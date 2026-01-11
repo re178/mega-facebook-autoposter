@@ -20,7 +20,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Serve the Pages HTML
-app.get('/pages', (req, res) => {
+app.get('/page', (req, res) => {
   res.sendFile(path.join(__dirname, 'public/page.html'));
 });
 
