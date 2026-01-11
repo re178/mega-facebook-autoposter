@@ -18,7 +18,6 @@ app.use(express.urlencoded({ extended: true }));
 
 // SERVE FRONTEND
 app.use(express.static(path.join(__dirname, 'public')));
-const path = require('path');
 
 // Serve the Pages HTML
 app.get('/pages', (req, res) => {
