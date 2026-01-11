@@ -1,1 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Page Dashboard</title>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="brand"><span class="dot"></span><h2>MEGA CONTROL</h2></div>
+      <nav class="nav" id="page-nav">
+        <a data-page="overview" class="active">Overview</a>
+        <a data-page="create">Create Post</a>
+        <a data-page="logs">Logs</a>
+        <a data-page="statistics">Statistics</a>
+      </nav>
+    </aside>
+
+    <main class="main">
+      <div class="topbar">
+        <h1 id="page-title">Page Dashboard</h1>
+      </div>
+
+      <!-- CREATE POST FORM -->
+      <section class="card" id="create-post">
+        <h3>Create / Schedule Post</h3>
+        <label>Type text here to be posted</label>
+        <textarea id="post-text" rows="4"></textarea>
+
+        <label>Upload media/image/video (optional)</label>
+        <input type="text" id="media-url" placeholder="Enter media URL" />
+
+        <label>Schedule date & time</label>
+        <input type="datetime-local" id="scheduled-time" />
+
+        <div class="actions">
+          <button id="post-now">Post Now</button>
+          <button id="save-post">Save</button>
+          <button id="delete-post">Delete</button>
+        </div>
+      </section>
+
+      <!-- POSTS LIST -->
+      <section class="card" id="posts-list">
+        <h3>Scheduled Posts</h3>
+        <table>
+          <thead>
+            <tr><th>Text</th><th>Media</th><th>Scheduled</th><th>Status</th><th>Actions</th></tr>
+          </thead>
+          <tbody id="posts-table-body">
+            <!-- Posts injected via JS -->
+          </tbody>
+        </table>
+      </section>
+
+      <!-- PAGE LOGS -->
+      <section class="card" id="page-logs">
+        <h3>Recent Logs</h3>
+        <div class="logs" id="logs-container">
+          <!-- Logs injected via JS -->
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="js/api.js"></script>
+  <script src="js/page.js"></script>
+</body>
+</html>
 
