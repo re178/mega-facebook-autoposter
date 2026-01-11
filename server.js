@@ -18,6 +18,17 @@ app.use(express.urlencoded({ extended: true }));
 
 // SERVE FRONTEND
 app.use(express.static(path.join(__dirname, 'public')));
+const path = require('path');
+
+// Serve the Pages HTML
+app.get('/pages', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public/page.html'));
+});
+
+// (Optional later) Serve Schedule HTML
+app.get('/schedule', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public/schedule.html'));
+});
 
 // ROUTES
 app.use('/api/dashboard', dashboardRoutes);
