@@ -43,7 +43,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     link.addEventListener('click', e => {
       const page = e.target.dataset.page;
       // Placeholder: You can later redirect to page.html?pageId=xxx
-      alert(`Navigate to ${page} dashboard`);
+      e.preventDefault();
+
+if (!page) return;
+
+// navigate to real backend route
+window.location.href = `/${page}`;
     });
   });
 });
