@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MEGA Control Dashboard</title>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="brand"><span class="dot"></span><h2>MEGA CONTROL</h2></div>
+      <nav class="nav">
+        <a class="active" data-page="master">Dashboard</a>
+        <a data-page="systems">Systems</a>
+        <a data-page="automations">Automations</a>
+        <a data-page="logs">Logs</a>
+        <a data-page="earnings">Earnings</a>
+        <a data-page="users">Users</a>
+        <a data-page="settings">Settings</a>
+      </nav>
+    </aside>
+
+    <main class="main">
+      <div class="topbar">
+        <h1>Master Dashboard</h1>
+      </div>
+
+      <section class="stats" id="summary-cards">
+        <!-- Stats cards injected via JS -->
+      </section>
+
+      <section class="card">
+        <h3>Recent Logs</h3>
+        <div class="logs" id="recent-logs">
+          <!-- Logs injected via JS -->
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="js/api.js"></script>
+  <script src="js/master.js"></script>
+</body>
+</html>
