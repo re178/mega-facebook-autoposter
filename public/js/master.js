@@ -1,19 +1,16 @@
-const API_BASE = '/api/dashboard';
-
 document.addEventListener('DOMContentLoaded', async () => {
   const summaryContainer = document.getElementById('summary-cards');
   const logsContainer = document.getElementById('recent-logs');
-  const nav = document.querySelector('.nav');
 
-  if (!summaryContainer || !logsContainer || !nav) {
+  if (!summaryContainer || !logsContainer) {
     console.error('Dashboard containers missing');
     return;
   }
 
-  // === Fetch all pages for sidebar navigation ===
+  // === Load pages for navigation ===
   let pages = [];
   try {
-    const res = await fetch(`${API_BASE}/pages`);
+    const res = await fetch('/api/dashboard/pages');
     pages = await res.json();
   } catch (err) {
     console.error('Failed to load pages', err);
@@ -22,7 +19,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   // === Fetch master summary ===
   let summary;
   try {
-    summary = await fetch(`${API_BASE}/master/summary`).then(r => r.json());
+    summary = await getMasterSummary();
   } catch (err) {
     console.error('Failed to load summary', err);
     return;
@@ -63,24 +60,30 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
-  // === Sidebar Navigation: Pages ===
-  nav.querySelectorAll('a').forEach(link => {
-    link.addEventListener('click', e => {
-      const target = link.dataset.page;
+  // === Sidebar navigation (Pages Dropdown instead of auto-redirect) ===
+  const pageNavLink = document.querySelector('.nav a[data-page="page"]');
 
-      if (target === 'page' || target === 'pages') {
-        e.preventDefault();
+  if (pageNavLink) {
+    pageNavLink.addEventListener('click', e => {
+      e.preventDefault();
 
-        if (!pages.length) {
-          alert('No pages available');
-          return;
-        }
-
-        // If multiple pages, you could show a selection prompt here
-        // For now, redirect to first page
-        const firstPageId = pages[0].pageId;
-        window.location.href = `/page?pageId=${firstPageId}`;
+      if (!pages.length) {
+        alert('No pages available');
+        return;
       }
+
+      // Build a simple selection prompt for pages
+      const pageNames = pages.map((p, idx) => `${idx + 1}: ${p.name}`).join('\n');
+      const choice = prompt(`Select a page:\n${pageNames}`, '1');
+      const index = parseInt(choice) - 1;
+
+      if (isNaN(index) || index < 0 || index >= pages.length) {
+        alert('Invalid selection');
+        return;
+      }
+
+      const selectedPageId = pages[index].pageId;
+      window.location.href = `${window.location.origin}/page?pageId=${selectedPageId}`;
     });
-  });
+  }
 });
