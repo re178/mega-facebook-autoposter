@@ -83,7 +83,10 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
 
       const selectedPageId = pages[index].pageId;
-      window.open(`/pages?pageId=${selectedPageId}`, '_blank');
+      const url = new URL('/pages', window.location.origin);
+url.searchParams.set('pageId', selectedPageId);
+window.location.assign(url.toString());
+
     });
   }
 });
