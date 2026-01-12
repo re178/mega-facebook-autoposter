@@ -3,6 +3,36 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const path = require('path');
+const Page = require('./models/Page');
+
+async function syncPagesFromEnv() {
+  if (!process.env.PAGES_JSON) {
+    console.log('ℹ️ No PAGES_JSON found, skipping page sync');
+    return;
+  }
+
+  let pages;
+  try {
+    pages = JSON.parse(process.env.PAGES_JSON);
+  } catch (err) {
+    console.error('❌ Invalid PAGES_JSON format');
+    return;
+  }
+
+  for (const p of pages) {
+    if (!p.pageId || !p.name || !p.pageToken) continue;
+
+    const exists = await Page.findOne({ pageId: p.pageId });
+    if (!exists) {
+      await Page.create({
+        name: p.name,
+        pageId: p.pageId,
+        pageToken: p.pageToken
+      });
+      console.log(`✅ Page synced: ${p.name}`);
+    }
+  }
+}
 
 // ROUTES
 const dashboardRoutes = require('./routes/dashboardRoutes');
@@ -39,6 +69,7 @@ const MONGO_URI = process.env.MONGO_URI;
 mongoose.connect(MONGO_URI)
   .then(() => {
     console.log('✅ MongoDB connected');
+    await syncPagesFromEnv(); 
     // START SCHEDULER AFTER DB IS READY
     startScheduler();
     app.listen(PORT, () => {
