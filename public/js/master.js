@@ -49,7 +49,21 @@ try {
   // === Sidebar navigation click handler ===
 document.querySelectorAll('.nav a').forEach(link => {
   link.addEventListener('click', e => {
-    e.preventDefault();
+    const target = e.target.dataset.page;
+
+    // 🚨 Only intercept when user wants to open a PAGE dashboard
+    if (target === 'pages' || target === 'page') {
+      e.preventDefault();
+
+      if (!pages || !pages.length) {
+        alert('No pages available');
+        return;
+      }
+
+      const selectedPage = pages[0]; // default for now
+      window.location.href = `/page?pageId=${selectedPage.pageId}`;
+    }
+
 
     // only handle page dashboard navigation
     if (!pages.length) {
