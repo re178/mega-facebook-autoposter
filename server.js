@@ -67,10 +67,11 @@ const PORT = process.env.PORT || 10000;
 const MONGO_URI = process.env.MONGO_URI;
 
 mongoose.connect(MONGO_URI)
-  .then(() => {
+  .then(async () => {
     console.log('✅ MongoDB connected');
+
     await syncPagesFromEnv(); 
-    // START SCHEDULER AFTER DB IS READY
+
     startScheduler();
     app.listen(PORT, () => {
       console.log(`🚀 Server running on port ${PORT}`);
