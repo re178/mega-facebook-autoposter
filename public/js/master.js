@@ -1,3 +1,21 @@
+const API_BASE = '/api/dashboard';
+
+// =========================
+// MASTER DASHBOARD API
+// =========================
+async function getMasterSummary() {
+  const res = await fetch(`${API_BASE}/master/summary`);
+  return res.json();
+}
+
+// =========================
+// PAGES API
+// =========================
+async function getPages() {
+  const res = await fetch(`${API_BASE}/pages`);
+  return res.json();
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
   const summaryContainer = document.getElementById('summary-cards');
   const logsContainer = document.getElementById('recent-logs');
@@ -10,8 +28,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   // === Load pages for navigation ===
   let pages = [];
   try {
-    const res = await fetch('/api/dashboard/pages');
-    pages = await res.json();
+    pages = await getPages();
   } catch (err) {
     console.error('Failed to load pages', err);
   }
@@ -60,8 +77,28 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
-  // === Sidebar navigation (Pages Dropdown instead of auto-redirect) ===
+  // ===============================
+  // Sidebar navigation: Pages Modal
+  // ===============================
   const pageNavLink = document.querySelector('.nav a[data-page="page"]');
+
+  // create modal container
+  const pageModal = document.createElement('div');
+  pageModal.style = `
+    display:none; position:fixed; top:0; left:0; width:100%; height:100%;
+    background:rgba(0,0,0,0.6); justify-content:center; align-items:center; z-index:1000;
+  `;
+  pageModal.innerHTML = `
+    <div style="background:#0b1220; padding:20px; border-radius:12px; max-width:400px; width:90%;">
+      <h3 style="margin-top:0; color:#fff;">Select a Page</h3>
+      <select id="page-select" style="width:100%; padding:8px; border-radius:6px; margin-bottom:12px;"></select>
+      <div style="text-align:right;">
+        <button id="page-cancel" style="padding:6px 12px; margin-right:6px;">Cancel</button>
+        <button id="page-go" style="padding:6px 12px; background:#22c55e; color:#fff;">Go</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(pageModal);
 
   if (pageNavLink) {
     pageNavLink.addEventListener('click', e => {
@@ -72,21 +109,31 @@ document.addEventListener('DOMContentLoaded', async () => {
         return;
       }
 
-      // Build a simple selection prompt for pages
-      const pageNames = pages.map((p, idx) => `${idx + 1}: ${p.name}`).join('\n');
-      const choice = prompt(`Select a page:\n${pageNames}`, '1');
-      const index = parseInt(choice) - 1;
+      const select = pageModal.querySelector('#page-select');
+      select.innerHTML = '';
+      pages.forEach(p => {
+        const opt = document.createElement('option');
+        opt.value = p.pageId;
+        opt.textContent = p.name;
+        select.appendChild(opt);
+      });
 
-      if (isNaN(index) || index < 0 || index >= pages.length) {
-        alert('Invalid selection');
-        return;
-      }
+      pageModal.style.display = 'flex';
 
-      const selectedPageId = pages[index].pageId;
-      const url = new URL('/pages', window.location.origin);
-url.searchParams.set('pageId', selectedPageId);
-window.location.assign(url.toString());
+      // cancel button
+      pageModal.querySelector('#page-cancel').onclick = () => {
+        pageModal.style.display = 'none';
+      };
 
+      // go button
+      pageModal.querySelector('#page-go').onclick = () => {
+        const selectedPageId = select.value;
+        pageModal.style.display = 'none';
+        const url = new URL('/pages', window.location.origin);
+        url.searchParams.set('pageId', selectedPageId);
+        window.location.href = url.toString(); // safe redirect
+      };
     });
   }
 });
+
