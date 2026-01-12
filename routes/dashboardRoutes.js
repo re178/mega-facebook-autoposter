@@ -19,13 +19,19 @@ router.get('/master/summary', async (req, res) => {
       .limit(10)
       .populate('pageId');
 
-    res.json({
-      totalPages,
-      totalPosts,
-      posted,
-      failed,
-      recentLogs: logs
-    });
+    res.json({ totalPages, totalPosts, posted, failed, recentLogs: logs });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// =======================
+// GET ALL PAGES (for master.js)
+// =======================
+router.get('/pages', async (req, res) => {
+  try {
+    const pages = await Page.find().sort({ createdAt: -1 });
+    res.json(pages);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -34,35 +40,41 @@ router.get('/master/summary', async (req, res) => {
 // =======================
 // PAGE DASHBOARD
 // =======================
-
-// Get page info
 router.get('/page/:id', async (req, res) => {
   try {
     const page = await Page.findById(req.params.id);
+    if (!page) return res.status(404).json({ error: 'Page not found' });
     res.json(page);
   } catch (err) {
-    res.status(404).json({ error: 'Page not found' });
+    res.status(500).json({ error: err.message });
   }
 });
 
-// Get posts for a page
 router.get('/page/:id/posts', async (req, res) => {
   try {
     const posts = await Post.find({ pageId: req.params.id })
       .sort({ scheduledTime: -1 })
       .limit(100);
-
     res.json(posts);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// Create post (schedule or post-now)
+router.get('/page/:id/logs', async (req, res) => {
+  try {
+    const logs = await Log.find({ pageId: req.params.id })
+      .sort({ createdAt: -1 })
+      .limit(50);
+    res.json(logs);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.post('/page/:id/post', async (req, res) => {
   try {
     const { text, mediaUrl, scheduledTime } = req.body;
-
     const post = await Post.create({
       pageId: req.params.id,
       text,
@@ -83,22 +95,15 @@ router.post('/page/:id/post', async (req, res) => {
   }
 });
 
-// Edit post
 router.put('/post/:postId', async (req, res) => {
   try {
-    const post = await Post.findByIdAndUpdate(
-      req.params.postId,
-      req.body,
-      { new: true }
-    );
-
+    const post = await Post.findByIdAndUpdate(req.params.postId, req.body, { new: true });
     res.json(post);
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
 });
 
-// Delete post
 router.delete('/post/:postId', async (req, res) => {
   try {
     await Post.findByIdAndDelete(req.params.postId);
@@ -108,18 +113,4 @@ router.delete('/post/:postId', async (req, res) => {
   }
 });
 
-// Page logs
-router.get('/page/:id/logs', async (req, res) => {
-  try {
-    const logs = await Log.find({ pageId: req.params.id })
-      .sort({ createdAt: -1 })
-      .limit(50);
-
-    res.json(logs);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
 module.exports = router;
-
