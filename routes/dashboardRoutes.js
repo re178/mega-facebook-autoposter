@@ -5,7 +5,7 @@ const Post = require('../models/Post');
 const Log = require('../models/Log');
 
 // =======================
-// MASTER DASHBOARD
+// MASTER DASHBOARD SUMMARY
 // =======================
 router.get('/master/summary', async (req, res) => {
   try {
@@ -19,27 +19,35 @@ router.get('/master/summary', async (req, res) => {
       .limit(10)
       .populate('pageId');
 
-    res.json({ totalPages, totalPosts, posted, failed, recentLogs: logs });
+    res.json({
+      totalPages,
+      totalPosts,
+      posted,
+      failed,
+      recentLogs: logs
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
 // =======================
-// GET ALL PAGES (for master.js)
+// GET ALL PAGES (for master dashboard sidebar)
 // =======================
 router.get('/pages', async (req, res) => {
   try {
     const pages = await Page.find().sort({ createdAt: -1 });
     res.json(pages);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Failed to fetch pages' });
   }
 });
 
 // =======================
-// PAGE DASHBOARD
+// PAGE DASHBOARD ROUTES
 // =======================
+
+// Get page info
 router.get('/page/:id', async (req, res) => {
   try {
     const page = await Page.findById(req.params.id);
@@ -50,6 +58,7 @@ router.get('/page/:id', async (req, res) => {
   }
 });
 
+// Get posts for a page
 router.get('/page/:id/posts', async (req, res) => {
   try {
     const posts = await Post.find({ pageId: req.params.id })
@@ -61,17 +70,7 @@ router.get('/page/:id/posts', async (req, res) => {
   }
 });
 
-router.get('/page/:id/logs', async (req, res) => {
-  try {
-    const logs = await Log.find({ pageId: req.params.id })
-      .sort({ createdAt: -1 })
-      .limit(50);
-    res.json(logs);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
+// Create a post
 router.post('/page/:id/post', async (req, res) => {
   try {
     const { text, mediaUrl, scheduledTime } = req.body;
@@ -95,6 +94,7 @@ router.post('/page/:id/post', async (req, res) => {
   }
 });
 
+// Edit a post
 router.put('/post/:postId', async (req, res) => {
   try {
     const post = await Post.findByIdAndUpdate(req.params.postId, req.body, { new: true });
@@ -104,12 +104,25 @@ router.put('/post/:postId', async (req, res) => {
   }
 });
 
+// Delete a post
 router.delete('/post/:postId', async (req, res) => {
   try {
     await Post.findByIdAndDelete(req.params.postId);
     res.json({ success: true });
   } catch (err) {
     res.status(400).json({ error: err.message });
+  }
+});
+
+// Get page logs
+router.get('/page/:id/logs', async (req, res) => {
+  try {
+    const logs = await Log.find({ pageId: req.params.id })
+      .sort({ createdAt: -1 })
+      .limit(50);
+    res.json(logs);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 
