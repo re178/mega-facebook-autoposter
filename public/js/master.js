@@ -1,16 +1,19 @@
+const API_BASE = '/api/dashboard';
+
 document.addEventListener('DOMContentLoaded', async () => {
   const summaryContainer = document.getElementById('summary-cards');
   const logsContainer = document.getElementById('recent-logs');
+  const nav = document.querySelector('.nav');
 
-  if (!summaryContainer || !logsContainer) {
+  if (!summaryContainer || !logsContainer || !nav) {
     console.error('Dashboard containers missing');
     return;
   }
 
-  // === Load pages for navigation ===
+  // === Fetch all pages for sidebar navigation ===
   let pages = [];
   try {
-    const res = await fetch('/api/pages');
+    const res = await fetch(`${API_BASE}/pages`);
     pages = await res.json();
   } catch (err) {
     console.error('Failed to load pages', err);
@@ -19,7 +22,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   // === Fetch master summary ===
   let summary;
   try {
-    summary = await getMasterSummary();
+    summary = await fetch(`${API_BASE}/master/summary`).then(r => r.json());
   } catch (err) {
     console.error('Failed to load summary', err);
     return;
@@ -60,20 +63,23 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
-  // === Sidebar navigation (CLEAN & SINGLE FLOW) ===
-  document.querySelectorAll('.nav a').forEach(link => {
+  // === Sidebar Navigation: Pages ===
+  nav.querySelectorAll('a').forEach(link => {
     link.addEventListener('click', e => {
       const target = link.dataset.page;
 
-      if (target === 'pages' || target === 'page') {
+      if (target === 'page' || target === 'pages') {
         e.preventDefault();
 
-        if (!pages.length || !pages[0]?.pageId) {
+        if (!pages.length) {
           alert('No pages available');
           return;
         }
 
-        window.location.href = `/page?pageId=${pages[0].pageId}`;
+        // If multiple pages, you could show a selection prompt here
+        // For now, redirect to first page
+        const firstPageId = pages[0].pageId;
+        window.location.href = `/page?pageId=${firstPageId}`;
       }
     });
   });
