@@ -83,7 +83,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
 
       const selectedPageId = pages[index].pageId;
-      window.location.href = `https://${window.location.host}/pages?pageId=${selectedPageId}`;
+      window.open(`/pages?pageId=${selectedPageId}`, '_blank');
     });
   }
 });
