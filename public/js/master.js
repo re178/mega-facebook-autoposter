@@ -1,6 +1,14 @@
 document.addEventListener('DOMContentLoaded', async () => {
   const summaryContainer = document.getElementById('summary-cards');
   const logsContainer = document.getElementById('recent-logs');
+  // === Load pages for navigation ===
+let pages = [];
+try {
+  const res = await fetch('/api/pages');
+  pages = await res.json();
+} catch (err) {
+  console.error('Failed to load pages', err);
+}
 
   // Fetch and display master summary
   const summary = await getMasterSummary();
@@ -39,18 +47,24 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   // === Sidebar navigation click handler ===
-  document.querySelectorAll('.nav a').forEach(link => {
-    link.addEventListener('click', e => {
-      const page = e.target.dataset.page;
-      // Placeholder: You can later redirect to page.html?pageId=xxx
-      e.preventDefault();
+document.querySelectorAll('.nav a').forEach(link => {
+  link.addEventListener('click', e => {
+    e.preventDefault();
 
-if (!page) return;
+    // only handle page dashboard navigation
+    if (!pages.length) {
+      alert('No pages available');
+      return;
+    }
 
-// navigate to real backend route
-window.location.href = `/page?pageId=...`;
+    // default: open first page (can be improved later)
+    const selectedPage = pages[0];
 
-    });
+    if (!selectedPage.pageId) {
+      alert('Invalid page selected');
+      return;
+    }
+
+    window.location.href = `/page?pageId=${selectedPage.pageId}`;
   });
 });
-
