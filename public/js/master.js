@@ -48,7 +48,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 if (!page) return;
 
 // navigate to real backend route
-window.location.href = `/${page}`;
+window.location.href = `/page?pageId=...`;
+
     });
   });
 });
