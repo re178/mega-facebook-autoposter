@@ -1,0 +1,25 @@
+name: Keep Render Alive Irregular
+
+# Trigger every 5 minutes, and also allows manual run
+on:
+  schedule:
+    - cron: '*/5 * * * *' # every 5 minutes
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Wait random seconds before ping
+        run: |
+          # Random delay between 1 and 4 minutes (60-240 seconds)
+          SECONDS=$((RANDOM % 180 + 60))
+          echo "Waiting $SECONDS seconds before pinging Render..."
+          sleep $SECONDS
+
+      - name: Ping Render app
+        run: |
+          echo "Pinging Render app..."
+          curl -s https://mega-facebook-autoposter.onrender.com > /dev/null
+          echo "Ping complete."
