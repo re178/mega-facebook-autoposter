@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Login - Automatic Facebook Poster</title>
+<link rel="stylesheet" href="css/style.css">
+<style>
+body {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    background: linear-gradient(180deg, #020617, #0b1220);
+    position: relative;
+    overflow: hidden;
+}
+body::before {
+    content: "";
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%;
+    height: 100%;
+    background: url('img/watermark.png') no-repeat center center;
+    background-size: 40%;
+    opacity: 0.05;
+    pointer-events: none;
+}
+.login-card {
+    background: rgba(11, 18, 32, 0.9);
+    padding: 40px 30px;
+    border-radius: 16px;
+    box-shadow: 0 0 20px rgba(0,0,0,0.5);
+    position: relative;
+    z-index: 10;
+    width: 350px;
+    text-align: center;
+}
+.login-card img.logo {
+    width: 80px;
+    margin-bottom: 20px;
+}
+.login-card h1 {
+    font-size: 22px;
+    margin-bottom: 24px;
+    color: var(--accent);
+}
+.login-card input {
+    width: 100%;
+    padding: 10px 12px;
+    margin-bottom: 16px;
+    border-radius: 8px;
+    border: 1px solid #0f172a;
+    background: var(--soft);
+    color: var(--text);
+    font-size: 14px;
+}
+.login-card button {
+    width: 100%;
+    padding: 10px;
+    border-radius: 8px;
+    border: none;
+    background: var(--accent);
+    color: #fff;
+    font-size: 16px;
+    cursor: pointer;
+    transition: 0.3s;
+}
+.login-card button:hover {
+    opacity: 0.9;
+}
+.hidden {
+    display: none;
+}
+.footer-text {
+    margin-top: 20px;
+    font-size: 12px;
+    color: var(--muted);
+}
+</style>
+</head>
+<body>
+<div class="login-card">
+    <!-- Logo -->
+    <img src="img/logo.png" alt="Logo" class="logo">
+
+    <h1>Automatic Facebook Poster</h1>
+
+    <form action="/login" method="POST">
+        <input type="text" id="email" name="email" placeholder="Email" required>
+        <input type="password" id="password" name="password" placeholder="Password" required>
+        <button type="submit" id="loginBtn" class="hidden">Login</button>
+    </form>
+
+    <div class="footer-text">
+        &copy; 2026 GIGICRAFT
+    </div>
+</div>
+
+<script src="js/Login.js"></script>
+</body>
+</html>
