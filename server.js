@@ -37,7 +37,9 @@ async function syncPagesFromEnv() {
 
 // -------------------- ROUTES --------------------
 const dashboardRoutes = require('./routes/dashboardRoutes');
-// You may add pageRoutes later if needed
+const pageFeaturesRoutes = require('./routes/pageFeaturesRoutes');
+app.use('/api/dashboard', pageFeaturesRoutes); // same base URL as dashboard
+
 
 // -------------------- SERVICES --------------------
 const { startScheduler } = require('./services/scheduler');
