@@ -6,46 +6,8 @@ const path = require('path');
 const session = require('express-session');
 const Page = require('./models/Page');
 
-async function syncPagesFromEnv() {
-  if (!process.env.PAGES_JSON) {
-    console.log('ℹ️ No PAGES_JSON found, skipping page sync');
-    return;
-  }
-
-  let pages;
-  try {
-    pages = JSON.parse(process.env.PAGES_JSON);
-  } catch (err) {
-    console.error('❌ Invalid PAGES_JSON format');
-    return;
-  }
-
-  for (const p of pages) {
-    if (!p.pageId || !p.name || !p.pageToken) continue;
-
-    const exists = await Page.findOne({ pageId: p.pageId });
-    if (!exists) {
-      await Page.create({
-        name: p.name,
-        pageId: p.pageId,
-        pageToken: p.pageToken
-      });
-      console.log(`✅ Page synced: ${p.name}`);
-    }
-  }
-}
-
-// -------------------- ROUTES --------------------
-const dashboardRoutes = require('./routes/dashboardRoutes');
-const pageFeaturesRoutes = require('./routes/pageFeaturesRoutes');
-app.use('/api/dashboard', pageFeaturesRoutes); // same base URL as dashboard
-
-
-
-// -------------------- SERVICES --------------------
-const { startScheduler } = require('./services/scheduler');
-
-const app = express();
+// -------------------- CREATE APP --------------------
+const app = express(); // <-- Must be first before app.use
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -58,36 +20,32 @@ app.use(session({
     saveUninitialized: false,
     cookie: {
         httpOnly: true,
-        secure: false, // set true if using HTTPS
-        maxAge: 24 * 60 * 60 * 1000 // 1 day
+        secure: false,
+        maxAge: 24 * 60 * 60 * 1000
     }
 }));
 
-// -------------------- LOGIN --------------------
+// -------------------- ROUTES --------------------
+const dashboardRoutes = require('./routes/dashboardRoutes');
+const pageFeaturesRoutes = require('./routes/pageFeaturesRoutes'); 
 
-// Redirect root URL to login
+app.use('/api/dashboard', dashboardRoutes);       // Existing routes
+app.use('/api/dashboard', pageFeaturesRoutes);    // New features routes (messaging, analytics, ads, comments)
+
+// -------------------- FRONTEND --------------------
+app.use(express.static(path.join(__dirname, 'public')));
+
+// Login & logout
 app.get('/', (req, res) => res.redirect('/login'));
-
-// Serve login page
-app.get('/login', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public/login.html'));
-});
-
-// Handle login POST
+app.get('/login', (req, res) => res.sendFile(path.join(__dirname, 'public/login.html')));
 app.post('/login', (req, res) => {
     const { email, password } = req.body;
-    const envEmail = process.env.APP_EMAIL;
-    const envPassword = process.env.APP_PASSWORD;
-
-    if (email === envEmail && password === envPassword) {
+    if (email === process.env.APP_EMAIL && password === process.env.APP_PASSWORD) {
         req.session.user = email;
-        res.redirect('/index.html');
-    } else {
-        res.send('<h2>Login failed. <a href="/login">Try again</a></h2>');
+        return res.redirect('/index.html');
     }
+    res.send('<h2>Login failed. <a href="/login">Try again</a></h2>');
 });
-
-// Logout route
 app.get('/logout', (req, res) => {
     req.session.destroy(err => {
         if (err) console.error(err);
@@ -101,42 +59,40 @@ function requireLogin(req, res, next) {
     return res.redirect('/login');
 }
 
-// -------------------- SERVE FRONTEND --------------------
-app.use(express.static(path.join(__dirname, 'public')));
+// Protect frontend pages
+app.get('/index.html', requireLogin, (req, res) => res.sendFile(path.join(__dirname, 'public/index.html')));
+app.get('/pages', requireLogin, (req, res) => res.sendFile(path.join(__dirname, 'public/page.html')));
+app.get('/schedule', requireLogin, (req, res) => res.sendFile(path.join(__dirname, 'public/schedule.html')));
 
-// Protect index.html
-app.get('/index.html', requireLogin, (req, res) => {
-    res.sendFile(path.join(__dirname, 'public/index.html'));
-});
+// -------------------- SERVICES --------------------
+const { startScheduler } = require('./services/scheduler');
 
-// Protected Pages
-app.get('/pages', requireLogin, (req, res) => {
-    res.sendFile(path.join(__dirname, 'public/page.html'));
-});
+// -------------------- ENV PAGES SYNC --------------------
+async function syncPagesFromEnv() {
+    if (!process.env.PAGES_JSON) return console.log('ℹ️ No PAGES_JSON found, skipping page sync');
+    let pages;
+    try { pages = JSON.parse(process.env.PAGES_JSON); } 
+    catch { return console.error('❌ Invalid PAGES_JSON format'); }
 
-// Protected Schedule
-app.get('/schedule', requireLogin, (req, res) => {
-    res.sendFile(path.join(__dirname, 'public/schedule.html'));
-});
+    for (const p of pages) {
+        if (!p.pageId || !p.name || !p.pageToken) continue;
+        const exists = await Page.findOne({ pageId: p.pageId });
+        if (!exists) {
+            await Page.create({ name: p.name, pageId: p.pageId, pageToken: p.pageToken });
+            console.log(`✅ Page synced: ${p.name}`);
+        }
+    }
+}
 
-// -------------------- DASHBOARD API --------------------
-app.use('/api/dashboard', dashboardRoutes);
-
-// -------------------- DATABASE CONNECTION --------------------
+// -------------------- DATABASE --------------------
 const PORT = process.env.PORT || 10000;
 const MONGO_URI = process.env.MONGO_URI;
 
 mongoose.connect(MONGO_URI)
-  .then(async () => {
-    console.log('✅ MongoDB connected');
-
-    await syncPagesFromEnv(); 
-
-    startScheduler();
-    app.listen(PORT, () => {
-      console.log(`🚀 Server running on port ${PORT}`);
-    });
-  })
-  .catch(err => {
-    console.error('❌ MongoDB connection error:', err.message);
-  });
+    .then(async () => {
+        console.log('✅ MongoDB connected');
+        await syncPagesFromEnv();
+        startScheduler();
+        app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
+    })
+    .catch(err => console.error('❌ MongoDB connection error:', err.message));
