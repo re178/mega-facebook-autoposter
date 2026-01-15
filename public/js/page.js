@@ -17,17 +17,6 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   const postNowBtn = document.getElementById('post-now');
   const savePostBtn = document.getElementById('save-post');
-// ======= Sidebar Navigation for New Sections =======
-const sections = ['create-post', 'posts-list', 'page-logs', 'messaging-section', 'analytics-section', 'ads-section', 'manage-section'];
-document.querySelectorAll('#page-nav a').forEach(link => {
-  link.addEventListener('click', () => {
-    const page = link.dataset.page;
-    sections.forEach(sec => {
-      const el = document.getElementById(sec);
-      if (el) el.style.display = (sec === page || sec+'-section' === page+'-section') ? 'block' : 'none';
-    });
-  });
-});
 
   // === Fetch page info ===
   const page = await getPageInfo(pageId);
@@ -124,4 +113,15 @@ document.querySelectorAll('#page-nav a').forEach(link => {
     await loadPosts();
     await loadLogs();
   }, 30000);
+});
+// ======= Sidebar Navigation for New Sections =======
+const sections = ['create-post', 'posts-list', 'page-logs', 'messaging-section', 'analytics-section', 'ads-section', 'manage-section'];
+document.querySelectorAll('#page-nav a').forEach(link => {
+  link.addEventListener('click', () => {
+    const page = link.dataset.page;
+    sections.forEach(sec => {
+      const el = document.getElementById(sec);
+      if (el) el.style.display = (sec === page || sec+'-section' === page+'-section') ? 'block' : 'none';
+    });
+  });
 });
