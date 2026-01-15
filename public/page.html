@@ -62,6 +62,71 @@
           <!-- Logs injected via JS -->
         </div>
       </section>
+
+    <!-- MESSAGING SECTION -->
+<section class="card" id="messaging-section" style="display:none;">
+  <h3>Inbox / Auto-replies</h3>
+  <div id="messages-container">
+    <table>
+      <thead>
+        <tr>
+          <th>Sender</th><th>Message</th><th>Received</th><th>Status</th><th>Action</th>
+        </tr>
+      </thead>
+      <tbody id="messages-table-body"></tbody>
+    </table>
+    <button id="refresh-messages">Refresh</button>
+  </div>
+
+  <div id="templates-container">
+    <h4>Auto-reply Templates</h4>
+    <table>
+      <thead>
+        <tr><th>Name</th><th>Type</th><th>Keywords</th><th>Reply</th><th>Action</th></tr>
+      </thead>
+      <tbody id="templates-table-body"></tbody>
+    </table>
+    <button id="add-template">Add Template</button>
+  </div>
+</section>
+
+<!-- ANALYTICS SECTION -->
+<section class="card" id="analytics-section" style="display:none;">
+  <h3>Page Insights</h3>
+  <div id="charts-container">
+    <!-- Chart.js or ApexCharts placeholders -->
+  </div>
+  <button id="refresh-analytics">Refresh</button>
+  <button id="download-report">Download Report</button>
+</section>
+
+<!-- ADS SECTION -->
+<section class="card" id="ads-section" style="display:none;">
+  <h3>Campaigns & Boosting</h3>
+  <div id="ads-container">
+    <table>
+      <thead>
+        <tr><th>Campaign</th><th>Status</th><th>Budget</th><th>Reach</th><th>CTR</th><th>Action</th></tr>
+      </thead>
+      <tbody id="ads-table-body"></tbody>
+    </table>
+    <button id="create-ad">Create Campaign</button>
+    <button id="refresh-ads">Refresh</button>
+  </div>
+</section>
+
+<!-- MANAGE / COMMENTS SECTION -->
+<section class="card" id="manage-section" style="display:none;">
+  <h3>Comments & Moderation</h3>
+  <table>
+    <thead>
+      <tr><th>User</th><th>Comment</th><th>Post</th><th>Time</th><th>Action</th></tr>
+    </thead>
+    <tbody id="comments-table-body"></tbody>
+  </table>
+  <button id="refresh-comments">Refresh</button>
+</section>
+
     </main>
   </div>
 
