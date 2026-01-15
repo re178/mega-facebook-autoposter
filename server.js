@@ -37,6 +37,8 @@ async function syncPagesFromEnv() {
 
 // -------------------- ROUTES --------------------
 const dashboardRoutes = require('./routes/dashboardRoutes');
+const pageFeaturesRoutes = require('./routes/pageFeaturesRoutes');
+app.use('/api/dashboard', pageFeaturesRoutes); // same base URL as dashboard
 
 
 
