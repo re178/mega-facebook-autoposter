@@ -1,44 +1,105 @@
 const axios = require('axios');
 
-/**
- * postToFacebook
- * @param {string} pageId - Facebook Page ID
- * @param {string} pageToken - Facebook Page Access Token
- * @param {string} message - Text to post
- * @param {string} mediaUrl - Optional media URL (image/video)
- */
-async function postToFacebook(pageId, pageToken, message, mediaUrl = '') {
+const GRAPH_BASE = 'https://graph.facebook.com/v18.0';
+
+
+async function postToFacebook(pageId, pageToken, text, mediaUrl = null) {
   try {
-    let endpoint;
-    let params;
+    // TEXT-ONLY POST
+    if (!mediaUrl) {
+      const res = await axios.post(
+        `${GRAPH_BASE}/${pageId}/feed`,
+        { message: text },
+        {
+          params: { access_token: pageToken },
+          timeout: 15000
+        }
+      );
+      return res.data;
+    }
 
-    if (mediaUrl) {
-      // Image post
-      endpoint = `https://graph.facebook.com/${pageId}/photos`;
-      params = {
+    // MEDIA POST (URL-based)
+    const res = await axios.post(
+      `${GRAPH_BASE}/${pageId}/photos`,
+      {
         url: mediaUrl,
-        caption: message,
-        access_token: pageToken
-      };
-    } else {
-      // Text-only post
-      endpoint = `https://graph.facebook.com/${pageId}/feed`;
-      params = {
-        message,
-        access_token: pageToken
-      };
-    }
+        caption: text
+      },
+      {
+        params: { access_token: pageToken },
+        timeout: 20000
+      }
+    );
 
-    const response = await axios.post(endpoint, params);
+    return res.data;
 
-    if (!response.data || response.data.error) {
-      throw new Error(response.data.error?.message || 'Unknown Facebook API error');
-    }
-
-    return response.data; // returns post ID or photo ID
   } catch (err) {
-    throw new Error(`Facebook API error: ${err.message}`);
+    throw normalizeFacebookError(err);
   }
 }
 
-module.exports = { postToFacebook };
+
+async function replyToComment(commentId, pageToken, replyText) {
+  try {
+    const res = await axios.post(
+      `${GRAPH_BASE}/${commentId}/comments`,
+      { message: replyText },
+      {
+        params: { access_token: pageToken },
+        timeout: 15000
+      }
+    );
+    return res.data;
+  } catch (err) {
+    throw normalizeFacebookError(err);
+  }
+}
+
+
+async function sendMessengerReply(psid, pageToken, replyText) {
+  try {
+    const res = await axios.post(
+      `${GRAPH_BASE}/me/messages`,
+      {
+        recipient: { id: psid },
+        messaging_type: 'RESPONSE',
+        message: { text: replyText }
+      },
+      {
+        params: { access_token: pageToken },
+        timeout: 15000
+      }
+    );
+    return res.data;
+  } catch (err) {
+    throw normalizeFacebookError(err);
+  }
+}
+
+
+function normalizeFacebookError(err) {
+  if (err.response?.data?.error) {
+    const fbErr = err.response.data.error;
+    const error = new Error(fbErr.message);
+    error.code = fbErr.code;
+    error.subcode = fbErr.error_subcode;
+    error.type = fbErr.type;
+    error.isFacebook = true;
+    return error;
+  }
+
+  if (err.code === 'ECONNABORTED') {
+    return new Error('Facebook request timeout');
+  }
+
+  return err;
+}
+
+
+module.exports = {
+  postToFacebook,
+  replyToComment,
+  sendMessengerReply
+};
+
+
