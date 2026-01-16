@@ -1,13 +1,19 @@
-// routes/pageFeaturesRoutes.js
+// src/routes/pageFeaturesRoutes.js
 const express = require('express');
 const router = express.Router();
-const { requireLogin } = require('../middlewares/auth'); // We'll use your existing login middleware
+
+// ✅ Authentication middleware
+const { requireLogin } = require('../middlewares/auth');
+
+// ✅ Models
 const Page = require('../models/Page');
 const Post = require('../models/Post');
 const Message = require('../models/Message');
 const Template = require('../models/Template');
 const Ad = require('../models/Ad');
 const Comment = require('../models/Comment');
+
+// ✅ Services
 const { postToFacebook } = require('../services/FacebookService');
 
 // =========================
@@ -28,7 +34,7 @@ router.post('/page/:pageId/post', requireLogin, async (req, res) => {
     const page = await Page.findOne({ pageId: req.params.pageId });
     if (!page) return res.status(404).json({ error: 'Page not found' });
 
-    // Post to Facebook immediately if scheduledTime is in the past or now
+    // Determine post status
     let status = 'SCHEDULED';
     const postTime = scheduledTime ? new Date(scheduledTime) : new Date();
     if (postTime <= new Date()) {
@@ -87,6 +93,8 @@ router.post('/page/:pageId/message', requireLogin, async (req, res) => {
     if (!message) return res.status(404).json({ error: 'Message not found' });
 
     const page = await Page.findOne({ pageId: req.params.pageId });
+    if (!page) return res.status(404).json({ error: 'Page not found' });
+
     await postToFacebook(page.pageId, page.pageToken, replyText);
 
     message.status = 'REPLIED';
@@ -204,6 +212,8 @@ router.post('/page/:commentId/comment/reply', requireLogin, async (req, res) => 
     if (!comment) return res.status(404).json({ error: 'Comment not found' });
 
     const page = await Page.findOne({ pageId: comment.pageId });
+    if (!page) return res.status(404).json({ error: 'Page not found' });
+
     await postToFacebook(page.pageId, page.pageToken, replyText);
 
     comment.status = 'REPLIED';
