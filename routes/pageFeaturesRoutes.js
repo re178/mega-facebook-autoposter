@@ -1,228 +1,88 @@
-// src/routes/pageFeaturesRoutes.js
 const express = require('express');
 const router = express.Router();
-
-// ✅ Authentication middleware
-const { requireLogin } = require('../middlewares/auth');
-
-// ✅ Models
 const Page = require('../models/Page');
-const Post = require('../models/Post');
-const Message = require('../models/Message');
-const Template = require('../models/Template');
-const Ad = require('../models/Ad');
-const Comment = require('../models/Comment');
 
-// ✅ Services
-const { postToFacebook } = require('../services/FacebookService');
+/*
+|--------------------------------------------------------------------------
+| 
+|--------------------------------------------------------------------------
+*/
+function requireLogin(req, res, next) {
+    if (req.session && req.session.user) return next();
+    return res.status(401).json({ error: 'Unauthorized' });
+}
 
-// =========================
-// POSTS
-// =========================
-router.get('/page/:pageId/posts', requireLogin, async (req, res) => {
-  try {
-    const posts = await Post.find({ pageId: req.params.pageId }).sort({ scheduledTime: -1 });
-    res.json(posts);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+/*
+|--------------------------------------------------------------------------
+|
+|--------------------------------------------------------------------------
+*/
+
+// Get all pages
+router.get('/pages', requireLogin, async (req, res) => {
+    try {
+        const pages = await Page.find().sort({ name: 1 });
+        res.json(pages);
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to load pages' });
+    }
 });
 
-router.post('/page/:pageId/post', requireLogin, async (req, res) => {
-  try {
-    const { text, mediaUrl, scheduledTime } = req.body;
-    const page = await Page.findOne({ pageId: req.params.pageId });
-    if (!page) return res.status(404).json({ error: 'Page not found' });
+// Add page manually
+router.post('/pages', requireLogin, async (req, res) => {
+    const { name, pageId, pageToken } = req.body;
 
-    // Determine post status
-    let status = 'SCHEDULED';
-    const postTime = scheduledTime ? new Date(scheduledTime) : new Date();
-    if (postTime <= new Date()) {
-      await postToFacebook(page.pageId, page.pageToken, text, mediaUrl);
-      status = 'POSTED';
+    if (!name || !pageId || !pageToken) {
+        return res.status(400).json({ error: 'All fields required' });
     }
 
-    const post = await Post.create({
-      pageId: req.params.pageId,
-      text,
-      mediaUrl,
-      scheduledTime: postTime,
-      status
-    });
+    try {
+        const exists = await Page.findOne({ pageId });
+        if (exists) {
+            return res.status(409).json({ error: 'Page already exists' });
+        }
 
-    res.json(post);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+        const page = await Page.create({ name, pageId, pageToken });
+        res.json(page);
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to save page' });
+    }
 });
 
-router.put('/post/:postId', requireLogin, async (req, res) => {
-  try {
-    const post = await Post.findByIdAndUpdate(req.params.postId, req.body, { new: true });
-    res.json(post);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+// Delete page
+router.delete('/pages/:id', requireLogin, async (req, res) => {
+    try {
+        await Page.findByIdAndDelete(req.params.id);
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to delete page' });
+    }
 });
 
-router.delete('/post/:postId', requireLogin, async (req, res) => {
-  try {
-    await Post.findByIdAndDelete(req.params.postId);
-    res.json({ success: true });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+/*
+|--------------------------------------------------------------------------
+| P
+|--------------------------------------------------------------------------
+*/
+
+// Messaging
+router.get('/messaging', requireLogin, (req, res) => {
+    res.json({ status: 'Messaging ready' });
 });
 
-// =========================
-// MESSAGES / INBOX
-// =========================
-router.get('/page/:pageId/messages', requireLogin, async (req, res) => {
-  try {
-    const messages = await Message.find({ pageId: req.params.pageId }).sort({ receivedAt: -1 });
-    res.json(messages);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+// Analytics
+router.get('/analytics', requireLogin, (req, res) => {
+    res.json({ status: 'Analytics ready' });
 });
 
-router.post('/page/:pageId/message', requireLogin, async (req, res) => {
-  try {
-    const { messageId, replyText } = req.body;
-    const message = await Message.findById(messageId);
-    if (!message) return res.status(404).json({ error: 'Message not found' });
-
-    const page = await Page.findOne({ pageId: req.params.pageId });
-    if (!page) return res.status(404).json({ error: 'Page not found' });
-
-    await postToFacebook(page.pageId, page.pageToken, replyText);
-
-    message.status = 'REPLIED';
-    await message.save();
-
-    res.json(message);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+// Ads
+router.get('/ads', requireLogin, (req, res) => {
+    res.json({ status: 'Ads ready' });
 });
 
-// =========================
-// TEMPLATES / AUTO-REPLIES
-// =========================
-router.get('/page/:pageId/templates', requireLogin, async (req, res) => {
-  try {
-    const templates = await Template.find({ pageId: req.params.pageId });
-    res.json(templates);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-router.post('/page/:pageId/templates', requireLogin, async (req, res) => {
-  try {
-    const template = await Template.create({ pageId: req.params.pageId, ...req.body });
-    res.json(template);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-router.put('/template/:templateId', requireLogin, async (req, res) => {
-  try {
-    const template = await Template.findByIdAndUpdate(req.params.templateId, req.body, { new: true });
-    res.json(template);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-router.delete('/template/:templateId', requireLogin, async (req, res) => {
-  try {
-    await Template.findByIdAndDelete(req.params.templateId);
-    res.json({ success: true });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// =========================
-// ADS / CAMPAIGNS
-// =========================
-router.get('/page/:pageId/ads', requireLogin, async (req, res) => {
-  try {
-    const ads = await Ad.find({ pageId: req.params.pageId });
-    res.json(ads);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-router.post('/page/:pageId/ad', requireLogin, async (req, res) => {
-  try {
-    const ad = await Ad.create({ pageId: req.params.pageId, ...req.body });
-    res.json(ad);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-router.put('/page/:adId/ad', requireLogin, async (req, res) => {
-  try {
-    const ad = await Ad.findByIdAndUpdate(req.params.adId, req.body, { new: true });
-    res.json(ad);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-router.delete('/page/:adId/ad', requireLogin, async (req, res) => {
-  try {
-    await Ad.findByIdAndDelete(req.params.adId);
-    res.json({ success: true });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// =========================
-// COMMENTS / MODERATION
-// =========================
-router.get('/page/:pageId/comments', requireLogin, async (req, res) => {
-  try {
-    const comments = await Comment.find({ pageId: req.params.pageId }).sort({ createdAt: -1 });
-    res.json(comments);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-router.put('/page/:commentId/comment', requireLogin, async (req, res) => {
-  try {
-    const comment = await Comment.findByIdAndUpdate(req.params.commentId, req.body, { new: true });
-    res.json(comment);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-router.post('/page/:commentId/comment/reply', requireLogin, async (req, res) => {
-  try {
-    const { replyText } = req.body;
-    const comment = await Comment.findById(req.params.commentId);
-    if (!comment) return res.status(404).json({ error: 'Comment not found' });
-
-    const page = await Page.findOne({ pageId: comment.pageId });
-    if (!page) return res.status(404).json({ error: 'Page not found' });
-
-    await postToFacebook(page.pageId, page.pageToken, replyText);
-
-    comment.status = 'REPLIED';
-    await comment.save();
-
-    res.json(comment);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+// Comments
+router.get('/comments', requireLogin, (req, res) => {
+    res.json({ status: 'Comments ready' });
 });
 
 module.exports = router;
