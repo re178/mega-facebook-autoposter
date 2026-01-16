@@ -4,38 +4,45 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 const path = require('path');
 const session = require('express-session');
+const MongoStore = require('connect-mongo'); // <-- production-ready session store
 const Page = require('./models/Page');
 
 // -------------------- CREATE APP --------------------
-const app = express(); // <-- Must be first before app.use
+const app = express(); 
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // -------------------- SESSION SETUP --------------------
+// ✅ Using MongoStore to avoid MemoryStore warning
 app.use(session({
     name: 'fbposter.sid',
     secret: process.env.SESSION_SECRET || 'supersecret123',
     resave: false,
     saveUninitialized: false,
+    store: MongoStore.create({
+        mongoUrl: process.env.MONGO_URI,
+        collectionName: 'sessions',
+        ttl: 24 * 60 * 60 // 1 day
+    }),
     cookie: {
         httpOnly: true,
-        secure: false,
+        secure: false, // keep false unless you use HTTPS
         maxAge: 24 * 60 * 60 * 1000
     }
 }));
 
 // -------------------- ROUTES --------------------
 const dashboardRoutes = require('./routes/dashboardRoutes');
-const pageFeaturesRoutes = require('./routes/pageFeaturesRoutes'); 
+const pageFeaturesRoutes = require('./routes/pageFeaturesRoutes');
 
-app.use('/api/dashboard', dashboardRoutes);       // Existing routes
-app.use('/api/dashboard', pageFeaturesRoutes);    // New features routes (messaging, analytics, ads, comments)
+app.use('/api/dashboard', dashboardRoutes); 
+app.use('/api/page', pageFeaturesRoutes); // separate namespace for page features
 
 // -------------------- FRONTEND --------------------
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Login & logout
+// ======================== LOGIN LOGIC (UNCHANGED) ========================
 app.get('/', (req, res) => res.redirect('/login'));
 app.get('/login', (req, res) => res.sendFile(path.join(__dirname, 'public/login.html')));
 app.post('/login', (req, res) => {
@@ -53,7 +60,7 @@ app.get('/logout', (req, res) => {
     });
 });
 
-// Middleware to protect routes
+// Middleware to protect frontend pages (unchanged)
 function requireLogin(req, res, next) {
     if (req.session && req.session.user) return next();
     return res.redirect('/login');
