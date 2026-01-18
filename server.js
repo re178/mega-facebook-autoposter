@@ -11,6 +11,7 @@ const app = express(); // MUST be before app.use
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.use('/', webhookRoutes);
 
 // -------------------- SESSION SETUP --------------------
 app.use(
@@ -30,6 +31,7 @@ app.use(
 // -------------------- ROUTES --------------------
 const dashboardRoutes = require('./routes/dashboardRoutes');
 const pageFeaturesRoutes = require('./routes/pageFeaturesRoutes');
+const webhookRoutes = require('./routes/webhook');
 
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/dashboard', pageFeaturesRoutes);
