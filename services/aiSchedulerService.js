@@ -1,109 +1,181 @@
+const OpenAI = require('openai');
 const AiScheduledPost = require('../models/AiScheduledPost');
-const AiLog = require('../models/AiLog');
-const AiTopic = require('../models/AiTopic');
-const { postToFacebook } = require('./../services/facebookService'); // your existing service
+const Page = require('../models/Page');
 
-// Generate posts for a topic
-async function generatePostsForTopic(topicId, options = { immediate: false }) {
-  const topic = await AiTopic.findById(topicId);
-  if (!topic) throw new Error('Topic not found');
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY
+});
 
-  const posts = [];
-  const now = new Date();
-  const startDate = topic.startDate || now;
-  const endDate = topic.endDate || now;
+/*
+CONTENT RULES ENGINE
+*/
+const ANGLES = [
+  'memory',
+  'observation',
+  'curiosity',
+  'experience',
+  'reflection',
+  'surprise',
+  'casual'
+];
 
-  const postsPerDay = topic.postsPerDay || 1;
-  const timesPerDay = topic.times || ['12:00']; // fallback if no time defined
+function cleanText(text) {
+  return text
+    .replace(/[-_•:*#"`]/g, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
 
-  // Helper: generate scheduled dates based on repeat
-  function getScheduledDates() {
-    const dates = [];
-    let current = new Date(startDate);
-    while (current <= endDate) {
-      dates.push(new Date(current));
-      if (topic.repeatType === 'daily') current.setDate(current.getDate() + 1);
-      else if (topic.repeatType === 'weekly') current.setDate(current.getDate() + 7);
-      else if (topic.repeatType === 'monthly') current.setMonth(current.getMonth() + 1);
-      else current.setDate(current.getDate() + 1);
+function buildPrompt({ topic, angle, isTrending, isCritical }) {
+  let base = '';
+
+  if (isCritical) {
+    base =
+      `Write a calm factual Facebook post about a very recent event related to ${topic}. 
+       No opinions. No advice. No excitement. Just clear human wording.`;
+  } else if (isTrending) {
+    base =
+      `Write a natural Facebook post reacting to something people are currently talking about related to ${topic}. 
+       Sound like a normal person noticing it.`;
+  } else {
+    switch (angle) {
+      case 'memory':
+        base = `Write a Facebook post recalling a memory related to ${topic}.`;
+        break;
+      case 'observation':
+        base = `Write a Facebook post sharing an everyday observation about ${topic}.`;
+        break;
+      case 'curiosity':
+        base = `Write a Facebook post expressing curiosity about ${topic} in a natural way.`;
+        break;
+      case 'experience':
+        base = `Write a Facebook post describing a personal experience related to ${topic}.`;
+        break;
+      case 'reflection':
+        base = `Write a Facebook post reflecting quietly on ${topic}.`;
+        break;
+      case 'surprise':
+        base = `Write a Facebook post reacting with mild surprise about ${topic}.`;
+        break;
+      default:
+        base = `Write a casual Facebook post about ${topic}.`;
     }
-    return dates;
   }
 
-  const scheduledDates = getScheduledDates();
+  return `
+${base}
+Rules
+Write like a human
+No advice
+No teaching
+No lists
+No emojis
+No symbols
+No promotional tone
+No AI language
+`;
+}
 
-  for (const date of scheduledDates) {
+/*
+CORE GENERATOR
+*/
+async function generateAiPosts({
+  pageId,
+  topic,
+  postsPerDay,
+  times,
+  startDate,
+  endDate,
+  includeMedia,
+  repeatType,
+  isTrending = false,
+  isCritical = false
+}) {
+  const posts = [];
+  const start = new Date(startDate);
+  const end = new Date(endDate);
+
+  let angleIndex = 0;
+
+  for (let day = new Date(start); day <= end; ) {
     for (let i = 0; i < postsPerDay; i++) {
-      const time = timesPerDay[i % timesPerDay.length].split(':');
-      const scheduledTime = new Date(date);
-      scheduledTime.setHours(parseInt(time[0]), parseInt(time[1]), 0, 0);
+      const angle = ANGLES[angleIndex % ANGLES.length];
+      angleIndex++;
 
-      // Skip past times unless immediate is true
-      if (!options.immediate && scheduledTime < now) continue;
+      const textResponse = await openai.chat.completions.create({
+        model: 'gpt-4',
+        temperature: 0.95,
+        messages: [
+          {
+            role: 'system',
+            content:
+              'You write Facebook posts that sound fully human and natural.'
+          },
+          {
+            role: 'user',
+            content: buildPrompt({
+              topic,
+              angle,
+              isTrending,
+              isCritical
+            })
+          }
+        ],
+        max_tokens: 180
+      });
 
-      // Generate post text dynamically based on topic
-      const text = await generateTextForTopic(topic.name);
+      const text = cleanText(
+        textResponse.choices[0].message.content
+      );
 
-      // Optionally generate media
-      let mediaUrl = '';
-      if (topic.includeMedia) {
-        mediaUrl = await generateMediaForTopic(topic.name);
+      let mediaUrl = null;
+
+      if (!isCritical && includeMedia && Math.random() > 0.4) {
+        const image = await openai.images.generate({
+          model: 'gpt-image-1',
+          prompt:
+            `A realistic everyday photo related to ${topic}. No text. Natural lighting.`,
+          size: '1024x1024'
+        });
+
+        mediaUrl = image.data[0].url;
       }
 
+      const [h, m] = times[i].split(':');
+      const scheduledTime = new Date(day);
+      scheduledTime.setHours(Number(h), Number(m), 0, 0);
+
       const post = await AiScheduledPost.create({
-        pageId: topic.pageId,
-        topicId: topic._id,
+        pageId,
+        topic,
         text,
         mediaUrl,
         scheduledTime,
-        status: 'PENDING'
+        status: 'PENDING',
+        retryCount: 0,
+        meta: {
+          angle,
+          trending: isTrending,
+          critical: isCritical
+        }
       });
 
       posts.push(post);
-      await createAiLog(topic.pageId, post._id, 'POST_SCHEDULED', `Post scheduled for ${scheduledTime.toLocaleString()}`);
+    }
+
+    if (repeatType === 'weekly') {
+      day.setDate(day.getDate() + 7);
+    } else if (repeatType === 'monthly') {
+      day.setMonth(day.getMonth() + 1);
+    } else {
+      day.setDate(day.getDate() + 1);
     }
   }
 
   return posts;
 }
 
-// Delete all scheduled posts for a topic
-async function deleteTopicPosts(topicId) {
-  const posts = await AiScheduledPost.find({ topicId });
-  for (const post of posts) {
-    await createAiLog(post.pageId, post._id, 'POST_DELETED', 'Scheduled post deleted');
-  }
-  await AiScheduledPost.deleteMany({ topicId });
-}
-
-// Create a log
-async function createAiLog(pageId, postId, action, message) {
-  return AiLog.create({ pageId, postId, action, message });
-}
-
-// Dummy: Generate text dynamically
-async function generateTextForTopic(topicName) {
-  // Here you can integrate OpenAI or other AI service
-  // For now, return placeholder text dynamically based on topic
-  const variations = [
-    `Latest insights about ${topicName}`,
-    `Did you know? Interesting facts about ${topicName}`,
-    `${topicName} updates you shouldn't miss`,
-    `Breaking developments on ${topicName}`,
-    `Top tips regarding ${topicName}`
-  ];
-  return variations[Math.floor(Math.random() * variations.length)];
-}
-
-// Dummy: Generate media dynamically
-async function generateMediaForTopic(topicName) {
-  // Here you can integrate your image/video generation
-  // For now, return empty or placeholder URL
-  return `https://dummyimage.com/600x400/000/fff&text=${encodeURIComponent(topicName)}`;
-}
-
 module.exports = {
-  generatePostsForTopic,
-  deleteTopicPosts,
-  createAiLog
+  generateAiPosts
 };
+
