@@ -13,21 +13,9 @@ const {
   createAiLog
 } = require('../services/aiSchedulerService');
 
-// SCHEDULER
-const { startAiScheduler } = require('../services/aiPostScheduler');
 
-/*
-|--------------------------------------------------------------------------
-| START AI SCHEDULER (RUNS ONCE)
-|--------------------------------------------------------------------------
-*/
-startAiScheduler();
 
-/*
-|--------------------------------------------------------------------------
-| TOPICS (PAGE SCOPED)
-|--------------------------------------------------------------------------
-*/
+
 
 // Get all AI topics for a page
 router.get('/page/:pageId/topics', async (req, res) => {
