@@ -16,5 +16,6 @@
     "express": "^4.19.2",
     "mongoose": "^7.6.3",
     "express-session": "^1.17.3"
+    "openai": "^4.10.0"
   }
 }
