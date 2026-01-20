@@ -37,6 +37,8 @@ const pageFeaturesRoutes = require('./routes/pageFeaturesRoutes');
 
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/dashboard', pageFeaturesRoutes);
+app.use('/api/ai', require('./routes/aiSchedulerRoutes'));
+
 
 // -------------------- FRONTEND --------------------
 app.use(express.static(path.join(__dirname, 'public')));
