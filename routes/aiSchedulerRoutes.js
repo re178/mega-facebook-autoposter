@@ -1,8 +1,3 @@
-// ==========================
-// routes/aiSchedulerRoutes.js
-// Fully integrated for pageAi.js frontend
-// Supports topics, posts, post-now, retry, delete, mark content, and logs
-// ==========================
 const express = require('express');
 const router = express.Router();
 
@@ -10,30 +5,33 @@ const router = express.Router();
 const AiTopic = require('../models/AiTopic');
 const AiScheduledPost = require('../models/AiScheduledPost');
 const AiLog = require('../models/AiLog');
-const Page = require('../models/Page');
 
 // SERVICES
 const {
   generatePostsForTopic,
-  deleteTopicPosts
+  deleteTopicPosts,
+  createAiLog
 } = require('../services/aiSchedulerService');
 
-// =================================================
-// TOPICS
-// =================================================
+/* =========================================================
+   TOPIC ROUTES
+========================================================= */
 
 // Get all AI topics for a page
 router.get('/page/:pageId/topics', async (req, res) => {
   try {
     const topics = await AiTopic.find({ pageId: req.params.pageId })
       .sort({ createdAt: -1 });
-    res.json(topics);
+
+    // ALWAYS return array
+    res.json(Array.isArray(topics) ? topics : []);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('❌ Failed to get topics:', err.message);
+    res.status(500).json([]);
   }
 });
 
-// Create new AI topic
+// Create AI topic
 router.post('/page/:pageId/topic', async (req, res) => {
   try {
     const topic = await AiTopic.create({
@@ -41,20 +39,21 @@ router.post('/page/:pageId/topic', async (req, res) => {
       ...req.body
     });
 
-    await AiLog.create({
-      pageId: req.params.pageId,
-      postId: null,
-      action: 'TOPIC_CREATED',
-      message: `AI topic "${topic.topicName}" created`
-    });
+    await createAiLog(
+      req.params.pageId,
+      null,
+      'TOPIC_CREATED',
+      `AI topic "${topic.topicName || topic.name}" was created`
+    );
 
     res.json(topic);
   } catch (err) {
+    console.error('❌ Failed to create topic:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-// Update topic
+// Update AI topic
 router.put('/topic/:topicId', async (req, res) => {
   try {
     const topic = await AiTopic.findByIdAndUpdate(
@@ -62,22 +61,24 @@ router.put('/topic/:topicId', async (req, res) => {
       req.body,
       { new: true }
     );
+
     if (!topic) return res.status(404).json({ error: 'Topic not found' });
 
-    await AiLog.create({
-      pageId: topic.pageId,
-      postId: null,
-      action: 'TOPIC_UPDATED',
-      message: `AI topic "${topic.topicName}" updated`
-    });
+    await createAiLog(
+      topic.pageId,
+      null,
+      'TOPIC_UPDATED',
+      `AI topic "${topic.topicName}" was updated`
+    );
 
     res.json(topic);
   } catch (err) {
+    console.error('❌ Failed to update topic:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-// Delete topic + all its posts
+// Delete AI topic + its posts
 router.delete('/topic/:topicId', async (req, res) => {
   try {
     const topic = await AiTopic.findById(req.params.topicId);
@@ -86,70 +87,68 @@ router.delete('/topic/:topicId', async (req, res) => {
     await deleteTopicPosts(topic._id);
     await AiTopic.findByIdAndDelete(topic._id);
 
-    await AiLog.create({
-      pageId: topic.pageId,
-      postId: null,
-      action: 'TOPIC_DELETED',
-      message: `AI topic "${topic.topicName}" and its posts deleted`
-    });
+    await createAiLog(
+      topic.pageId,
+      null,
+      'TOPIC_DELETED',
+      `AI topic "${topic.topicName}" and its posts were deleted`
+    );
 
     res.json({ success: true });
   } catch (err) {
+    console.error('❌ Failed to delete topic:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-// =================================================
-// POST GENERATION
-// =================================================
+/* =========================================================
+   POST GENERATION
+========================================================= */
 
-// Generate posts now for topic (manual trigger)
+// Generate posts immediately (manual trigger)
 router.post('/topic/:topicId/generate-now', async (req, res) => {
   try {
-    const posts = await generatePostsForTopic(req.params.topicId, { immediate: true });
-    const topic = await AiTopic.findById(req.params.topicId);
-
-    await AiLog.create({
-      pageId: topic.pageId,
-      postId: null,
-      action: 'POSTS_GENERATED',
-      message: `${posts.length} AI posts generated for "${topic.topicName}"`
-    });
-
-    res.json(posts);
+    const posts = await generatePostsForTopic(
+      req.params.topicId,
+      { immediate: true }
+    );
+    res.json(Array.isArray(posts) ? posts : []);
   } catch (err) {
+    console.error('❌ Failed to generate posts:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-// Delete all posts for topic
+// Delete all scheduled posts for topic
 router.delete('/topic/:topicId/posts', async (req, res) => {
   try {
     await deleteTopicPosts(req.params.topicId);
     res.json({ success: true });
   } catch (err) {
+    console.error('❌ Failed to delete posts for topic:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-// =================================================
-// SCHEDULED POSTS (PAGE SCOPED)
-// =================================================
+/* =========================================================
+   UPCOMING POSTS (PAGE SCOPED)
+========================================================= */
 
-// Get upcoming posts for a page
 router.get('/page/:pageId/upcoming-posts', async (req, res) => {
   try {
     const posts = await AiScheduledPost.find({ pageId: req.params.pageId })
       .sort({ scheduledTime: 1 })
       .limit(100)
       .populate('topicId');
-    res.json(posts);
+
+    res.json(Array.isArray(posts) ? posts : []);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('❌ Failed to load upcoming posts:', err.message);
+    res.status(500).json([]);
   }
 });
 
-// Retry failed post
+// Retry failed AI post manually
 router.post('/post/:postId/retry', async (req, res) => {
   try {
     const post = await AiScheduledPost.findById(req.params.postId);
@@ -159,107 +158,46 @@ router.post('/post/:postId/retry', async (req, res) => {
     post.retryCount = 0;
     await post.save();
 
-    await AiLog.create({
-      pageId: post.pageId,
-      postId: post._id,
-      action: 'RETRY_TRIGGERED',
-      message: 'Manual retry triggered from dashboard'
-    });
+    await createAiLog(
+      post.pageId,
+      post._id,
+      'RETRY_TRIGGERED',
+      'Manual retry triggered from dashboard'
+    );
 
     res.json({ success: true });
   } catch (err) {
+    console.error('❌ Failed to retry post:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-// Delete a single AI post
-router.delete('/ai-post/:postId', async (req, res) => {
-  try {
-    const post = await AiScheduledPost.findById(req.params.postId);
-    if (!post) return res.status(404).json({ error: 'Post not found' });
+/* =========================================================
+   AI LOGS (MONITOR / CCTV)
+========================================================= */
 
-    await AiLog.create({
-      pageId: post.pageId,
-      postId: post._id,
-      action: 'POST_DELETED',
-      message: 'AI post deleted manually'
-    });
-
-    await post.remove();
-    res.json({ success: true });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Post now (manual trigger)
-router.post('/ai-post/:postId/post-now', async (req, res) => {
-  try {
-    const post = await AiScheduledPost.findById(req.params.postId);
-    if (!post) return res.status(404).json({ error: 'Post not found' });
-
-    post.status = 'POSTED';
-    await post.save();
-
-    await AiLog.create({
-      pageId: post.pageId,
-      postId: post._id,
-      action: 'POST_NOW',
-      message: 'AI post manually published'
-    });
-
-    res.json({ success: true });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Mark post content (normal/trending/critical)
-router.post('/ai-post/:postId/mark', async (req, res) => {
-  try {
-    const { type } = req.body;
-    const post = await AiScheduledPost.findById(req.params.postId);
-    if (!post) return res.status(404).json({ error: 'Post not found' });
-
-    post.contentType = type.toUpperCase();
-    await post.save();
-
-    await AiLog.create({
-      pageId: post.pageId,
-      postId: post._id,
-      action: 'CONTENT_MARKED',
-      message: `Post marked as ${type.toUpperCase()}`
-    });
-
-    res.json({ success: true });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// =================================================
-// LOGS
-// =================================================
-
-// Get page logs (monitor feed)
+// Get latest AI activity logs (monitor feed)
 router.get('/page/:pageId/logs', async (req, res) => {
   try {
     const logs = await AiLog.find({ pageId: req.params.pageId })
       .sort({ createdAt: -1 })
       .limit(20)
       .populate('postId');
-    res.json(logs);
+
+    res.json(Array.isArray(logs) ? logs : []);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('❌ Failed to load logs:', err.message);
+    res.status(500).json([]);
   }
 });
 
-// Clear logs
+// Clear AI logs
 router.delete('/page/:pageId/logs', async (req, res) => {
   try {
     await AiLog.deleteMany({ pageId: req.params.pageId });
     res.json({ success: true });
   } catch (err) {
+    console.error('❌ Failed to clear logs:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
