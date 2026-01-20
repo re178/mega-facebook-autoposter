@@ -92,7 +92,7 @@ app.get('/schedule', requireLogin, (req, res) =>
 
 // -------------------- SERVICES --------------------
 const { startScheduler } = require('./services/scheduler');
-const { startAiScheduler } = require('./services/aiSchedulerService'); 
+const { startAiPostScheduler } = require('./services/aiPostScheduler'); 
 
 
 
@@ -138,7 +138,7 @@ mongoose
 
         try {
             await startScheduler();
-            await startAiScheduler();
+            await startAiPostScheduler();
         } catch (err) {
             console.error('❌ Scheduler error:', err.message);
         }
