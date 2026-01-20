@@ -1,7 +1,15 @@
+// ==========================
+// pageAi.js - AI Scheduler Frontend Controller
+// Fully utilizes backend routes without breaking existing code
+// Enhances reliability, prevents DB overload, strengthens buttons
+// ==========================
 document.addEventListener('DOMContentLoaded', async () => {
   const urlParams = new URLSearchParams(window.location.search);
   const pageId = urlParams.get('pageId'); // expects ?pageId=xxx
-  if (!pageId) return;
+  if (!pageId) {
+    alert('❌ Page ID missing from URL!');
+    return;
+  }
 
   // ----- Elements -----
   const topicNameInput = document.getElementById('ai-topic-name');
@@ -30,6 +38,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     line.innerHTML = `<span style="color:${color}">[${now}]</span> ${message}`;
     monitorLog.appendChild(line);
     monitorLog.scrollTop = monitorLog.scrollHeight;
+    console.log(`[${now}] ${type.toUpperCase()}: ${message}`);
   }
 
   function addTimeInput(value='') {
@@ -56,7 +65,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         tr.innerHTML = `
           <td>${p.topicId?.topicName || ''}</td>
           <td>${new Date(p.scheduledTime).toLocaleString()}</td>
-          <td>${p.text}</td>
+          <td>${p.text || ''}</td>
           <td>${p.mediaUrl || ''}</td>
           <td>${p.status}</td>
           <td>
@@ -97,6 +106,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         `;
         logsTable.appendChild(tr);
       });
+
+      // Warn if logs are too large
+      if (logs.length >= 20) logMonitor('⚠️ Logs exceeding 20 entries. Consider clearing', 'warn');
+
       logMonitor('📝 Logs loaded');
     } catch(e) {
       logMonitor(`❌ Failed to load logs: ${e.message}`, 'error');
@@ -106,9 +119,19 @@ document.addEventListener('DOMContentLoaded', async () => {
   // ----- Save Topic -----
   saveTopicBtn.addEventListener('click', async () => {
     try {
+      const topicName = topicNameInput.value.trim();
+      if (!topicName) return logMonitor('❌ Topic name cannot be empty', 'error');
+
+      // check duplicate
+      const resTopics = await fetch(`/api/ai/page/${pageId}/topics`);
+      const topics = await resTopics.json();
+      if (topics.some(t => t.topicName.trim().toLowerCase() === topicName.toLowerCase())) {
+        return logMonitor(`⚠️ Topic "${topicName}" already exists`, 'warn');
+      }
+
       const times = Array.from(timesContainer.querySelectorAll('input[type=time]')).map(i=>i.value);
       const data = {
-        topicName: topicNameInput.value,
+        topicName,
         postsPerDay: parseInt(postsPerDaySelect.value),
         times,
         startDate: startDateInput.value,
@@ -116,8 +139,11 @@ document.addEventListener('DOMContentLoaded', async () => {
         repeatType: repeatTypeSelect.value,
         includeMedia: includeMediaCheckbox.checked
       };
+
       const res = await fetch(`/api/ai/page/${pageId}/topic`, {
-        method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify(data)
       });
       const topic = await res.json();
       logMonitor(`💾 Topic '${topic.topicName}' saved`);
@@ -127,18 +153,28 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   });
 
-  // ----- Generate Now -----
+  // ----- Generate Post Now -----
   generatePostNowBtn.addEventListener('click', async () => {
     try {
-      const topicName = topicNameInput.value;
-      // First find topicId by name
+      const topicName = topicNameInput.value.trim();
+      if (!topicName) return logMonitor('❌ Enter topic name to generate posts', 'error');
+
+      // find topic
       const resTopics = await fetch(`/api/ai/page/${pageId}/topics`);
       const topics = await resTopics.json();
-      const topic = topics.find(t=>t.topicName===topicName);
-      if(!topic) return logMonitor(`❌ Topic '${topicName}' not found`, 'error');
+      const topic = topics.find(t => t.topicName === topicName);
+      if (!topic) return logMonitor(`❌ Topic "${topicName}" not found`, 'error');
 
-      await fetch(`/api/ai/topic/${topic._id}/generate-now`, {method:'POST'});
-      logMonitor(`🚀 Generated and posted now for topic '${topicName}'`);
+      // limit scheduled posts per topic
+      const resPosts = await fetch(`/api/ai/page/${pageId}/upcoming-posts`);
+      const posts = await resPosts.json();
+      const topicPosts = posts.filter(p => p.topicId?._id === topic._id);
+      if (topicPosts.length >= 10) { // configurable max
+        return logMonitor(`⚠️ Maximum posts reached for topic "${topicName}"`, 'warn');
+      }
+
+      await fetch(`/api/ai/topic/${topic._id}/generate-now`, { method:'POST' });
+      logMonitor(`🚀 Generated posts for topic '${topicName}'`);
       loadUpcomingPosts();
       loadLogs();
     } catch(e) {
@@ -149,13 +185,15 @@ document.addEventListener('DOMContentLoaded', async () => {
   // ----- Delete All Posts for Topic -----
   deleteAllTopicPostsBtn.addEventListener('click', async () => {
     try {
-      const topicName = topicNameInput.value;
+      const topicName = topicNameInput.value.trim();
+      if (!topicName) return logMonitor('❌ Enter topic name to delete posts', 'error');
+
       const resTopics = await fetch(`/api/ai/page/${pageId}/topics`);
       const topics = await resTopics.json();
-      const topic = topics.find(t=>t.topicName===topicName);
-      if(!topic) return logMonitor(`❌ Topic '${topicName}' not found`, 'error');
+      const topic = topics.find(t => t.topicName === topicName);
+      if (!topic) return logMonitor(`❌ Topic "${topicName}" not found`, 'error');
 
-      await fetch(`/api/ai/topic/${topic._id}/posts`, {method:'DELETE'});
+      await fetch(`/api/ai/topic/${topic._id}/posts`, { method:'DELETE' });
       logMonitor(`🗑 All posts for topic '${topicName}' deleted`);
       loadUpcomingPosts();
       loadLogs();
@@ -167,7 +205,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   // ----- Clear Logs -----
   clearLogsBtn.addEventListener('click', async () => {
     try {
-      await fetch(`/api/ai/page/${pageId}/logs`, {method:'DELETE'});
+      await fetch(`/api/ai/page/${pageId}/logs`, { method:'DELETE' });
       logMonitor('🧹 Logs cleared');
       loadLogs();
     } catch(e) {
@@ -183,7 +221,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   window.deleteAiPost = async (id) => {
     try {
-      await fetch(`/api/ai/post/${id}/retry`, {method:'DELETE'});
+      await fetch(`/api/ai/post/${id}/retry`, { method:'DELETE' });
       logMonitor(`🗑 Deleted AI post ${id}`);
       loadUpcomingPosts();
       loadLogs();
@@ -194,7 +232,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   window.postNowAi = async (id) => {
     try {
-      await fetch(`/api/ai/post/${id}/retry`, {method:'POST'});
+      await fetch(`/api/ai/post/${id}/retry`, { method:'POST' });
       logMonitor(`🚀 Posted AI post ${id} immediately`);
       loadUpcomingPosts();
       loadLogs();
@@ -205,7 +243,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   window.retryAiPost = async (id) => {
     try {
-      await fetch(`/api/ai/post/${id}/retry`, {method:'POST'});
+      await fetch(`/api/ai/post/${id}/retry`, { method:'POST' });
       logMonitor(`⚡ Retrying AI post ${id}`);
       loadUpcomingPosts();
       loadLogs();
@@ -214,12 +252,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   };
 
-  window.markContent = async (id,type) => {
+  window.markContent = async (id, type) => {
     try {
       await fetch(`/api/ai/ai-post/${id}/mark`, {
         method:'POST',
         headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({type})
+        body: JSON.stringify({ type })
       });
       logMonitor(`🔖 Marked AI post ${id} as ${type.toUpperCase()}`);
       loadUpcomingPosts();
@@ -235,8 +273,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   loadUpcomingPosts();
   loadLogs();
   logMonitor('✅ AI Scheduler interface loaded');
-});
 
- 
+});
 
 
