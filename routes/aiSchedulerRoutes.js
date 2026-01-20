@@ -14,7 +14,7 @@ const {
 } = require('../services/aiSchedulerService');
 
 /* =========================================================
-   TOPIC ROUTES
+   AI TOPICS
 ========================================================= */
 
 // Get all AI topics for a page
@@ -22,12 +22,9 @@ router.get('/page/:pageId/topics', async (req, res) => {
   try {
     const topics = await AiTopic.find({ pageId: req.params.pageId })
       .sort({ createdAt: -1 });
-
-    // ALWAYS return array
-    res.json(Array.isArray(topics) ? topics : []);
+    res.json(topics);
   } catch (err) {
-    console.error('❌ Failed to get topics:', err.message);
-    res.status(500).json([]);
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -43,12 +40,11 @@ router.post('/page/:pageId/topic', async (req, res) => {
       req.params.pageId,
       null,
       'TOPIC_CREATED',
-      `AI topic "${topic.topicName || topic.name}" was created`
+      `AI topic "${topic.topicName}" was created`
     );
 
     res.json(topic);
   } catch (err) {
-    console.error('❌ Failed to create topic:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -73,7 +69,6 @@ router.put('/topic/:topicId', async (req, res) => {
 
     res.json(topic);
   } catch (err) {
-    console.error('❌ Failed to update topic:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -96,13 +91,12 @@ router.delete('/topic/:topicId', async (req, res) => {
 
     res.json({ success: true });
   } catch (err) {
-    console.error('❌ Failed to delete topic:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
 /* =========================================================
-   POST GENERATION
+   AI POST GENERATION
 ========================================================= */
 
 // Generate posts immediately (manual trigger)
@@ -112,9 +106,18 @@ router.post('/topic/:topicId/generate-now', async (req, res) => {
       req.params.topicId,
       { immediate: true }
     );
-    res.json(Array.isArray(posts) ? posts : []);
+
+    const topic = await AiTopic.findById(req.params.topicId);
+
+    await createAiLog(
+      topic.pageId,
+      null,
+      'POSTS_GENERATED',
+      `${posts.length} AI posts generated for "${topic.topicName}"`
+    );
+
+    res.json(posts);
   } catch (err) {
-    console.error('❌ Failed to generate posts:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -125,26 +128,24 @@ router.delete('/topic/:topicId/posts', async (req, res) => {
     await deleteTopicPosts(req.params.topicId);
     res.json({ success: true });
   } catch (err) {
-    console.error('❌ Failed to delete posts for topic:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
 /* =========================================================
-   UPCOMING POSTS (PAGE SCOPED)
+   SCHEDULED POSTS (PAGE SCOPED)
 ========================================================= */
 
+// Get upcoming scheduled AI posts
 router.get('/page/:pageId/upcoming-posts', async (req, res) => {
   try {
     const posts = await AiScheduledPost.find({ pageId: req.params.pageId })
       .sort({ scheduledTime: 1 })
       .limit(100)
       .populate('topicId');
-
-    res.json(Array.isArray(posts) ? posts : []);
+    res.json(posts);
   } catch (err) {
-    console.error('❌ Failed to load upcoming posts:', err.message);
-    res.status(500).json([]);
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -167,7 +168,6 @@ router.post('/post/:postId/retry', async (req, res) => {
 
     res.json({ success: true });
   } catch (err) {
-    console.error('❌ Failed to retry post:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -183,11 +183,9 @@ router.get('/page/:pageId/logs', async (req, res) => {
       .sort({ createdAt: -1 })
       .limit(20)
       .populate('postId');
-
-    res.json(Array.isArray(logs) ? logs : []);
+    res.json(logs);
   } catch (err) {
-    console.error('❌ Failed to load logs:', err.message);
-    res.status(500).json([]);
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -197,9 +195,9 @@ router.delete('/page/:pageId/logs', async (req, res) => {
     await AiLog.deleteMany({ pageId: req.params.pageId });
     res.json({ success: true });
   } catch (err) {
-    console.error('❌ Failed to clear logs:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
 module.exports = router;
+
