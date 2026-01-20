@@ -143,5 +143,5 @@ async function startAiPostScheduler() {
   runScheduler();
 }
 
-module.exports = { startAiScheduler: startAiPostScheduler };
+module.exports = { startAiScheduler};
 
