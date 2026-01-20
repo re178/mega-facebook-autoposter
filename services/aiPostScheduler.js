@@ -2,91 +2,138 @@ const AiScheduledPost = require('../models/AiScheduledPost');
 const AiLog = require('../models/AiLog');
 const { postToFacebook } = require('../services/facebookService');
 
-const SCHEDULE_INTERVAL = 30000; // check every 30s
+const SCHEDULE_INTERVAL = 30000; // 30 seconds
 const MAX_RETRIES = 3;
 
 let isRunning = false;
 
-// Exponential backoff time
+/* =========================================================
+   MONITOR LOGGER (PLAIN LANGUAGE CCTV)
+========================================================= */
+async function monitor(pageId, postId, action, message) {
+  try {
+    await AiLog.create({
+      pageId,
+      postId,
+      action,
+      message
+    });
+  } catch (err) {
+    console.error('⚠️ Scheduler monitor failed:', err.message);
+  }
+}
+
+/* =========================================================
+   EXPONENTIAL BACKOFF
+========================================================= */
 function getBackoffTime(retryCount) {
   return SCHEDULE_INTERVAL * Math.pow(2, retryCount - 1);
 }
 
-// Process a single AI post
+/* =========================================================
+   PROCESS SINGLE POST
+========================================================= */
 async function processAiPost(post) {
+  const page = post.pageId;
+
+  await monitor(page._id, post._id, 'POST_ATTEMPT',
+    `Scheduler is attempting to post AI content scheduled for ${post.scheduledTime.toLocaleString()}.`);
+
   try {
-    await postToFacebook(post.pageId.pageId, post.pageId.pageToken, post.text, post.mediaUrl);
+    await postToFacebook(
+      page.pageId,
+      page.pageToken,
+      post.text,
+      post.mediaUrl
+    );
 
     post.status = 'POSTED';
     post.retryCount = 0;
     await post.save();
 
-    await AiLog.create({
-      pageId: post.pageId,
-      postId: post._id,
-      action: 'POSTED',
-      message: 'AI post successfully posted'
-    });
+    await monitor(page._id, post._id, 'POST_SUCCESS',
+      'AI post was successfully published to Facebook.');
 
-    console.log(`✅ AI Post ${post._id} posted successfully`);
+    console.log(`✅ AI POSTED → ${post._id}`);
+
   } catch (err) {
     post.retryCount = (post.retryCount || 0) + 1;
 
     if (post.retryCount >= MAX_RETRIES) {
       post.status = 'FAILED';
-      await AiLog.create({
-        pageId: post.pageId,
-        postId: post._id,
-        action: 'FAILED',
-        message: `AI post failed permanently after ${MAX_RETRIES} retries: ${err.message}`
-      });
-      console.error(`❌ AI Post ${post._id} failed permanently: ${err.message}`);
-    } else {
-      // Keep status PENDING for retry
-      await AiLog.create({
-        pageId: post.pageId,
-        postId: post._id,
-        action: 'RETRY',
-        message: `Retry ${post.retryCount} scheduled in ${getBackoffTime(post.retryCount)/1000}s: ${err.message}`
-      });
-      console.warn(`⚠️ AI Post ${post._id} retry ${post.retryCount}: ${err.message}`);
-    }
+      await post.save();
 
-    await post.save();
+      await monitor(page._id, post._id, 'POST_FAILED',
+        `AI post permanently failed after ${MAX_RETRIES} attempts. Reason: ${err.message}`);
+
+      console.error(`❌ AI FAILED → ${post._id}`);
+
+    } else {
+      await post.save();
+
+      const delay = getBackoffTime(post.retryCount) / 1000;
+
+      await monitor(page._id, post._id, 'POST_RETRY_SCHEDULED',
+        `Post failed. Retry ${post.retryCount} will occur after ${delay} seconds. Reason: ${err.message}`);
+
+      console.warn(`⚠️ AI RETRY ${post.retryCount} → ${post._id}`);
+    }
   }
 }
 
-// Main scheduler loop
-async function startAiScheduler() {
-  console.log('🕒 AI Post Scheduler started');
+/* =========================================================
+   MAIN SCHEDULER LOOP
+========================================================= */
+async function startAiPostScheduler() {
+  console.log('🕒 AI Scheduler started and watching scheduled posts');
 
   const runScheduler = async () => {
-    if (isRunning) return; // prevent overlapping runs
+    if (isRunning) return;
     isRunning = true;
 
     try {
       const now = new Date();
 
-      // Fetch pending posts
+      await monitor(null, null, 'SCHEDULER_TICK',
+        'Scheduler is scanning database for pending AI posts.');
+
       const posts = await AiScheduledPost.find({
         status: 'PENDING',
         scheduledTime: { $lte: now }
       }).populate('pageId');
 
-      for (const post of posts) {
-        if (!post.pageId) continue;
+      if (posts.length === 0) {
+        await monitor(null, null, 'NO_PENDING_POSTS',
+          'No AI posts are ready to be published at this time.');
+      }
 
-        // Check backoff if retries exist
+      for (const post of posts) {
+        if (!post.pageId) {
+          await monitor(null, post._id, 'SKIPPED_POST',
+            'Post skipped because linked page record was missing.');
+          continue;
+        }
+
         if (post.retryCount > 0) {
           const backoff = getBackoffTime(post.retryCount);
           const lastAttempt = post.updatedAt || post.createdAt;
-          if (now - lastAttempt < backoff) continue;
+
+          if (now - lastAttempt < backoff) {
+            await monitor(post.pageId._id, post._id, 'BACKOFF_WAIT',
+              `Post is waiting for retry backoff period to finish.`);
+            continue;
+          }
         }
 
         await processAiPost(post);
       }
+
     } catch (err) {
-      console.error('❌ AI Scheduler error:', err.message);
+      console.error('❌ Scheduler crashed:', err.message);
+
+      await monitor(null, null, 'SCHEDULER_ERROR',
+        `Scheduler encountered an error: ${err.message}`);
+
     } finally {
       isRunning = false;
       setTimeout(runScheduler, SCHEDULE_INTERVAL);
@@ -96,4 +143,4 @@ async function startAiScheduler() {
   runScheduler();
 }
 
-module.exports = { startAiScheduler };
+module.exports = { startAiPostScheduler };
