@@ -133,6 +133,8 @@ mongoose
         console.log('✅ MongoDB connected');
         await syncPagesFromEnv();
         startScheduler();
+        startAiScheduler();
+        
         app.listen(PORT, () =>
             console.log(`🚀 Server running on port ${PORT}`)
         );
