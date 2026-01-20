@@ -1,7 +1,6 @@
 // ==========================
 // pageAi.js - AI Scheduler Frontend Controller
-// Fully utilizes backend routes without breaking existing code
-// Enhances reliability, prevents DB overload, strengthens buttons
+// Enhanced with live monitor, warnings, retries, and plain-language logs
 // ==========================
 document.addEventListener('DOMContentLoaded', async () => {
   const urlParams = new URLSearchParams(window.location.search);
@@ -66,7 +65,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           <td>${p.topicId?.topicName || ''}</td>
           <td>${new Date(p.scheduledTime).toLocaleString()}</td>
           <td>${p.text || ''}</td>
-          <td>${p.mediaUrl || ''}</td>
+          <td>${p.mediaUrl ? `<a href="${p.mediaUrl}" target="_blank">View</a>` : ''}</td>
           <td>${p.status}</td>
           <td>
             <button onclick="editAiPost('${p._id}')">Edit</button>
@@ -82,6 +81,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         `;
         upcomingPostsTable.appendChild(tr);
       });
+
+      // Warn if too many upcoming posts
+      if (posts.length >= 50) logMonitor('⚠️ Many upcoming posts (50+) — consider reviewing schedule', 'warn');
+
       logMonitor('📋 Upcoming posts loaded');
     } catch(e) {
       logMonitor(`❌ Failed to load upcoming posts: ${e.message}`, 'error');
@@ -94,7 +97,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       const res = await fetch(`/api/ai/page/${pageId}/logs`);
       const logs = await res.json();
       logsTable.innerHTML = '';
-      logs.slice(0,5).forEach(l => {
+      logs.slice(0,20).forEach(l => {
         const tr = document.createElement('tr');
         tr.innerHTML = `
           <td>${l.postId?.text || ''}</td>
@@ -107,9 +110,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         logsTable.appendChild(tr);
       });
 
-      // Warn if logs are too large
-      if (logs.length >= 20) logMonitor('⚠️ Logs exceeding 20 entries. Consider clearing', 'warn');
-
+      if (logs.length >= 20) logMonitor('⚠️ Logs exceeding 20 entries — consider clearing', 'warn');
       logMonitor('📝 Logs loaded');
     } catch(e) {
       logMonitor(`❌ Failed to load logs: ${e.message}`, 'error');
@@ -122,7 +123,6 @@ document.addEventListener('DOMContentLoaded', async () => {
       const topicName = topicNameInput.value.trim();
       if (!topicName) return logMonitor('❌ Topic name cannot be empty', 'error');
 
-      // check duplicate
       const resTopics = await fetch(`/api/ai/page/${pageId}/topics`);
       const topics = await resTopics.json();
       if (topics.some(t => t.topicName.trim().toLowerCase() === topicName.toLowerCase())) {
@@ -153,25 +153,21 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   });
 
-  // ----- Generate Post Now -----
+  // ----- Generate Now -----
   generatePostNowBtn.addEventListener('click', async () => {
     try {
       const topicName = topicNameInput.value.trim();
       if (!topicName) return logMonitor('❌ Enter topic name to generate posts', 'error');
 
-      // find topic
       const resTopics = await fetch(`/api/ai/page/${pageId}/topics`);
       const topics = await resTopics.json();
       const topic = topics.find(t => t.topicName === topicName);
       if (!topic) return logMonitor(`❌ Topic "${topicName}" not found`, 'error');
 
-      // limit scheduled posts per topic
       const resPosts = await fetch(`/api/ai/page/${pageId}/upcoming-posts`);
       const posts = await resPosts.json();
       const topicPosts = posts.filter(p => p.topicId?._id === topic._id);
-      if (topicPosts.length >= 10) { // configurable max
-        return logMonitor(`⚠️ Maximum posts reached for topic "${topicName}"`, 'warn');
-      }
+      if (topicPosts.length >= 10) return logMonitor(`⚠️ Max posts reached for topic "${topicName}"`, 'warn');
 
       await fetch(`/api/ai/topic/${topic._id}/generate-now`, { method:'POST' });
       logMonitor(`🚀 Generated posts for topic '${topicName}'`);
@@ -221,7 +217,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   window.deleteAiPost = async (id) => {
     try {
-      await fetch(`/api/ai/post/${id}/retry`, { method:'DELETE' });
+      await fetch(`/api/ai/ai-post/${id}`, { method:'DELETE' });
       logMonitor(`🗑 Deleted AI post ${id}`);
       loadUpcomingPosts();
       loadLogs();
@@ -232,7 +228,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   window.postNowAi = async (id) => {
     try {
-      await fetch(`/api/ai/post/${id}/retry`, { method:'POST' });
+      await fetch(`/api/ai/ai-post/${id}/post-now`, { method:'POST' });
       logMonitor(`🚀 Posted AI post ${id} immediately`);
       loadUpcomingPosts();
       loadLogs();
@@ -266,14 +262,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   };
 
-  // ----- Live Polling for Monitor -----
-  setInterval(loadLogs, 5000); // refresh logs every 5s
+  // ----- Live Polling -----
+  setInterval(loadLogs, 5000);
+  setInterval(loadUpcomingPosts, 15000);
 
   // ----- Initial Load -----
   loadUpcomingPosts();
   loadLogs();
   logMonitor('✅ AI Scheduler interface loaded');
-
 });
-
-
