@@ -168,7 +168,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   await loadComments();
 
   // ---- Sidebar navigation ----
-  const sections = ['create-post','posts-list','page-logs','messaging-section','analytics-section','ads-section','manage-section'];
+  const sections = ['create-post','posts-list','page-logs','messaging-section','analytics-section','ads-section','manage-section', 'ai-scheduler-section'];
   document.querySelectorAll('#page-nav a').forEach(link => {
     link.addEventListener('click', () => {
       const page = link.dataset.page;
