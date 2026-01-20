@@ -135,9 +135,14 @@ mongoose
     .then(async () => {
         console.log('✅ MongoDB connected');
         await syncPagesFromEnv();
-        startScheduler();
-        startAiScheduler();
-        
+
+        try {
+            await startScheduler();
+            await startAiScheduler();
+        } catch (err) {
+            console.error('❌ Scheduler error:', err.message);
+        }
+
         app.listen(PORT, () =>
             console.log(`🚀 Server running on port ${PORT}`)
         );
