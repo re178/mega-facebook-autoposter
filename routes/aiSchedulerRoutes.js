@@ -5,6 +5,7 @@ const router = express.Router();
 const AiTopic = require('../models/AiTopic');
 const AiScheduledPost = require('../models/AiScheduledPost');
 const AiLog = require('../models/AiLog');
+const Page = require('../models/Page');
 
 // SERVICES
 const {
@@ -13,16 +14,13 @@ const {
   createAiLog
 } = require('../services/aiSchedulerService');
 
-/* =========================================================
-   AI TOPICS
-========================================================= */
+// -------------------- AI TOPICS --------------------
 
 // Get all AI topics for a page
 router.get('/page/:pageId/topics', async (req, res) => {
   try {
-    const topics = await AiTopic.find({ pageId: req.params.pageId })
-      .sort({ createdAt: -1 });
-    res.json(topics);
+    const topics = await AiTopic.find({ pageId: req.params.pageId }).sort({ createdAt: -1 });
+    res.json(Array.isArray(topics) ? topics : []);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -43,7 +41,7 @@ router.post('/page/:pageId/topic', async (req, res) => {
       `AI topic "${topic.topicName}" was created`
     );
 
-    res.json(topic);
+    res.json(topic); // returns topicName for frontend
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -52,12 +50,7 @@ router.post('/page/:pageId/topic', async (req, res) => {
 // Update AI topic
 router.put('/topic/:topicId', async (req, res) => {
   try {
-    const topic = await AiTopic.findByIdAndUpdate(
-      req.params.topicId,
-      req.body,
-      { new: true }
-    );
-
+    const topic = await AiTopic.findByIdAndUpdate(req.params.topicId, req.body, { new: true });
     if (!topic) return res.status(404).json({ error: 'Topic not found' });
 
     await createAiLog(
@@ -95,18 +88,12 @@ router.delete('/topic/:topicId', async (req, res) => {
   }
 });
 
-/* =========================================================
-   AI POST GENERATION
-========================================================= */
+// -------------------- AI POST GENERATION --------------------
 
 // Generate posts immediately (manual trigger)
 router.post('/topic/:topicId/generate-now', async (req, res) => {
   try {
-    const posts = await generatePostsForTopic(
-      req.params.topicId,
-      { immediate: true }
-    );
-
+    const posts = await generatePostsForTopic(req.params.topicId, { immediate: true });
     const topic = await AiTopic.findById(req.params.topicId);
 
     await createAiLog(
@@ -132,17 +119,17 @@ router.delete('/topic/:topicId/posts', async (req, res) => {
   }
 });
 
-/* =========================================================
-   SCHEDULED POSTS (PAGE SCOPED)
-========================================================= */
+// -------------------- SCHEDULED POSTS --------------------
 
 // Get upcoming scheduled AI posts
 router.get('/page/:pageId/upcoming-posts', async (req, res) => {
   try {
-    const posts = await AiScheduledPost.find({ pageId: req.params.pageId })
+    let posts = await AiScheduledPost.find({ pageId: req.params.pageId })
       .sort({ scheduledTime: 1 })
       .limit(100)
       .populate('topicId');
+
+    if (!Array.isArray(posts)) posts = [];
     res.json(posts);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -172,17 +159,17 @@ router.post('/post/:postId/retry', async (req, res) => {
   }
 });
 
-/* =========================================================
-   AI LOGS (MONITOR / CCTV)
-========================================================= */
+// -------------------- AI LOGS --------------------
 
 // Get latest AI activity logs (monitor feed)
 router.get('/page/:pageId/logs', async (req, res) => {
   try {
-    const logs = await AiLog.find({ pageId: req.params.pageId })
+    let logs = await AiLog.find({ pageId: req.params.pageId })
       .sort({ createdAt: -1 })
       .limit(20)
       .populate('postId');
+
+    if (!Array.isArray(logs)) logs = [];
     res.json(logs);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -200,4 +187,3 @@ router.delete('/page/:pageId/logs', async (req, res) => {
 });
 
 module.exports = router;
-
