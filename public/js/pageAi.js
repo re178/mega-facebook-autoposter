@@ -237,16 +237,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   logMonitor('✅ AI Scheduler interface loaded');
 });
 
- // ======= Sidebar Navigation for New Sections =======
-const sections = ['create-post', 'posts-list', 'page-logs', 'messaging-section', 'analytics-section', 'ads-section', 'manage-section', 'ai-scheduler-section'];
-document.querySelectorAll('#page-nav a').forEach(link => {
-  link.addEventListener('click', () => {
-    const page = link.dataset.page;
-    sections.forEach(sec => {
-      const el = document.getElementById(sec);
-      if (el) el.style.display = (sec === page || sec+'-section' === page+'-section') ? 'block' : 'none';
-    });
-  });
-}); 
+ 
 
 
