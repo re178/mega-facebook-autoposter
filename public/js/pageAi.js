@@ -47,16 +47,14 @@ document.addEventListener('DOMContentLoaded', async () => {
   // ----- Load upcoming posts -----
   async function loadUpcomingPosts() {
     try {
-      const res = await fetch(`/api/aiScheduler/page/${pageId}/ai-posts`);
+      const res = await fetch(`/api/ai/page/${pageId}/upcoming-posts`);
       const posts = await res.json();
       upcomingPostsTable.innerHTML = '';
       posts.forEach(p => {
         const tr = document.createElement('tr');
-        const statusBtn = p.status === 'FAILED' 
-          ? `<button onclick="retryAiPost('${p._id}')">Retry</button>` 
-          : '';
+        const retryBtn = p.status === 'FAILED' ? `<button onclick="retryAiPost('${p._id}')">Retry</button>` : '';
         tr.innerHTML = `
-          <td>${p.topicName}</td>
+          <td>${p.topicId?.topicName || ''}</td>
           <td>${new Date(p.scheduledTime).toLocaleString()}</td>
           <td>${p.text}</td>
           <td>${p.mediaUrl || ''}</td>
@@ -65,6 +63,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             <button onclick="editAiPost('${p._id}')">Edit</button>
             <button onclick="deleteAiPost('${p._id}')">Delete</button>
             <button onclick="postNowAi('${p._id}')">Post Now</button>
+            ${retryBtn}
           </td>
           <td>
             <button onclick="markContent('${p._id}','normal')">Normal</button>
@@ -83,18 +82,18 @@ document.addEventListener('DOMContentLoaded', async () => {
   // ----- Load logs -----
   async function loadLogs() {
     try {
-      const res = await fetch(`/api/aiScheduler/page/${pageId}/logs`);
+      const res = await fetch(`/api/ai/page/${pageId}/logs`);
       const logs = await res.json();
       logsTable.innerHTML = '';
       logs.slice(0,5).forEach(l => {
         const tr = document.createElement('tr');
         tr.innerHTML = `
-          <td>${l.postText || ''}</td>
+          <td>${l.postId?.text || ''}</td>
           <td>${l.action}</td>
           <td>${l.message}</td>
           <td>${new Date(l.createdAt).toLocaleString()}</td>
           <td><button onclick="deleteLog('${l._id}')">Delete</button></td>
-          <td>${l.action==='FAILED'?`<button onclick="retryAiPost('${l.postId}')">Retry</button>`:''}</td>
+          <td>${l.action==='FAILED' && l.postId ? `<button onclick="retryAiPost('${l.postId._id}')">Retry</button>`:''}</td>
         `;
         logsTable.appendChild(tr);
       });
@@ -104,7 +103,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   }
 
-  // ----- Button Handlers -----
+  // ----- Save Topic -----
   saveTopicBtn.addEventListener('click', async () => {
     try {
       const times = Array.from(timesContainer.querySelectorAll('input[type=time]')).map(i=>i.value);
@@ -117,20 +116,28 @@ document.addEventListener('DOMContentLoaded', async () => {
         repeatType: repeatTypeSelect.value,
         includeMedia: includeMediaCheckbox.checked
       };
-      await fetch(`/api/aiScheduler/page/${pageId}/ai-topic`, {
+      const res = await fetch(`/api/ai/page/${pageId}/topic`, {
         method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)
       });
-      logMonitor(`💾 Topic '${topicNameInput.value}' saved`);
+      const topic = await res.json();
+      logMonitor(`💾 Topic '${topic.topicName}' saved`);
       loadUpcomingPosts();
     } catch(e) {
       logMonitor(`❌ Failed to save topic: ${e.message}`, 'error');
     }
   });
 
+  // ----- Generate Now -----
   generatePostNowBtn.addEventListener('click', async () => {
     try {
       const topicName = topicNameInput.value;
-      await fetch(`/api/aiScheduler/generate/${pageId}`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({topicName})});
+      // First find topicId by name
+      const resTopics = await fetch(`/api/ai/page/${pageId}/topics`);
+      const topics = await resTopics.json();
+      const topic = topics.find(t=>t.topicName===topicName);
+      if(!topic) return logMonitor(`❌ Topic '${topicName}' not found`, 'error');
+
+      await fetch(`/api/ai/topic/${topic._id}/generate-now`, {method:'POST'});
       logMonitor(`🚀 Generated and posted now for topic '${topicName}'`);
       loadUpcomingPosts();
       loadLogs();
@@ -139,10 +146,16 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   });
 
+  // ----- Delete All Posts for Topic -----
   deleteAllTopicPostsBtn.addEventListener('click', async () => {
     try {
       const topicName = topicNameInput.value;
-      await fetch(`/api/aiScheduler/page/${pageId}/ai-topic/${topicName}/posts`, {method:'DELETE'});
+      const resTopics = await fetch(`/api/ai/page/${pageId}/topics`);
+      const topics = await resTopics.json();
+      const topic = topics.find(t=>t.topicName===topicName);
+      if(!topic) return logMonitor(`❌ Topic '${topicName}' not found`, 'error');
+
+      await fetch(`/api/ai/topic/${topic._id}/posts`, {method:'DELETE'});
       logMonitor(`🗑 All posts for topic '${topicName}' deleted`);
       loadUpcomingPosts();
       loadLogs();
@@ -151,9 +164,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   });
 
+  // ----- Clear Logs -----
   clearLogsBtn.addEventListener('click', async () => {
     try {
-      await fetch(`/api/aiScheduler/page/${pageId}/logs`, {method:'DELETE'});
+      await fetch(`/api/ai/page/${pageId}/logs`, {method:'DELETE'});
       logMonitor('🧹 Logs cleared');
       loadLogs();
     } catch(e) {
@@ -161,15 +175,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   });
 
-  // ----- Global Functions for Table Buttons -----
+  // ----- Table Actions -----
   window.editAiPost = (id) => {
-    alert('Edit flow for post ' + id);
-    logMonitor(`✏️ Edit button clicked for post ${id}`);
+    alert('✏️ Edit flow for post ' + id);
+    logMonitor(`✏️ Edit clicked for post ${id}`);
   };
 
   window.deleteAiPost = async (id) => {
     try {
-      await fetch(`/api/aiScheduler/ai-post/${id}`, {method:'DELETE'});
+      await fetch(`/api/ai/post/${id}/retry`, {method:'DELETE'});
       logMonitor(`🗑 Deleted AI post ${id}`);
       loadUpcomingPosts();
       loadLogs();
@@ -180,7 +194,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   window.postNowAi = async (id) => {
     try {
-      await fetch(`/api/aiScheduler/ai-post/${id}/post-now`, {method:'POST'});
+      await fetch(`/api/ai/post/${id}/retry`, {method:'POST'});
       logMonitor(`🚀 Posted AI post ${id} immediately`);
       loadUpcomingPosts();
       loadLogs();
@@ -189,19 +203,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   };
 
-  window.deleteLog = async (id) => {
-    try {
-      await fetch(`/api/aiScheduler/log/${id}`, {method:'DELETE'});
-      logMonitor(`🧹 Deleted log ${id}`);
-      loadLogs();
-    } catch(e) {
-      logMonitor(`❌ Failed to delete log ${id}: ${e.message}`, 'error');
-    }
-  };
-
   window.retryAiPost = async (id) => {
     try {
-      await fetch(`/api/aiScheduler/ai-post/${id}/post-now`, {method:'POST'});
+      await fetch(`/api/ai/post/${id}/retry`, {method:'POST'});
       logMonitor(`⚡ Retrying AI post ${id}`);
       loadUpcomingPosts();
       loadLogs();
@@ -212,7 +216,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   window.markContent = async (id,type) => {
     try {
-      await fetch(`/api/aiScheduler/ai-post/${id}/mark`, {
+      await fetch(`/api/ai/ai-post/${id}/mark`, {
         method:'POST',
         headers:{'Content-Type':'application/json'},
         body: JSON.stringify({type})
@@ -224,8 +228,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   };
 
-  // ----- Initial load -----
+  // ----- Live Polling for Monitor -----
+  setInterval(loadLogs, 5000); // refresh logs every 5s
+
+  // ----- Initial Load -----
   loadUpcomingPosts();
   loadLogs();
   logMonitor('✅ AI Scheduler interface loaded');
 });
+
+  
+
+
