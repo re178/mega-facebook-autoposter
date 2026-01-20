@@ -7,12 +7,12 @@ const session = require('express-session');
 const Page = require('./models/Page');
 
 // -------------------- CREATE APP --------------------
-const app = express(); // MUST be before app.use
+const app = express(); 
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 // -------------------- WEBHOOK ROUTES --------------------
-const webhookRoutes = require('./routes/webhookRoutes'); // require first
+const webhookRoutes = require('./routes/webhookRoutes'); 
 app.use('/', webhookRoutes); 
 
 // -------------------- SESSION SETUP --------------------
@@ -92,6 +92,9 @@ app.get('/schedule', requireLogin, (req, res) =>
 
 // -------------------- SERVICES --------------------
 const { startScheduler } = require('./services/scheduler');
+const { startAiScheduler } = require('./services/aiSchedulerService'); 
+
+
 
 // -------------------- ENV PAGES SYNC --------------------
 async function syncPagesFromEnv() {
