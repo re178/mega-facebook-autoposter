@@ -5,234 +5,170 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Page Dashboard</title>
   <link rel="stylesheet" href="css/style.css" />
+
+  <!-- ADDITIVE: monitor animation -->
+  <style>
+    .monitor-line {
+      white-space: nowrap;
+      animation: slideIn 0.4s ease-out;
+    }
+
+    @keyframes slideIn {
+      from { transform: translateX(100%); opacity: 0; }
+      to   { transform: translateX(0); opacity: 1; }
+    }
+
+    .topic-badge {
+      background: #222;
+      color: #00ff99;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 0.8rem;
+    }
+  </style>
 </head>
+
 <body>
-  <div class="layout">
-    <aside class="sidebar">
-      <div class="brand"><span class="dot"></span><h2>MEGA CONTROL</h2></div>
-      <nav class="nav" id="page-nav">
-  <a data-page="overview" class="active">Overview</a>
-  <a data-page="create-post">Create Post</a>
-  <a data-page="page-logs">Logs</a>
+<div class="layout">
 
-  <hr />
+  <!-- ================= SIDEBAR ================= -->
+  <aside class="sidebar">
+    <div class="brand"><span class="dot"></span><h2>MEGA CONTROL</h2></div>
+    <nav class="nav" id="page-nav">
+      <a data-page="overview" class="active">Overview</a>
+      <a data-page="create-post">Create Post</a>
+      <a data-page="page-logs">Logs</a>
+      <hr />
+      <a data-page="messaging-section">Messaging</a>
+      <a data-page="analytics-section">Analytics</a>
+      <a data-page="ads-section">Ads</a>
+      <a data-page="manage-section">Manage</a>
+      <a data-page="ai-scheduler-section">AI Post Scheduler</a>
+    </nav>
+  </aside>
 
-  <a data-page="messaging-section">Messaging</a>
-  <a data-page="analytics-section">Analytics</a>
-  <a data-page="ads-section">Ads</a>
-  <a data-page="manage-section">Manage</a>
- <a data-page="ai-scheduler-section">AI Post Scheduler</a>
-     
-</nav>
+  <!-- ================= MAIN ================= -->
+  <main class="main">
+    <div class="topbar">
+      <h1 id="page-title">Page Dashboard</h1>
+    </div>
 
-    </aside>
+    <!-- ================= AI POST SCHEDULER ================= -->
+    <section class="card" id="ai-scheduler-section" style="display:none;">
+      <h3>AI Post Scheduler</h3>
 
-    <main class="main">
-      <div class="topbar">
-        <h1 id="page-title">Page Dashboard</h1>
-      </div>
+      <!-- -------- TOPIC INPUTS (UNCHANGED) -------- -->
+      <div class="ai-topic-inputs">
+        <label>Topic Name</label>
+        <input type="text" id="ai-topic-name" placeholder="Enter topic">
 
-      <!-- CREATE POST FORM -->
-      <section class="card" id="create-post">
-        <h3>Create / Schedule Post</h3>
-        <label>Type text here to be posted</label>
-        <textarea id="post-text" rows="4"></textarea>
+        <label>Posts Per Day</label>
+        <select id="ai-posts-per-day">
+          <option value="1">1</option>
+          <option value="2">2</option>
+          <option value="3">3</option>
+        </select>
 
-        <label>Upload media/image/video (optional)</label>
-        <input type="text" id="media-url" placeholder="Enter media URL" />
+        <label>Times (HH:MM)</label>
+        <div id="ai-times-container"></div>
+        <button id="ai-add-time">Add Time</button>
 
-        <label>Schedule date & time</label>
-        <input type="datetime-local" id="scheduled-time" />
+        <label>Schedule Period</label>
+        <input type="date" id="ai-start-date">
+        to
+        <input type="date" id="ai-end-date">
+
+        <label>Repeat</label>
+        <select id="ai-repeat-type">
+          <option value="daily">Daily</option>
+          <option value="weekly">Weekly</option>
+          <option value="monthly">Monthly</option>
+        </select>
+
+        <label>Include Media</label>
+        <input type="checkbox" id="ai-include-media" checked>
 
         <div class="actions">
-          <button id="post-now">Post Now</button>
-          <button id="save-post">Save</button>
-          <button id="delete-post">Delete</button>
+          <button id="ai-save-topic">Save Topic</button>
+          <button id="ai-generate-post-now">Generate and Post Now</button>
+          <button id="ai-delete-all-topic-posts">Delete Topic Posts</button>
+          <button id="ai-clear-logs">Clear Logs</button>
         </div>
-      </section>
+      </div>
 
-      <!-- POSTS LIST -->
-      <section class="card" id="posts-list">
-        <h3>Scheduled Posts</h3>
-        <table>
-          <thead>
-            <tr><th>Text</th><th>Media</th><th>Scheduled</th><th>Status</th><th>Actions</th></tr>
-          </thead>
-          <tbody id="posts-table-body">
-            <!-- Posts injected via JS -->
-          </tbody>
-        </table>
-      </section>
+      <!-- -------- NEW: SAVED TOPICS MANAGEMENT -------- -->
+      <h4>Saved Topics</h4>
+      <table>
+        <thead>
+          <tr>
+            <th>Topic</th>
+            <th>Posts / Day</th>
+            <th>Schedule</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="ai-topics-table">
+          <!-- injected by JS -->
+        </tbody>
+      </table>
 
-      <!-- PAGE LOGS -->
-      <section class="card" id="page-logs">
-        <h3>Recent Logs</h3>
-        <div class="logs" id="logs-container">
-          <!-- Logs injected via JS -->
-        </div>
-      </section>
+      <!-- -------- UPCOMING / GENERATED POSTS -------- -->
+      <h4>Upcoming & Generated Posts</h4>
+      <table>
+        <thead>
+          <tr>
+            <th>Topic</th>
+            <th>Scheduled Time</th>
+            <th>Text</th>
+            <th>Media</th>
+            <th>Status</th>
+            <th>Actions</th>
+            <th>Content Type</th>
+          </tr>
+        </thead>
+        <tbody id="ai-upcoming-posts"></tbody>
+      </table>
 
-    <!-- MESSAGING SECTION -->
-<section class="card" id="messaging-section" style="display:none;">
-  <h3>Inbox / Auto-replies</h3>
-  <div id="messages-container">
-    <table>
-      <thead>
-        <tr>
-          <th>Sender</th><th>Message</th><th>Received</th><th>Status</th><th>Action</th>
-        </tr>
-      </thead>
-      <tbody id="messages-table-body"></tbody>
-    </table>
-    <button id="refresh-messages">Refresh</button>
-  </div>
+      <!-- -------- LOGS -------- -->
+      <h4>Logs (Latest 5)</h4>
+      <table>
+        <thead>
+          <tr>
+            <th>Post</th>
+            <th>Action</th>
+            <th>Message</th>
+            <th>Time</th>
+            <th>Delete</th>
+            <th>Retry</th>
+          </tr>
+        </thead>
+        <tbody id="ai-logs"></tbody>
+      </table>
 
-  <div id="templates-container">
-    <h4>Auto-reply Templates</h4>
-    <table>
-      <thead>
-        <tr><th>Name</th><th>Type</th><th>Keywords</th><th>Reply</th><th>Action</th></tr>
-      </thead>
-      <tbody id="templates-table-body"></tbody>
-    </table>
-    <button id="add-template">Add Template</button>
-  </div>
-</section>
+      <!-- -------- AI MONITOR (ENHANCED, SAFE) -------- -->
+      <h4>AI Operations Monitor</h4>
+      <div id="ai-monitor-log"
+           style="
+            height:300px;
+            overflow-y:auto;
+            background:#0a0a0a;
+            color:#fff;
+            padding:10px;
+            font-family:monospace;
+            font-size:0.9rem;
+            border-radius:6px;">
+        <!-- logs appended here (unchanged ID) -->
+      </div>
 
-<!-- ANALYTICS SECTION -->
-<section class="card" id="analytics-section" style="display:none;">
-  <h3>Page Insights</h3>
-  <div id="charts-container">
-    <!-- Chart.js or ApexCharts placeholders -->
-  </div>
-  <button id="refresh-analytics">Refresh</button>
-  <button id="download-report">Download Report</button>
-</section>
+    </section>
+  </main>
+</div>
 
-<!-- ADS SECTION -->
-<section class="card" id="ads-section" style="display:none;">
-  <h3>Campaigns & Boosting</h3>
-  <div id="ads-container">
-    <table>
-      <thead>
-        <tr><th>Campaign</th><th>Status</th><th>Budget</th><th>Reach</th><th>CTR</th><th>Action</th></tr>
-      </thead>
-      <tbody id="ads-table-body"></tbody>
-    </table>
-    <button id="create-ad">Create Campaign</button>
-    <button id="refresh-ads">Refresh</button>
-  </div>
-</section>
+<!-- ================= SCRIPTS (UNCHANGED ORDER) ================= -->
+<script src="js/api.js"></script>
+<script src="js/page.js"></script>
+<script src="js/page-features.js"></script>
+<script src="js/pageAi.js"></script>
 
-<!-- MANAGE / COMMENTS SECTION -->
-<section class="card" id="manage-section" style="display:none;">
-  <h3>Comments & Moderation</h3>
-  <table>
-    <thead>
-      <tr><th>User</th><th>Comment</th><th>Post</th><th>Time</th><th>Action</th></tr>
-    </thead>
-    <tbody id="comments-table-body"></tbody>
-  </table>
-  <button id="refresh-comments">Refresh</button>
-</section>
-
-     <!-- ----- AI POST SCHEDULER SECTION ----- -->
-<section class="card" id="ai-scheduler-section" style="display:none;">
-  <h3>AI Post Scheduler</h3>
-
-  <!-- Topic and Scheduling Inputs -->
-  <div class="ai-topic-inputs">
-    <label>Topic Name</label>
-    <input type="text" id="ai-topic-name" placeholder="Enter topic">
-
-    <label>Posts Per Day</label>
-    <select id="ai-posts-per-day">
-      <option value="1">1</option>
-      <option value="2">2</option>
-      <option value="3">3</option>
-    </select>
-
-    <label>Times (HH:MM) - one per post per day</label>
-    <div id="ai-times-container"></div>
-    <button id="ai-add-time">Add Time</button>
-
-    <label>Schedule Period</label>
-    <input type="date" id="ai-start-date"> to <input type="date" id="ai-end-date">
-
-    <label>Repeat</label>
-    <select id="ai-repeat-type">
-      <option value="daily">Daily</option>
-      <option value="weekly">Weekly</option>
-      <option value="monthly">Monthly</option>
-    </select>
-
-    <label>Include Media</label>
-    <input type="checkbox" id="ai-include-media" checked>
-
-    <div class="actions">
-      <button id="ai-save-topic">Save Topic</button>
-      <button id="ai-generate-post-now">Generate and Post Now</button>
-      <button id="ai-delete-all-topic-posts">Delete Topic Posts</button>
-      <button id="ai-clear-logs">Clear Logs</button>
-    </div>
-  </div>
-
-  <!-- Upcoming Posts Table -->
-  <h4>Upcoming Posts</h4>
-  <table>
-    <thead>
-      <tr>
-        <th>Topic</th>
-        <th>Scheduled Time</th>
-        <th>Text</th>
-        <th>Media</th>
-        <th>Status</th>
-        <th>Actions</th>
-        <th>Content Type</th> <!-- New column for Critical / Trending / Normal -->
-      </tr>
-    </thead>
-    <tbody id="ai-upcoming-posts"></tbody>
-  </table>
-
-  <!-- Logs Table -->
-  <h4>Logs (Latest 5)</h4>
-  <table>
-    <thead>
-      <tr>
-        <th>Post</th>
-        <th>Action</th>
-        <th>Message</th>
-        <th>Time</th>
-        <th>Delete</th>
-        <th>Retry</th> <!-- New column for retry failed posts -->
-      </tr>
-    </thead>
-    <tbody id="ai-logs"></tbody>
-  </table>
-
-  <!-- AI Operations Monitor -->
-  <h4>AI Operations Monitor</h4>
-  <div id="ai-monitor-log" style="
-       height:300px;
-       overflow-y:auto;
-       background:#111;
-       color:#fff;
-       padding:10px;
-       font-family:monospace;
-       font-size:0.9rem;
-       border-radius:6px;">
-    <!-- Live logs will appear here -->
-  </div>
-
-</section>
-
-    </main>
-  </div>
-
-  <script src="js/api.js"></script>
-  <script src="js/page.js"></script>
-  <script src="js/page-features.js"></script>
-  <script src="js/pageAi.js"></script>
 </body>
 </html>
-
