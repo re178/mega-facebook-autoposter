@@ -1,7 +1,7 @@
 document.addEventListener('DOMContentLoaded', async () => {
   const urlParams = new URLSearchParams(window.location.search);
   const pageId = urlParams.get('pageId');
-  if (!pageId) return alert('❌ Page ID missing from URL!');
+  if (!pageId) return alert('❌ Page ID missing!');
 
   // Elements
   const topicNameInput = document.getElementById('ai-topic-name');
@@ -33,6 +33,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     console.log(`[${now}] ${type.toUpperCase()}: ${message}`);
   }
 
+  // Add time input
   function addTimeInput(value='') {
     const input = document.createElement('input');
     input.type = 'time';
@@ -40,7 +41,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     timesContainer.appendChild(input);
   }
 
-  addTimeBtn.addEventListener('click', () => { addTimeInput(); logMonitor('🕒 Added a new post time input'); });
+  addTimeBtn.addEventListener('click', () => { addTimeInput(); logMonitor('🕒 Added new post time input'); });
 
   // Load upcoming posts
   async function loadUpcomingPosts() {
@@ -52,11 +53,12 @@ document.addEventListener('DOMContentLoaded', async () => {
       posts.forEach(p => {
         const tr = document.createElement('tr');
         const retryBtn = p.status==='FAILED'?`<button onclick="retryAiPost('${p._id}')">Retry</button>`:'';
+        const mediaLink = p.mediaUrl ? `<a href="${p.mediaUrl}" target="_blank">View</a>` : '';
         tr.innerHTML = `
           <td>${p.topicId?.topicName||''}</td>
           <td>${new Date(p.scheduledTime).toLocaleString()}</td>
           <td>${p.text||''}</td>
-          <td>${p.mediaUrl||''}</td>
+          <td>${mediaLink}</td>
           <td>${p.status}</td>
           <td>
             <button onclick="editAiPost('${p._id}')">Edit</button>
@@ -73,7 +75,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         upcomingPostsTable.appendChild(tr);
       });
       logMonitor('📋 Upcoming posts loaded');
-    } catch(e) { logMonitor(`❌ Failed to load upcoming posts: ${e.message}`, 'error'); }
+    } catch(e) { logMonitor(`❌ Failed to load upcoming posts: ${e.message}`,'error'); }
   }
 
   // Load logs
@@ -85,19 +87,20 @@ document.addEventListener('DOMContentLoaded', async () => {
       logsTable.innerHTML = '';
       logs.slice(0,5).forEach(l => {
         const tr = document.createElement('tr');
+        const retryBtn = l.action==='FAILED' && l.postId ? `<button onclick="retryAiPost('${l.postId._id}')">Retry</button>`:'';
         tr.innerHTML = `
           <td>${l.postId?.text||''}</td>
           <td>${l.action}</td>
           <td>${l.message}</td>
           <td>${new Date(l.createdAt).toLocaleString()}</td>
           <td><button onclick="deleteLog('${l._id}')">Delete</button></td>
-          <td>${l.action==='FAILED' && l.postId ? `<button onclick="retryAiPost('${l.postId._id}')">Retry</button>`:''}</td>
+          <td>${retryBtn}</td>
         `;
         logsTable.appendChild(tr);
       });
-      if (logs.length>=20) logMonitor('⚠️ Logs exceeding 20 entries. Consider clearing','warn');
+      if (logs.length>=20) logMonitor('⚠️ Logs exceeding 20 entries','warn');
       logMonitor('📝 Logs loaded');
-    } catch(e) { logMonitor(`❌ Failed to load logs: ${e.message}`, 'error'); }
+    } catch(e) { logMonitor(`❌ Failed to load logs: ${e.message}`,'error'); }
   }
 
   // Save topic
@@ -105,15 +108,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     try {
       const topicName = topicNameInput.value.trim();
       if (!topicName) return logMonitor('❌ Topic name cannot be empty','error');
-
-      const resTopics = await fetch(`/api/ai/page/${pageId}/topics`);
-      let topics = await resTopics.json();
-      if (!Array.isArray(topics)) topics = [];
-
-      if (topics.some(t => t.topicName.trim().toLowerCase()===topicName.toLowerCase())) {
-        return logMonitor(`⚠️ Topic "${topicName}" already exists`,'warn');
-      }
-
       const times = Array.from(timesContainer.querySelectorAll('input[type=time]')).map(i=>i.value);
       const data = {
         topicName,
@@ -124,8 +118,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         repeatType: repeatTypeSelect.value,
         includeMedia: includeMediaCheckbox.checked
       };
-
-      const res = await fetch(`/api/ai/page/${pageId}/topic`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data) });
+      const res = await fetch(`/api/ai/page/${pageId}/topic`, { 
+        method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data) 
+      });
       const topic = await res.json();
       logMonitor(`💾 Topic '${topic.topicName}' saved`);
       loadUpcomingPosts();
@@ -136,19 +131,30 @@ document.addEventListener('DOMContentLoaded', async () => {
   generatePostNowBtn.addEventListener('click', async () => {
     try {
       const topicName = topicNameInput.value.trim();
-      if (!topicName) return logMonitor('❌ Enter topic name to generate posts','error');
-
-      let resTopics = await fetch(`/api/ai/page/${pageId}/topics`);
+      if (!topicName) return logMonitor('❌ Enter topic name','error');
+      const resTopics = await fetch(`/api/ai/page/${pageId}/topics`);
       let topics = await resTopics.json();
-      if (!Array.isArray(topics)) topics = [];
       const topic = topics.find(t => t.topicName===topicName);
       if (!topic) return logMonitor(`❌ Topic "${topicName}" not found`,'error');
-
       await fetch(`/api/ai/topic/${topic._id}/generate-now`, { method:'POST' });
-      logMonitor(`🚀 Generated posts for topic '${topicName}'`);
-      loadUpcomingPosts();
-      loadLogs();
+      logMonitor(`🚀 Generated posts for '${topicName}'`);
+      loadUpcomingPosts(); loadLogs();
     } catch(e) { logMonitor(`❌ Failed to generate post: ${e.message}`,'error'); }
+  });
+
+  // Delete all topic posts
+  deleteAllTopicPostsBtn.addEventListener('click', async () => {
+    if(!confirm('Delete all scheduled posts for this topic?')) return;
+    try {
+      const topicName = topicNameInput.value.trim();
+      const resTopics = await fetch(`/api/ai/page/${pageId}/topics`);
+      let topics = await resTopics.json();
+      const topic = topics.find(t => t.topicName===topicName);
+      if (!topic) return logMonitor(`❌ Topic "${topicName}" not found`,'error');
+      await fetch(`/api/ai/topic/${topic._id}/posts`, { method:'DELETE' });
+      logMonitor(`🗑️ All posts for topic '${topicName}' deleted`);
+      loadUpcomingPosts(); loadLogs();
+    } catch(e) { logMonitor(`❌ Failed to delete posts: ${e.message}`,'error'); }
   });
 
   // Clear logs
@@ -157,11 +163,42 @@ document.addEventListener('DOMContentLoaded', async () => {
     catch(e) { logMonitor(`❌ Failed to clear logs: ${e.message}`,'error'); }
   });
 
-  // Live polling
-  setInterval(loadLogs,5000);
+  // --- POST BUTTON FUNCTIONS ---
+  window.postNowAi = async postId => {
+    await fetch(`/api/ai/post/${postId}/post-now`, { method:'POST' });
+    loadUpcomingPosts(); loadLogs();
+  };
+  window.deleteAiPost = async postId => {
+    if(!confirm('Delete this post?')) return;
+    await fetch(`/api/ai/post/${postId}`, { method:'DELETE' });
+    loadUpcomingPosts(); loadLogs();
+  };
+  window.editAiPost = async postId => {
+    const newText = prompt('Enter new post text:');
+    const newMedia = prompt('Enter new media URL:');
+    if(newText==null) return;
+    await fetch(`/api/ai/post/${postId}`, {
+      method:'PUT', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({ text:newText, mediaUrl:newMedia })
+    });
+    loadUpcomingPosts(); loadLogs();
+  };
+  window.markContent = async (postId, type) => {
+    await fetch(`/api/ai/post/${postId}/content-type`, {
+      method:'PATCH', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({ contentType:type })
+    });
+    loadUpcomingPosts(); loadLogs();
+  };
+  window.retryAiPost = async postId => {
+    await fetch(`/api/ai/post/${postId}/retry`, { method:'POST' });
+    loadUpcomingPosts(); loadLogs();
+  };
 
-  // Initial load
+  // --- Initial Load ---
+  addTimeInput(); // at least one time input by default
   loadUpcomingPosts();
   loadLogs();
+  setInterval(loadLogs,5000);
   logMonitor('✅ AI Scheduler interface loaded');
 });
