@@ -136,11 +136,11 @@
   <button id="refresh-comments">Refresh</button>
 </section>
 
-     <!-- ----- AI POST SCHEDULER SECTION ----- -->
+    <!-- ----- AI POST SCHEDULER SECTION ----- -->
 <section class="card" id="ai-scheduler-section" style="display:none;">
   <h3>AI Post Scheduler</h3>
 
-  <!-- Topic and Scheduling Inputs -->
+  <!-- Topic Inputs -->
   <div class="ai-topic-inputs">
     <label>Topic Name</label>
     <input type="text" id="ai-topic-name" placeholder="Enter topic">
@@ -154,7 +154,7 @@
 
     <label>Times (HH:MM) - one per post per day</label>
     <div id="ai-times-container"></div>
-    <button id="ai-add-time">Add Time</button>
+    <button type="button" id="ai-add-time">Add Time</button>
 
     <label>Schedule Period</label>
     <input type="date" id="ai-start-date"> to <input type="date" id="ai-end-date">
@@ -171,8 +171,8 @@
 
     <div class="actions">
       <button id="ai-save-topic">Save Topic</button>
-      <button id="ai-generate-post-now">Generate and Post Now</button>
-      <button id="ai-delete-all-topic-posts">Delete Topic Posts</button>
+      <button id="ai-generate-post-now">Generate & Post Now</button>
+      <button id="ai-delete-all-topic-posts">Delete All Topic Posts</button>
       <button id="ai-clear-logs">Clear Logs</button>
     </div>
   </div>
@@ -188,7 +188,7 @@
         <th>Media</th>
         <th>Status</th>
         <th>Actions</th>
-        <th>Content Type</th> <!-- New column for Critical / Trending / Normal -->
+        <th>Content Type</th>
       </tr>
     </thead>
     <tbody id="ai-upcoming-posts"></tbody>
@@ -204,7 +204,7 @@
         <th>Message</th>
         <th>Time</th>
         <th>Delete</th>
-        <th>Retry</th> <!-- New column for retry failed posts -->
+        <th>Retry</th>
       </tr>
     </thead>
     <tbody id="ai-logs"></tbody>
@@ -221,10 +221,10 @@
        font-family:monospace;
        font-size:0.9rem;
        border-radius:6px;">
-    <!-- Live logs will appear here -->
+    <!-- Live logs appear here -->
   </div>
-
 </section>
+
 
     </main>
   </div>
