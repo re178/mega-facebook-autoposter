@@ -36,8 +36,18 @@ router.post('/page/:pageId/topic', async (req, res) => {
       return res.status(400).json({ error: 'Topic name is required' });
     }
 
+  // Create AI topic
+router.post('/page/:pageId/topic', async (req, res) => {
+  try {
+    const { topicName, postsPerDay, times, startDate, endDate, repeatType, includeMedia } = req.body;
+
+    // Validate topicName
+    if (!topicName || !topicName.trim()) {
+      return res.status(400).json({ error: 'Topic name is required' });
+    }
+
     // Create the topic
-    const topic = await AiTopic.create({
+    const topic = new AiTopic({
       pageId: req.params.pageId,
       topicName: topicName.trim(),
       postsPerDay,
@@ -48,16 +58,19 @@ router.post('/page/:pageId/topic', async (req, res) => {
       includeMedia
     });
 
-    // Create a log with the proper topicId
+    // Save the topic
+    await topic.save();
+
+    // Create a log
     await createAiLog(
       req.params.pageId,
-      topic._id, // ✅ Pass actual topicId
+      topic._id,
       'TOPIC_CREATED',
       `AI topic "${topic.topicName}" was created`
     );
 
-    // Return topic info to frontend
-    res.json({
+    // ✅ RETURN FULL OBJECT INCLUDING _id
+    res.status(201).json({
       _id: topic._id,
       topicName: topic.topicName,
       postsPerDay: topic.postsPerDay,
@@ -73,6 +86,7 @@ router.post('/page/:pageId/topic', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
 
 
 // Update AI topic
