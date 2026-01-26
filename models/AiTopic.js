@@ -1,7 +1,7 @@
 const mongoose = require('mongoose');
 
 const AiTopicSchema = new mongoose.Schema({
-  pageId: { type: mongoose.Schema.Types.ObjectId, ref: 'Page', required: true },
+  pageId: { type: String, required: true },
   topicName: { type: String, required: true },
   postsPerDay: Number,
   times: [String], // ["11:00", "14:21", "19:47"]
