@@ -110,50 +110,61 @@ document.addEventListener('DOMContentLoaded', () => {
 
   /* ===================== SAVE TOPIC ===================== */
   saveTopicBtn.addEventListener('click', async () => {
-    try {
-      const topicName = topicNameInput.value.trim();
-      if (!topicName) {
-        logMonitor('❌ Topic name required', 'error');
-        return;
-      }
-
-      const times = [...timesContainer.querySelectorAll('input[type=time]')]
-        .map(i => i.value)
-        .filter(Boolean);
-
-      const payload = {
-        topicName,
-        postsPerDay: Number(postsPerDaySelect.value),
-        times,
-        startDate: startDateInput.value,
-        endDate: endDateInput.value,
-        repeatType: repeatTypeSelect.value,
-        includeMedia: includeMediaCheckbox.checked
-      };
-
-      const res = await fetch(`/api/ai/page/${pageId}/topic`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-
-      const topic = await res.json();
-
-      if (!topic || !topic._id) {
-        logMonitor('❌ Topic saved but ID missing', 'error');
-        console.error(topic);
-        return;
-      }
-
-      currentTopicId = topic._id;
-      logMonitor(`💾 Topic "${topic.topicName}" saved (ID: ${topic._id})`);
-
-      loadUpcomingPosts();
-      loadLogs();
-    } catch (err) {
-      logMonitor(`❌ Save failed: ${err.message}`, 'error');
+  try {
+    const topicName = topicNameInput.value.trim();
+    if (!topicName) {
+      logMonitor('❌ Topic name cannot be empty', 'error');
+      return;
     }
-  });
+
+    const times = Array.from(timesContainer.querySelectorAll('input[type=time]'))
+                        .map(i => i.value);
+
+    const data = {
+      topicName,
+      postsPerDay: Number(postsPerDaySelect.value),
+      times,
+      startDate: startDateInput.value,
+      endDate: endDateInput.value,
+      repeatType: repeatTypeSelect.value,
+      includeMedia: includeMediaCheckbox.checked
+    };
+
+    const res = await fetch(`/api/ai/page/${pageId}/topic`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+
+    if (!res.ok) {
+      const errData = await res.json();
+      logMonitor(`❌ Failed to save topic: ${errData.error}`, 'error');
+      return;
+    }
+
+    const topic = await res.json();
+
+    // ⚡ INNOVATIVE FIX: Check if _id exists before storing
+    if (!topic || !topic._id) {
+      logMonitor('❌ Topic saved but ID missing from response', 'error');
+      console.error('Bad response from backend:', topic);
+      return;
+    }
+
+    // Store topic ID safely
+    topicNameInput.dataset.topicId = topic._id;
+
+    logMonitor(`💾 Topic "${topic.topicName}" saved (ID: ${topic._id})`);
+
+    // Reload tables
+    loadUpcomingPosts();
+    loadLogs();
+
+  } catch (err) {
+    logMonitor(`❌ Failed to save topic: ${err.message}`, 'error');
+  }
+});
+
 
   /* ===================== GENERATE POSTS NOW ===================== */
   generatePostNowBtn.addEventListener('click', async () => {
