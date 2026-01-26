@@ -136,11 +136,11 @@
   <button id="refresh-comments">Refresh</button>
 </section>
 
-    <!-- ----- AI POST SCHEDULER SECTION ----- -->
+<!-- ----- AI POST SCHEDULER SECTION ----- -->
 <section class="card" id="ai-scheduler-section" style="display:none;">
   <h3>AI Post Scheduler</h3>
 
-  <!-- Topic Inputs -->
+  <!-- Topic and Scheduling Inputs -->
   <div class="ai-topic-inputs">
     <label>Topic Name</label>
     <input type="text" id="ai-topic-name" placeholder="Enter topic">
@@ -170,10 +170,10 @@
     <input type="checkbox" id="ai-include-media" checked>
 
     <div class="actions">
-      <button id="ai-save-topic">Save Topic</button>
-      <button id="ai-generate-post-now">Generate & Post Now</button>
-      <button id="ai-delete-all-topic-posts">Delete All Topic Posts</button>
-      <button id="ai-clear-logs">Clear Logs</button>
+      <button type="button" id="ai-save-topic">Save Topic</button>
+      <button type="button" id="ai-generate-post-now">Generate & Post Now</button>
+      <button type="button" id="ai-delete-all-topic-posts">Delete Topic Posts</button>
+      <button type="button" id="ai-clear-logs">Clear Logs</button>
     </div>
   </div>
 
@@ -221,7 +221,7 @@
        font-family:monospace;
        font-size:0.9rem;
        border-radius:6px;">
-    <!-- Live logs appear here -->
+    <!-- Live logs will appear here -->
   </div>
 </section>
 
