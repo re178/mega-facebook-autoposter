@@ -185,5 +185,50 @@ router.delete('/page/:pageId/logs', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+// 1️⃣ Post Now
+router.post('/post/:postId/post-now', async (req,res)=>{
+  try{
+    const post = await AiScheduledPost.findById(req.params.postId);
+    if(!post) return res.status(404).json({error:'Post not found'});
+    post.status='POSTED'; post.postedAt=new Date(); await post.save();
+    await createAiLog(post.pageId,post._id,'POSTED_NOW','Post manually published from dashboard');
+    res.json({success:true});
+  }catch(err){ res.status(500).json({error:err.message}); }
+});
+
+// 2️⃣ Delete individual post
+router.delete('/post/:postId', async (req,res)=>{
+  try{
+    const post = await AiScheduledPost.findById(req.params.postId);
+    if(!post) return res.status(404).json({error:'Post not found'});
+    await AiScheduledPost.findByIdAndDelete(req.params.postId);
+    await createAiLog(post.pageId,post._id,'POST_DELETED','Individual post deleted from dashboard');
+    res.json({success:true});
+  }catch(err){ res.status(500).json({error:err.message}); }
+});
+
+// 3️⃣ Edit post
+router.put('/post/:postId', async (req,res)=>{
+  try{
+    const post = await AiScheduledPost.findByIdAndUpdate(req.params.postId,{
+      text:req.body.text, mediaUrl:req.body.mediaUrl
+    },{new:true});
+    if(!post) return res.status(404).json({error:'Post not found'});
+    await createAiLog(post.pageId,post._id,'POST_EDITED','Post text/media updated from dashboard');
+    res.json(post);
+  }catch(err){ res.status(500).json({error:err.message}); }
+});
+
+// 4️⃣ Mark content type
+router.patch('/post/:postId/content-type', async (req,res)=>{
+  try{
+    const {contentType} = req.body;
+    const post = await AiScheduledPost.findById(req.params.postId);
+    if(!post) return res.status(404).json({error:'Post not found'});
+    post.contentType = contentType; await post.save();
+    await createAiLog(post.pageId,post._id,'CONTENT_TYPE_UPDATED',`Content type set to "${contentType}"`);
+    res.json({success:true});
+  }catch(err){ res.status(500).json({error:err.message}); }
+});
 
 module.exports = router;
