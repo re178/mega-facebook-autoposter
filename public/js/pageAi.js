@@ -153,18 +153,6 @@ document.addEventListener('DOMContentLoaded', async () => {
 });
 
 
-      const res = await fetch(`/api/ai/page/${pageId}/topic`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data) });
-      const topic = await res.json();
-
-      logMonitor(`💾 Topic '${topic.topicName}' saved (ID: ${topic._id})`);
-
-      // Store _id in input dataset for later
-      topicNameInput.dataset.topicId = topic._id;
-
-      loadUpcomingPosts();
-    } catch(e) { logMonitor(`❌ Failed to save topic: ${e.message}`,'error'); }
-  });
-
   // --- Generate Post Now using ID ---
   generatePostNowBtn.addEventListener('click', async () => {
     try {
