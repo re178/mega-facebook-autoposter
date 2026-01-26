@@ -223,6 +223,8 @@ async function deleteTopicPosts(topicId) {
 ========================================================= */
 module.exports = {
   generatePostsForTopic,
-  deleteTopicPosts
+  deleteTopicPosts,
+  createAiLog: monitor 
 };
+
 
