@@ -26,17 +26,7 @@ router.get('/page/:pageId/topics', async (req, res) => {
   }
 });
 
-// Create AI topic
-router.post('/page/:pageId/topic', async (req, res) => {
-  try {
-    const { topicName, postsPerDay, times, startDate, endDate, repeatType, includeMedia } = req.body;
-
-    // Validate topicName
-    if (!topicName || !topicName.trim()) {
-      return res.status(400).json({ error: 'Topic name is required' });
-    }
-
-  // Create AI topic
+// Create AI topic (your new working version)
 router.post('/page/:pageId/topic', async (req, res) => {
   try {
     const { topicName, postsPerDay, times, startDate, endDate, repeatType, includeMedia } = req.body;
@@ -69,7 +59,7 @@ router.post('/page/:pageId/topic', async (req, res) => {
       `AI topic "${topic.topicName}" was created`
     );
 
-    // ✅ RETURN FULL OBJECT INCLUDING _id
+    // ✅ Return full topic including _id
     res.status(201).json({
       _id: topic._id,
       topicName: topic.topicName,
@@ -86,8 +76,6 @@ router.post('/page/:pageId/topic', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-
-
 
 // Update AI topic
 router.put('/topic/:topicId', async (req, res) => {
@@ -151,7 +139,7 @@ router.post('/topic/:topicId/generate-now', async (req, res) => {
   }
 });
 
-// Delete all scheduled posts for topic
+// Delete all scheduled posts for a topic
 router.delete('/topic/:topicId/posts', async (req, res) => {
   try {
     await deleteTopicPosts(req.params.topicId);
@@ -203,7 +191,7 @@ router.post('/post/:postId/retry', async (req, res) => {
 
 // -------------------- AI LOGS --------------------
 
-// Get latest AI activity logs (monitor feed)
+// Get latest AI activity logs
 router.get('/page/:pageId/logs', async (req, res) => {
   try {
     let logs = await AiLog.find({ pageId: req.params.pageId })
@@ -227,50 +215,73 @@ router.delete('/page/:pageId/logs', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-// 1️⃣ Post Now
-router.post('/post/:postId/post-now', async (req,res)=>{
-  try{
+
+// -------------------- INDIVIDUAL POSTS --------------------
+
+// Post Now
+router.post('/post/:postId/post-now', async (req, res) => {
+  try {
     const post = await AiScheduledPost.findById(req.params.postId);
-    if(!post) return res.status(404).json({error:'Post not found'});
-    post.status='POSTED'; post.postedAt=new Date(); await post.save();
-    await createAiLog(post.pageId,post._id,'POSTED_NOW','Post manually published from dashboard');
-    res.json({success:true});
-  }catch(err){ res.status(500).json({error:err.message}); }
+    if (!post) return res.status(404).json({ error: 'Post not found' });
+
+    post.status = 'POSTED';
+    post.postedAt = new Date();
+    await post.save();
+
+    await createAiLog(post.pageId, post._id, 'POSTED_NOW', 'Post manually published from dashboard');
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-// 2️⃣ Delete individual post
-router.delete('/post/:postId', async (req,res)=>{
-  try{
+// Delete individual post
+router.delete('/post/:postId', async (req, res) => {
+  try {
     const post = await AiScheduledPost.findById(req.params.postId);
-    if(!post) return res.status(404).json({error:'Post not found'});
+    if (!post) return res.status(404).json({ error: 'Post not found' });
+
     await AiScheduledPost.findByIdAndDelete(req.params.postId);
-    await createAiLog(post.pageId,post._id,'POST_DELETED','Individual post deleted from dashboard');
-    res.json({success:true});
-  }catch(err){ res.status(500).json({error:err.message}); }
+    await createAiLog(post.pageId, post._id, 'POST_DELETED', 'Individual post deleted from dashboard');
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-// 3️⃣ Edit post
-router.put('/post/:postId', async (req,res)=>{
-  try{
-    const post = await AiScheduledPost.findByIdAndUpdate(req.params.postId,{
-      text:req.body.text, mediaUrl:req.body.mediaUrl
-    },{new:true});
-    if(!post) return res.status(404).json({error:'Post not found'});
-    await createAiLog(post.pageId,post._id,'POST_EDITED','Post text/media updated from dashboard');
+// Edit post
+router.put('/post/:postId', async (req, res) => {
+  try {
+    const post = await AiScheduledPost.findByIdAndUpdate(
+      req.params.postId,
+      { text: req.body.text, mediaUrl: req.body.mediaUrl },
+      { new: true }
+    );
+
+    if (!post) return res.status(404).json({ error: 'Post not found' });
+
+    await createAiLog(post.pageId, post._id, 'POST_EDITED', 'Post text/media updated from dashboard');
     res.json(post);
-  }catch(err){ res.status(500).json({error:err.message}); }
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-// 4️⃣ Mark content type
-router.patch('/post/:postId/content-type', async (req,res)=>{
-  try{
-    const {contentType} = req.body;
+// Mark content type
+router.patch('/post/:postId/content-type', async (req, res) => {
+  try {
+    const { contentType } = req.body;
     const post = await AiScheduledPost.findById(req.params.postId);
-    if(!post) return res.status(404).json({error:'Post not found'});
-    post.contentType = contentType; await post.save();
-    await createAiLog(post.pageId,post._id,'CONTENT_TYPE_UPDATED',`Content type set to "${contentType}"`);
-    res.json({success:true});
-  }catch(err){ res.status(500).json({error:err.message}); }
+    if (!post) return res.status(404).json({ error: 'Post not found' });
+
+    post.contentType = contentType;
+    await post.save();
+
+    await createAiLog(post.pageId, post._id, 'CONTENT_TYPE_UPDATED', `Content type set to "${contentType}"`);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 module.exports = router;
