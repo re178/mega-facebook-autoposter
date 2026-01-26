@@ -140,6 +140,18 @@
 <section class="card" id="ai-scheduler-section" style="display:none;">
   <h3>AI Post Scheduler</h3>
 
+  <!-- Topic Selection -->
+  <div class="ai-topic-selection">
+    <label>Select Existing Topic</label>
+    <select id="ai-topic-select">
+      <option value="">-- Select a topic --</option>
+    </select>
+    <div class="topic-actions">
+      <button type="button" id="ai-edit-topic">Edit Topic</button>
+      <button type="button" id="ai-delete-topic">Delete Topic</button>
+    </div>
+  </div>
+
   <!-- Topic and Scheduling Inputs -->
   <div class="ai-topic-inputs">
     <label>Topic Name</label>
@@ -224,7 +236,6 @@
     <!-- Live logs will appear here -->
   </div>
 </section>
-
 
     </main>
   </div>
