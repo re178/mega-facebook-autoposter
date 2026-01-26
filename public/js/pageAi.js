@@ -58,7 +58,8 @@ document.addEventListener('DOMContentLoaded', () => {
   async function loadTopics() {
     try {
       const res = await fetch(`/api/ai/page/${pageId}/topics`);
-      const topics = Array.isArray(await res.json()) ? await res.json() : [];
+      const data = await res.json();
+      const topics = Array.isArray(data) ? data : [];
       topicSelect.innerHTML = '<option value="">-- Select a topic --</option>';
       topics.forEach(t => {
         const opt = document.createElement('option');
@@ -142,17 +143,47 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  /* ===================== GENERATE POSTS NOW ===================== */
+  /* ===================== GENERATE POSTS NOW WITH PROGRESS ===================== */
   generatePostNowBtn.addEventListener('click', async () => {
     if (!currentTopicId) {
       logMonitor('❌ Save topic first', 'error');
       return;
     }
+
     try {
+      logMonitor(`⏳ Starting post generation for topic ${currentTopicId}...`);
+
       await fetch(`/api/ai/topic/${currentTopicId}/generate-now`, { method: 'POST' });
-      logMonitor(`🚀 Posts generated for topic ${currentTopicId}`);
-      loadUpcomingPosts();
-      loadLogs();
+
+      // Polling function to monitor post generation
+      const pollPosts = async (retries = 30, interval = 2000) => {
+        if (retries <= 0) {
+          logMonitor('❌ Post generation timed out', 'error');
+          return;
+        }
+
+        try {
+          const res = await fetch(`/api/ai/page/${pageId}/upcoming-posts`);
+          const data = await res.json();
+          const posts = Array.isArray(data) ? data : [];
+          const topicPosts = posts.filter(p => p.topicId?._id === currentTopicId);
+
+          // Check if generation complete
+          if (topicPosts.length >= Number(postsPerDaySelect.value)) {
+            logMonitor(`🚀 All posts generated for topic ${currentTopicId}`);
+            loadUpcomingPosts();
+            loadLogs();
+          } else {
+            logMonitor(`⏳ Waiting for posts... (${topicPosts.length}/${postsPerDaySelect.value})`);
+            setTimeout(() => pollPosts(retries - 1, interval), interval);
+          }
+        } catch (err) {
+          logMonitor(`❌ Polling error: ${err.message}`, 'error');
+        }
+      };
+
+      pollPosts();
+
     } catch (err) {
       logMonitor(`❌ Generate failed: ${err.message}`, 'error');
     }
@@ -183,7 +214,9 @@ document.addEventListener('DOMContentLoaded', () => {
   async function loadUpcomingPosts() {
     try {
       const res = await fetch(`/api/ai/page/${pageId}/upcoming-posts`);
-      const posts = Array.isArray(await res.json()) ? await res.json() : [];
+      const data = await res.json();
+      const posts = Array.isArray(data) ? data : [];
+
       upcomingPostsTable.innerHTML = '';
       posts.forEach(p => {
         const tr = document.createElement('tr');
@@ -202,6 +235,7 @@ document.addEventListener('DOMContentLoaded', () => {
         `;
         upcomingPostsTable.appendChild(tr);
       });
+
       logMonitor('📋 Upcoming posts loaded');
     } catch (err) {
       logMonitor(`❌ Failed loading posts: ${err.message}`, 'error');
@@ -212,7 +246,9 @@ document.addEventListener('DOMContentLoaded', () => {
   async function loadLogs() {
     try {
       const res = await fetch(`/api/ai/page/${pageId}/logs`);
-      const logs = Array.isArray(await res.json()) ? await res.json() : [];
+      const data = await res.json();
+      const logs = Array.isArray(data) ? data : [];
+
       logsTable.innerHTML = '';
       logs.forEach(l => {
         const tr = document.createElement('tr');
@@ -226,6 +262,7 @@ document.addEventListener('DOMContentLoaded', () => {
         `;
         logsTable.appendChild(tr);
       });
+
       logMonitor('📝 Logs loaded');
     } catch (err) {
       logMonitor(`❌ Failed loading logs: ${err.message}`, 'error');
@@ -273,4 +310,4 @@ document.addEventListener('DOMContentLoaded', () => {
   setInterval(loadLogs, 5000);
   logMonitor('✅ AI Scheduler ready');
 });
- 
+
