@@ -273,3 +273,4 @@ document.addEventListener('DOMContentLoaded', () => {
   setInterval(loadLogs, 5000);
   logMonitor('✅ AI Scheduler ready');
 });
+ 
