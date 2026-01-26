@@ -103,20 +103,55 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // --- Save Topic ---
   saveTopicBtn.addEventListener('click', async () => {
-    try {
-      const topicName = topicNameInput?.value?.trim();
-      if (!topicName) return logMonitor('❌ Topic name cannot be empty','error');
+  try {
+    const topicName = topicNameInput.value.trim();
+    if (!topicName) {
+      logMonitor('❌ Topic name cannot be empty','error');
+      return;
+    }
 
-      const times = Array.from(timesContainer.querySelectorAll('input[type=time]')).map(i=>i.value);
-      const data = {
-        topicName,
-        postsPerDay: parseInt(postsPerDaySelect.value),
-        times,
-        startDate: startDateInput.value,
-        endDate: endDateInput.value,
-        repeatType: repeatTypeSelect.value,
-        includeMedia: includeMediaCheckbox.checked
-      };
+    const times = Array.from(
+      timesContainer.querySelectorAll('input[type=time]')
+    ).map(i => i.value);
+
+    const data = {
+      topicName,
+      postsPerDay: Number(postsPerDaySelect.value),
+      times,
+      startDate: startDateInput.value,
+      endDate: endDateInput.value,
+      repeatType: repeatTypeSelect.value,
+      includeMedia: includeMediaCheckbox.checked
+    };
+
+    const res = await fetch(`/api/ai/page/${pageId}/topic`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+
+    const topic = await res.json();
+
+    // 🚨 THIS WAS MISSING
+    if (!topic || !topic._id) {
+      logMonitor('❌ Topic saved but ID not returned','error');
+      console.error('Bad response:', topic);
+      return;
+    }
+
+    // ✅ STORE THE ID PROPERLY
+    topicNameInput.dataset.topicId = topic._id;
+
+    logMonitor(`💾 Topic "${topic.topicName}" saved (ID: ${topic._id})`);
+
+    loadUpcomingPosts();
+    loadLogs();
+
+  } catch (err) {
+    logMonitor(`❌ Failed to save topic: ${err.message}`, 'error');
+  }
+});
+
 
       const res = await fetch(`/api/ai/page/${pageId}/topic`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data) });
       const topic = await res.json();
