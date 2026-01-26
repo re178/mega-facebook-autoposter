@@ -4,12 +4,15 @@ const AiTopic = require('../models/AiTopic');
 const AiLog = require('../models/AiLog');
 const Page = require('../models/Page');
 
+// 🔴 LIVE MONITOR (SAFE ADD)
+const { pushLive } = require('../routes/aiRoutes');
+
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
 
 /* =========================================================
-   LIVE MONITOR LOGGER (PLAIN LANGUAGE)
+   LIVE MONITOR LOGGER (DB + LIVE)
 ========================================================= */
 async function monitor(pageId, postId, action, message) {
   try {
@@ -19,6 +22,10 @@ async function monitor(pageId, postId, action, message) {
       action,
       message
     });
+
+    // 🔴 PUSH LIVE
+    pushLive(pageId, message);
+
   } catch (err) {
     console.error('⚠️ Monitor logging failed:', err.message);
   }
@@ -48,17 +55,15 @@ function cleanText(text) {
 }
 
 /* =========================================================
-   PROMPT BUILDER (INTELLIGENT)
+   PROMPT BUILDER
 ========================================================= */
 function buildPrompt({ topic, angle, isTrending, isCritical }) {
   let base = '';
 
   if (isCritical) {
-    base = `Write a calm, factual Facebook post about a very recent event related to ${topic}. 
-No opinions. No advice. No excitement. Just clear human wording.`;
+    base = `Write a calm, factual Facebook post about a very recent event related to ${topic}.`;
   } else if (isTrending) {
-    base = `Write a natural Facebook post reacting to something people are currently talking about related to ${topic}. 
-Sound like a normal person noticing it.`;
+    base = `Write a natural Facebook post reacting to something people are currently talking about related to ${topic}.`;
   } else {
     const map = {
       memory: `Write a Facebook post recalling a memory related to ${topic}.`,
@@ -88,7 +93,7 @@ No AI language
 }
 
 /* =========================================================
-   CORE GENERATOR (FULLY MONITORED)
+   CORE GENERATOR (LIVE + DB MONITORED)
 ========================================================= */
 async function generatePostsForTopic(topicId, options = {}) {
   const topic = await AiTopic.findById(topicId);
@@ -97,8 +102,12 @@ async function generatePostsForTopic(topicId, options = {}) {
   const page = await Page.findById(topic.pageId);
   if (!page) throw new Error('Page not found');
 
-  await monitor(topic.pageId, null, 'GENERATION_START',
-    `AI started generating posts for topic "${topic.topicName}".`);
+  await monitor(
+    topic.pageId,
+    null,
+    'GENERATION_START',
+    `🚀 AI started generating posts for "${topic.topicName}"`
+  );
 
   const {
     postsPerDay,
@@ -123,16 +132,24 @@ async function generatePostsForTopic(topicId, options = {}) {
 
   for (let day = new Date(start); day <= end;) {
 
-    await monitor(topic.pageId, null, 'DAY_PROCESSING',
-      `Processing content generation for date ${day.toDateString()}.`);
+    await monitor(
+      topic.pageId,
+      null,
+      'DAY_PROCESSING',
+      `📅 Processing ${day.toDateString()}`
+    );
 
     for (let i = 0; i < postsPerDay; i++) {
 
       const angle = ANGLES[angleIndex % ANGLES.length];
       angleIndex++;
 
-      await monitor(topic.pageId, null, 'TEXT_REQUEST',
-        `Requesting AI text for topic "${topic.topicName}" using angle "${angle}".`);
+      await monitor(
+        topic.pageId,
+        null,
+        'TEXT_REQUEST',
+        `✍️ Generating text (${angle})`
+      );
 
       const textResponse = await openai.chat.completions.create({
         model: 'gpt-4',
@@ -148,24 +165,21 @@ async function generatePostsForTopic(topicId, options = {}) {
 
       let mediaUrl = null;
 
-      if (!isCritical && includeMedia) {
-        const willInclude = Math.random() > 0.4;
+      if (!isCritical && includeMedia && Math.random() > 0.4) {
+        await monitor(
+          topic.pageId,
+          null,
+          'IMAGE_REQUEST',
+          '🖼️ Generating image'
+        );
 
-        if (willInclude) {
-          await monitor(topic.pageId, null, 'IMAGE_REQUEST',
-            `AI decided to include an image for topic "${topic.topicName}".`);
+        const image = await openai.images.generate({
+          model: 'gpt-image-1',
+          prompt: `A realistic everyday photo related to ${topic.topicName}.`,
+          size: '1024x1024'
+        });
 
-          const image = await openai.images.generate({
-            model: 'gpt-image-1',
-            prompt: `A realistic everyday photo related to ${topic.topicName}. No text.`,
-            size: '1024x1024'
-          });
-
-          mediaUrl = image.data[0].url;
-        } else {
-          await monitor(topic.pageId, null, 'IMAGE_SKIPPED',
-            `AI decided text-only post is better for this content.`);
-        }
+        mediaUrl = image.data[0].url;
       }
 
       const [h, m] = times[i].split(':');
@@ -180,15 +194,15 @@ async function generatePostsForTopic(topicId, options = {}) {
         scheduledTime,
         status: 'PENDING',
         retryCount: 0,
-        meta: {
-          angle,
-          trending: isTrending,
-          critical: isCritical
-        }
+        meta: { angle, trending: isTrending, critical: isCritical }
       });
 
-      await monitor(topic.pageId, post._id, 'POST_CREATED',
-        `AI post created and scheduled for ${scheduledTime.toLocaleString()}.`);
+      await monitor(
+        topic.pageId,
+        post._id,
+        'POST_CREATED',
+        `💾 Post scheduled at ${scheduledTime.toLocaleTimeString()}`
+      );
 
       createdPosts.push(post);
     }
@@ -198,21 +212,24 @@ async function generatePostsForTopic(topicId, options = {}) {
     else day.setDate(day.getDate() + 1);
   }
 
-  await monitor(topic.pageId, null, 'GENERATION_COMPLETE',
-    `AI finished generating ${createdPosts.length} posts for topic "${topic.topicName}".`);
+  await monitor(
+    topic.pageId,
+    null,
+    'GENERATION_COMPLETE',
+    `✅ Finished generating ${createdPosts.length} posts`
+  );
 
   return createdPosts;
 }
 
 /* =========================================================
-   DELETE TOPIC POSTS (MONITORED)
+   DELETE TOPIC POSTS
 ========================================================= */
 async function deleteTopicPosts(topicId) {
   const posts = await AiScheduledPost.find({ topicId });
 
   for (const post of posts) {
-    await monitor(post.pageId, post._id, 'POST_DELETED',
-      `Scheduled AI post was deleted.`);
+    await monitor(post.pageId, post._id, 'POST_DELETED', '🗑 Scheduled post deleted');
   }
 
   await AiScheduledPost.deleteMany({ topicId });
@@ -224,7 +241,5 @@ async function deleteTopicPosts(topicId) {
 module.exports = {
   generatePostsForTopic,
   deleteTopicPosts,
-  createAiLog: monitor 
+  createAiLog: monitor
 };
-
-
