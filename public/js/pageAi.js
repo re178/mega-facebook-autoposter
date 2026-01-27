@@ -143,7 +143,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  /* ===================== GENERATE POSTS NOW WITH PROGRESS ===================== */
+  /* ===================== GENERATE POSTS NOW ===================== */
   generatePostNowBtn.addEventListener('click', async () => {
     if (!currentTopicId) {
       logMonitor('❌ Save topic first', 'error');
@@ -155,7 +155,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
       await fetch(`/api/ai/topic/${currentTopicId}/generate-now`, { method: 'POST' });
 
-      // Polling function to monitor post generation
       const pollPosts = async (retries = 30, interval = 2000) => {
         if (retries <= 0) {
           logMonitor('❌ Post generation timed out', 'error');
@@ -168,7 +167,6 @@ document.addEventListener('DOMContentLoaded', () => {
           const posts = Array.isArray(data) ? data : [];
           const topicPosts = posts.filter(p => p.topicId?._id === currentTopicId);
 
-          // Check if generation complete
           if (topicPosts.length >= Number(postsPerDaySelect.value)) {
             logMonitor(`🚀 All posts generated for topic ${currentTopicId}`);
             loadUpcomingPosts();
@@ -207,7 +205,6 @@ document.addEventListener('DOMContentLoaded', () => {
   editTopicBtn.addEventListener('click', () => {
     if (!currentTopicId) return logMonitor('❌ Select a topic first', 'error');
     logMonitor(`✏️ Editing topic ${currentTopicId}`);
-    // Form already filled when selected
   });
 
   /* ===================== LOAD UPCOMING POSTS ===================== */
@@ -241,44 +238,40 @@ document.addEventListener('DOMContentLoaded', () => {
       logMonitor(`❌ Failed loading posts: ${err.message}`, 'error');
     }
   }
-/* ===================== LOAD LOGS ===================== */
- async function loadLogs() {
-  const logsTable = document.getElementById('ai-logs');
-  if (!logsTable) return;
 
-  try {
-    // Fetch logs for the current page
-    const res = await fetch(`/api/ai/page/${pageId}/logs`);
-    const logs = await res.json();
+  /* ===================== LOAD LOGS ===================== */
+  async function loadLogs() {
+    const logsTable = document.getElementById('ai-logs');
+    if (!logsTable) return;
 
-    // Clear previous rows
-    logsTable.innerHTML = '';
+    try {
+      const res = await fetch(`/api/ai/page/${pageId}/logs`);
+      const logs = await res.json();
 
-    if (!Array.isArray(logs) || logs.length === 0) {
-      logsTable.innerHTML = `<tr><td colspan="6" style="text-align:center;opacity:.6">No logs yet</td></tr>`;
-      return;
+      logsTable.innerHTML = '';
+
+      if (!Array.isArray(logs) || logs.length === 0) {
+        logsTable.innerHTML = `<tr><td colspan="6" style="text-align:center;opacity:.6">No logs yet</td></tr>`;
+        return;
+      }
+
+      logs.forEach(log => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${log.postId?.text || log.topicId?.topicName || '-'}</td>
+          <td>${log.action || '-'}</td>
+          <td>${log.message || '-'}</td>
+          <td>${new Date(log.createdAt).toLocaleString()}</td>
+          <td><button onclick="deleteAiLog('${log._id}')">Delete</button></td>
+          <td><button onclick="retryAiPost('${log.postId?._id || ''}')">Retry</button></td>
+        `;
+        logsTable.appendChild(tr);
+      });
+    } catch (err) {
+      console.error('Failed to load logs:', err);
+      logsTable.innerHTML = `<tr><td colspan="6" style="color:red">Error loading logs</td></tr>`;
     }
-
-    // Create a row for each log
-    logs.forEach(log => {
-      const tr = document.createElement('tr');
-      tr.innerHTML = `
-        <td>${log.topicId?.topicName || '-'}</td>
-        <td>${log.action || '-'}</td>
-        <td>${log.message || '-'}</td>
-        <td>${new Date(log.createdAt).toLocaleString()}</td>
-        <td>-</td>
-        <td>-</td>
-      `;
-      logsTable.appendChild(tr);
-    });
-
-  } catch (err) {
-    console.error('Failed to load logs:', err);
-    logsTable.innerHTML = `<tr><td colspan="6" style="color:red">Error loading logs</td></tr>`;
   }
-}
-
 
   /* ===================== CLEAR LOGS ===================== */
   clearLogsBtn.addEventListener('click', async () => {
@@ -314,6 +307,21 @@ document.addEventListener('DOMContentLoaded', () => {
     loadUpcomingPosts();
   };
 
+  /* ===================== LOG BUTTON HELPERS ===================== */
+  window.deleteAiLog = async logId => {
+    if (!confirm('Delete this log?')) return;
+    await fetch(`/api/ai/log/${logId}`, { method: 'DELETE' });
+    logMonitor(`🗑 Log ${logId} deleted`);
+    loadLogs();
+  };
+
+  window.retryAiPost = async postId => {
+    if (!postId) return alert('❌ No post associated with this log');
+    await fetch(`/api/ai/post/${postId}/retry`, { method: 'POST' });
+    logMonitor(`🔄 Retry triggered for post ${postId}`);
+    loadLogs();
+  };
+
   /* ===================== INIT ===================== */
   loadTopics();
   loadUpcomingPosts();
@@ -321,4 +329,3 @@ document.addEventListener('DOMContentLoaded', () => {
   setInterval(loadLogs, 5000);
   logMonitor('✅ AI Scheduler ready');
 });
-
