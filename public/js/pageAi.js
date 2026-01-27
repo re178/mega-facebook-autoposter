@@ -242,32 +242,43 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  /* ===================== LOAD LOGS ===================== */
-  async function loadLogs() {
-    try {
-      const res = await fetch(`/api/ai/page/${pageId}/logs`);
-      const data = await res.json();
-      const logs = Array.isArray(data) ? data : [];
+ async function loadLogs() {
+  const logsTable = document.getElementById('ai-logs');
+  if (!logsTable) return;
 
-      logsTable.innerHTML = '';
-      logs.forEach(l => {
-        const tr = document.createElement('tr');
-        tr.innerHTML = `
-          <td>${l.topicId?.topicName || ''}</td>
-          <td>${l.action}</td>
-          <td>${l.message}</td>
-          <td>${new Date(l.createdAt).toLocaleString()}</td>
-          <td><button onclick="deleteAiPost('${l._id}')">Delete</button></td>
-          <td><button onclick="postNowAi('${l._id}')">Retry</button></td>
-        `;
-        logsTable.appendChild(tr);
-      });
+  try {
+    // Fetch logs for the current page
+    const res = await fetch(`/api/ai/page/${pageId}/logs`);
+    const logs = await res.json();
 
-      logMonitor('📝 Logs loaded');
-    } catch (err) {
-      logMonitor(`❌ Failed loading logs: ${err.message}`, 'error');
+    // Clear previous rows
+    logsTable.innerHTML = '';
+
+    if (!Array.isArray(logs) || logs.length === 0) {
+      logsTable.innerHTML = `<tr><td colspan="6" style="text-align:center;opacity:.6">No logs yet</td></tr>`;
+      return;
     }
+
+    // Create a row for each log
+    logs.forEach(log => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>${log.topicId?.topicName || '-'}</td>
+        <td>${log.action || '-'}</td>
+        <td>${log.message || '-'}</td>
+        <td>${new Date(log.createdAt).toLocaleString()}</td>
+        <td>-</td>
+        <td>-</td>
+      `;
+      logsTable.appendChild(tr);
+    });
+
+  } catch (err) {
+    console.error('Failed to load logs:', err);
+    logsTable.innerHTML = `<tr><td colspan="6" style="color:red">Error loading logs</td></tr>`;
   }
+}
+
 
   /* ===================== CLEAR LOGS ===================== */
   clearLogsBtn.addEventListener('click', async () => {
