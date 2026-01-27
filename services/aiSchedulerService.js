@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const OpenAI = require('openai');
 const AiScheduledPost = require('../models/AiScheduledPost');
 const AiTopic = require('../models/AiTopic');
@@ -11,10 +12,11 @@ const openai = new OpenAI({
 /* =========================================================
    LIVE MONITOR LOGGER (PLAIN LANGUAGE)
 ========================================================= */
-async function monitor(pageId, postId, action, message) {
+async function monitor(topicId, pageId, postId, action, message) {
   try {
     await AiLog.create({
-      pageId,
+      topicId: mongoose.Types.ObjectId(topicId),
+      pageId: mongoose.Types.ObjectId(pageId),
       postId,
       action,
       message
@@ -97,7 +99,7 @@ async function generatePostsForTopic(topicId, options = {}) {
   const page = await Page.findById(topic.pageId);
   if (!page) throw new Error('Page not found');
 
-  await monitor(topic.pageId, null, 'GENERATION_START',
+  await monitor(topic._id, topic.pageId, null, 'GENERATION_START',
     `AI started generating posts for topic "${topic.topicName}".`);
 
   const {
@@ -123,7 +125,7 @@ async function generatePostsForTopic(topicId, options = {}) {
 
   for (let day = new Date(start); day <= end;) {
 
-    await monitor(topic.pageId, null, 'DAY_PROCESSING',
+    await monitor(topic._id, topic.pageId, null, 'DAY_PROCESSING',
       `Processing content generation for date ${day.toDateString()}.`);
 
     for (let i = 0; i < postsPerDay; i++) {
@@ -131,7 +133,7 @@ async function generatePostsForTopic(topicId, options = {}) {
       const angle = ANGLES[angleIndex % ANGLES.length];
       angleIndex++;
 
-      await monitor(topic.pageId, null, 'TEXT_REQUEST',
+      await monitor(topic._id, topic.pageId, null, 'TEXT_REQUEST',
         `Requesting AI text for topic "${topic.topicName}" using angle "${angle}".`);
 
       const textResponse = await openai.chat.completions.create({
@@ -152,7 +154,7 @@ async function generatePostsForTopic(topicId, options = {}) {
         const willInclude = Math.random() > 0.4;
 
         if (willInclude) {
-          await monitor(topic.pageId, null, 'IMAGE_REQUEST',
+          await monitor(topic._id, topic.pageId, null, 'IMAGE_REQUEST',
             `AI decided to include an image for topic "${topic.topicName}".`);
 
           const image = await openai.images.generate({
@@ -163,7 +165,7 @@ async function generatePostsForTopic(topicId, options = {}) {
 
           mediaUrl = image.data[0].url;
         } else {
-          await monitor(topic.pageId, null, 'IMAGE_SKIPPED',
+          await monitor(topic._id, topic.pageId, null, 'IMAGE_SKIPPED',
             `AI decided text-only post is better for this content.`);
         }
       }
@@ -187,7 +189,7 @@ async function generatePostsForTopic(topicId, options = {}) {
         }
       });
 
-      await monitor(topic.pageId, post._id, 'POST_CREATED',
+      await monitor(topic._id, topic.pageId, post._id, 'POST_CREATED',
         `AI post created and scheduled for ${scheduledTime.toLocaleString()}.`);
 
       createdPosts.push(post);
@@ -198,7 +200,7 @@ async function generatePostsForTopic(topicId, options = {}) {
     else day.setDate(day.getDate() + 1);
   }
 
-  await monitor(topic.pageId, null, 'GENERATION_COMPLETE',
+  await monitor(topic._id, topic.pageId, null, 'GENERATION_COMPLETE',
     `AI finished generating ${createdPosts.length} posts for topic "${topic.topicName}".`);
 
   return createdPosts;
@@ -211,7 +213,7 @@ async function deleteTopicPosts(topicId) {
   const posts = await AiScheduledPost.find({ topicId });
 
   for (const post of posts) {
-    await monitor(post.pageId, post._id, 'POST_DELETED',
+    await monitor(topicId, post.pageId, post._id, 'POST_DELETED',
       `Scheduled AI post was deleted.`);
   }
 
@@ -226,5 +228,4 @@ module.exports = {
   deleteTopicPosts,
   createAiLog: monitor 
 };
-
 
