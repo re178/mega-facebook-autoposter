@@ -16,7 +16,7 @@ async function monitor(topicId, pageId, postId, action, message) {
   try {
     await AiLog.create({
       topicId: mongoose.Types.ObjectId(topicId),
-      pageId: mongoose.Types.ObjectId(pageId),
+      pageId: pageId,
       postId,
       action,
       message
