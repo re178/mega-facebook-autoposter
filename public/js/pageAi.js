@@ -241,7 +241,7 @@ document.addEventListener('DOMContentLoaded', () => {
       logMonitor(`❌ Failed loading posts: ${err.message}`, 'error');
     }
   }
-
+/* ===================== LOAD LOGS ===================== */
  async function loadLogs() {
   const logsTable = document.getElementById('ai-logs');
   if (!logsTable) return;
