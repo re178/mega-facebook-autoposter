@@ -10,14 +10,14 @@ const openai = new OpenAI({
 });
 
 /* =========================================================
-   LIVE MONITOR LOGGER (PLAIN LANGUAGE)
+   SAFE MONITOR LOGGER
 ========================================================= */
 async function monitor(topicId, pageId, postId, action, message) {
   try {
     await AiLog.create({
-      topicId: mongoose.Types.ObjectId(topicId),
-      pageId: pageId,
-      postId,
+      topicId: topicId ? mongoose.Types.ObjectId(topicId) : null,
+      pageId: pageId, // keep as String to match AiTopic
+      postId: postId ? mongoose.Types.ObjectId(postId) : null,
       action,
       message
     });
@@ -50,7 +50,7 @@ function cleanText(text) {
 }
 
 /* =========================================================
-   PROMPT BUILDER (INTELLIGENT)
+   PROMPT BUILDER
 ========================================================= */
 function buildPrompt({ topic, angle, isTrending, isCritical }) {
   let base = '';
@@ -90,7 +90,7 @@ No AI language
 }
 
 /* =========================================================
-   CORE GENERATOR (FULLY MONITORED)
+   CORE GENERATOR
 ========================================================= */
 async function generatePostsForTopic(topicId, options = {}) {
   const topic = await AiTopic.findById(topicId);
@@ -207,7 +207,7 @@ async function generatePostsForTopic(topicId, options = {}) {
 }
 
 /* =========================================================
-   DELETE TOPIC POSTS (MONITORED)
+   DELETE TOPIC POSTS
 ========================================================= */
 async function deleteTopicPosts(topicId) {
   const posts = await AiScheduledPost.find({ topicId });
@@ -226,6 +226,6 @@ async function deleteTopicPosts(topicId) {
 module.exports = {
   generatePostsForTopic,
   deleteTopicPosts,
-  createAiLog: monitor 
+  createAiLog: monitor
 };
 
