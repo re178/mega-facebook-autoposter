@@ -14,17 +14,21 @@ const openai = new OpenAI({
 ========================================================= */
 async function monitor(topicId, pageId, postId, action, message) {
   try {
-    await AiLog.create({
-      topicId: topicId ? mongoose.Types.ObjectId(topicId) : null,
-      pageId: pageId, // keep as String to match AiTopic
-      postId: postId ? mongoose.Types.ObjectId(postId) : null,
+    const log = {
+      pageId: pageId?.toString(),
       action,
       message
-    });
+    };
+
+    if (topicId) log.topicId = topicId;
+    if (postId) log.postId = postId;
+
+    await AiLog.create(log);
   } catch (err) {
     console.error('⚠️ Monitor logging failed:', err.message);
   }
 }
+
 
 /* =========================================================
    CONTENT ANGLES
