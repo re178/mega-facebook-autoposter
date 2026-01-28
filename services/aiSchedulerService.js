@@ -14,20 +14,18 @@ const openai = new OpenAI({
 ========================================================= */
 async function monitor(topicId, pageId, postId, action, message) {
   try {
-    const log = {
+    await AiLog.create({
+      topicId: topicId || null,
       pageId: pageId?.toString(),
+      postId: postId || null,
       action,
       message
-    };
-
-    if (topicId) log.topicId = topicId;
-    if (postId) log.postId = postId;
-
-    await AiLog.create(log);
+    });
   } catch (err) {
     console.error('⚠️ Monitor logging failed:', err.message);
   }
 }
+
 
 
 /* =========================================================
