@@ -147,8 +147,8 @@
       <option value="">-- Select a topic --</option>
     </select>
     <div class="topic-actions">
-      <button type="button" id="ai-edit-topic">Edit Topic</button>
-      <button type="button" id="ai-delete-topic">Delete Topic</button>
+      <button type="button" id="ai-edit-topic" class="ai-btn">Edit Topic</button>
+      <button type="button" id="ai-delete-topic" class="ai-btn">Delete Topic</button>
     </div>
   </div>
 
@@ -166,7 +166,7 @@
 
     <label>Times (HH:MM) - one per post per day</label>
     <div id="ai-times-container"></div>
-    <button type="button" id="ai-add-time">Add Time</button>
+    <button type="button" id="ai-add-time" class="ai-btn">Add Time</button>
 
     <label>Schedule Period</label>
     <input type="date" id="ai-start-date"> to <input type="date" id="ai-end-date">
@@ -182,16 +182,16 @@
     <input type="checkbox" id="ai-include-media" checked>
 
     <div class="actions">
-      <button type="button" id="ai-save-topic">Save Topic</button>
-      <button type="button" id="ai-generate-post-now">Generate & Post Now</button>
-      <button type="button" id="ai-delete-all-topic-posts">Delete Topic Posts</button>
-      <button type="button" id="ai-clear-logs">Clear Logs</button>
+      <button type="button" id="ai-save-topic" class="ai-btn">Save Topic</button>
+      <button type="button" id="ai-generate-post-now" class="ai-btn">Generate & Post Now</button>
+      <button type="button" id="ai-delete-all-topic-posts" class="ai-btn">Delete Topic Posts</button>
+      <button type="button" id="ai-clear-logs" class="ai-btn">Clear Logs</button>
     </div>
   </div>
 
   <!-- Upcoming Posts Table -->
   <h4>Upcoming Posts</h4>
-  <table>
+  <table class="ai-table">
     <thead>
       <tr>
         <th>Topic</th>
@@ -208,7 +208,7 @@
 
   <!-- Logs Table -->
   <h4>Logs (Latest 5)</h4>
-  <table>
+  <table class="ai-table">
     <thead>
       <tr>
         <th>Post</th>
@@ -236,6 +236,7 @@
     <!-- Live logs will appear here -->
   </div>
 </section>
+
 
     </main>
   </div>
