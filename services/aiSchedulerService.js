@@ -101,7 +101,7 @@ async function generatePostsForTopic(topicId, options = {}) {
   const topic = await AiTopic.findById(topicId);
   if (!topic) throw new Error('Topic not found');
 
-  const page = await Page.findById(topic.pageId);
+  const page = await Page.findOne({ pageId: topic.pageId });
   if (!page) throw new Error('Page not found');
 
   if (!Array.isArray(topic.times) || topic.times.length === 0)
