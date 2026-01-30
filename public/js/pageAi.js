@@ -1,220 +1,198 @@
 document.addEventListener('DOMContentLoaded', () => {
-  const urlParams = new URLSearchParams(window.location.search);
-  const pageId = urlParams.get('pageId');
-  if (!pageId) return alert('❌ Page ID missing from URL');
+  const qs = new URLSearchParams(window.location.search);
+  const pageId = qs.get('pageId');
 
-  /* ===================== GLOBAL STATE ===================== */
-  let currentTopicId = null;
-
-  /* ===================== ELEMENTS ===================== */
-  const topicSelect = document.getElementById('ai-topic-select');
-  const editTopicBtn = document.getElementById('ai-edit-topic');
-  const deleteTopicBtn = document.getElementById('ai-delete-topic');
-
-  const topicNameInput = document.getElementById('ai-topic-name');
-  const postsPerDaySelect = document.getElementById('ai-posts-per-day');
-  const timesContainer = document.getElementById('ai-times-container');
-  const addTimeBtn = document.getElementById('ai-add-time');
-  const startDateInput = document.getElementById('ai-start-date');
-  const endDateInput = document.getElementById('ai-end-date');
-  const repeatTypeSelect = document.getElementById('ai-repeat-type');
-  const includeMediaCheckbox = document.getElementById('ai-include-media');
-
-  const saveTopicBtn = document.getElementById('ai-save-topic');
-  const generatePostNowBtn = document.getElementById('ai-generate-post-now');
-  const clearLogsBtn = document.getElementById('ai-clear-logs');
-
-  const upcomingPostsTable = document.getElementById('ai-upcoming-posts');
-  const logsTable = document.getElementById('ai-logs');
-  const monitorLog = document.getElementById('ai-monitor-log');
-
-  /* ===================== LOGGER ===================== */
-  function logMonitor(message, type = 'info') {
-    const now = new Date().toLocaleTimeString();
-    const color =
-      type === 'error' ? '#ff4c4c' :
-      type === 'warn'  ? '#ffa500' : '#00ff99';
-    const line = document.createElement('div');
-    line.innerHTML = `<span style="color:${color}">[${now}]</span> ${message}`;
-    monitorLog.appendChild(line);
-    monitorLog.scrollTop = monitorLog.scrollHeight;
-    console.log(`[${now}] ${type.toUpperCase()}: ${message}`);
+  if (!pageId) {
+    alert('❌ Page ID missing');
+    return;
   }
 
-  /* ===================== TIME INPUT ===================== */
-  function addTimeInput(value = '') {
+  /* =====================================================
+     STATE
+  ===================================================== */
+  let currentTopicId = null;
+  let pollTimer = null;
+
+  /* =====================================================
+     ELEMENTS
+  ===================================================== */
+  const els = {
+    topicSelect: document.getElementById('ai-topic-select'),
+    editBtn: document.getElementById('ai-edit-topic'),
+    deleteBtn: document.getElementById('ai-delete-topic'),
+
+    topicName: document.getElementById('ai-topic-name'),
+    postsPerDay: document.getElementById('ai-posts-per-day'),
+    timesContainer: document.getElementById('ai-times-container'),
+    addTimeBtn: document.getElementById('ai-add-time'),
+
+    startDate: document.getElementById('ai-start-date'),
+    endDate: document.getElementById('ai-end-date'),
+    repeatType: document.getElementById('ai-repeat-type'),
+    includeMedia: document.getElementById('ai-include-media'),
+
+    saveBtn: document.getElementById('ai-save-topic'),
+    generateBtn: document.getElementById('ai-generate-post-now'),
+    clearLogsBtn: document.getElementById('ai-clear-logs'),
+
+    postsTable: document.getElementById('ai-upcoming-posts'),
+    logsTable: document.getElementById('ai-logs'),
+    monitor: document.getElementById('ai-monitor-log')
+  };
+
+  /* =====================================================
+     LOGGER
+  ===================================================== */
+  function log(msg, type = 'info') {
+    const color =
+      type === 'error' ? '#ff4c4c' :
+      type === 'warn' ? '#ffaa00' :
+      '#00ff99';
+
+    const line = document.createElement('div');
+    line.innerHTML = `<span style="color:${color}">[${new Date().toLocaleTimeString()}]</span> ${msg}`;
+    els.monitor.appendChild(line);
+    els.monitor.scrollTop = els.monitor.scrollHeight;
+  }
+
+  /* =====================================================
+     TIME INPUTS
+  ===================================================== */
+  function addTime(value = '') {
     const input = document.createElement('input');
     input.type = 'time';
     input.value = value;
-    timesContainer.appendChild(input);
+    els.timesContainer.appendChild(input);
   }
 
-  addTimeBtn.addEventListener('click', () => {
-    addTimeInput();
-    logMonitor('🕒 Time added');
-  });
+  els.addTimeBtn.onclick = () => {
+    addTime();
+    log('🕒 Time added');
+  };
 
-  /* ===================== LOAD TOPICS ===================== */
+  /* =====================================================
+     LOAD TOPICS
+  ===================================================== */
   async function loadTopics() {
     try {
       const res = await fetch(`/api/ai/page/${pageId}/topics`);
-      const data = await res.json();
-      const topics = Array.isArray(data) ? data : [];
-      topicSelect.innerHTML = '<option value="">-- Select a topic --</option>';
+      const topics = await res.json();
+
+      els.topicSelect.innerHTML = `<option value="">-- Select Topic --</option>`;
+
       topics.forEach(t => {
         const opt = document.createElement('option');
         opt.value = t._id;
         opt.textContent = t.topicName;
-        opt.dataset.topicObj = JSON.stringify(t);
-        topicSelect.appendChild(opt);
+        opt.dataset.topic = JSON.stringify(t);
+        els.topicSelect.appendChild(opt);
       });
-      logMonitor('📂 Topics loaded');
+
+      log('📂 Topics loaded');
     } catch (err) {
-      logMonitor(`❌ Failed to load topics: ${err.message}`, 'error');
+      log(`❌ Failed loading topics`, 'error');
     }
   }
 
-  topicSelect.addEventListener('change', () => {
-    const selectedId = topicSelect.value;
-    if (!selectedId) return currentTopicId = null;
+  els.topicSelect.onchange = () => {
+    const opt = els.topicSelect.selectedOptions[0];
+    if (!opt) return;
 
-    currentTopicId = selectedId;
-    const topic = JSON.parse(topicSelect.selectedOptions[0].dataset.topicObj);
-    topicNameInput.value = topic.topicName;
-    postsPerDaySelect.value = topic.postsPerDay;
-    timesContainer.innerHTML = '';
-    topic.times.forEach(t => addTimeInput(t));
-    startDateInput.value = topic.startDate.slice(0,10);
-    endDateInput.value = topic.endDate.slice(0,10);
-    repeatTypeSelect.value = topic.repeatType;
-    includeMediaCheckbox.checked = topic.includeMedia;
-  });
+    const t = JSON.parse(opt.dataset.topic);
+    currentTopicId = t._id;
 
-  /* ===================== SAVE TOPIC ===================== */
-  saveTopicBtn.addEventListener('click', async () => {
+    els.topicName.value = t.topicName;
+    els.postsPerDay.value = t.postsPerDay;
+    els.timesContainer.innerHTML = '';
+    t.times.forEach(addTime);
+
+    els.startDate.value = t.startDate?.slice(0, 10);
+    els.endDate.value = t.endDate?.slice(0, 10);
+    els.repeatType.value = t.repeatType;
+    els.includeMedia.checked = t.includeMedia;
+  };
+
+  /* =====================================================
+     SAVE TOPIC
+  ===================================================== */
+  els.saveBtn.onclick = async () => {
     try {
-      const topicName = topicNameInput.value.trim();
-      if (!topicName) {
-        logMonitor('❌ Topic name cannot be empty', 'error');
-        return;
-      }
-
-      const times = Array.from(timesContainer.querySelectorAll('input[type=time]')).map(i => i.value);
-      const data = {
-        topicName,
-        postsPerDay: Number(postsPerDaySelect.value),
-        times,
-        startDate: startDateInput.value,
-        endDate: endDateInput.value,
-        repeatType: repeatTypeSelect.value,
-        includeMedia: includeMediaCheckbox.checked
+      const payload = {
+        topicName: els.topicName.value.trim(),
+        postsPerDay: Number(els.postsPerDay.value),
+        times: [...els.timesContainer.querySelectorAll('input')].map(i => i.value),
+        startDate: els.startDate.value,
+        endDate: els.endDate.value,
+        repeatType: els.repeatType.value,
+        includeMedia: els.includeMedia.checked
       };
+
+      if (!payload.topicName) return log('❌ Topic name required', 'error');
 
       const res = await fetch(`/api/ai/page/${pageId}/topic`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data)
+        body: JSON.stringify(payload)
       });
 
-      if (!res.ok) {
-        const errData = await res.json();
-        logMonitor(`❌ Failed to save topic: ${errData.error}`, 'error');
-        return;
-      }
+      const data = await res.json();
+      if (!data._id) throw new Error('Invalid response');
 
-      const topic = await res.json();
-      if (!topic || !topic._id) {
-        logMonitor('❌ Topic saved but ID missing from response', 'error');
-        console.error('Bad response from backend:', topic);
-        return;
-      }
-
-      currentTopicId = topic._id;
-      topicNameInput.dataset.topicId = topic._id;
-
-      logMonitor(`💾 Topic "${topic.topicName}" saved (ID: ${topic._id})`);
+      currentTopicId = data._id;
+      log(`💾 Topic saved: ${data.topicName}`);
 
       loadTopics();
       loadUpcomingPosts();
       loadLogs();
-
     } catch (err) {
-      logMonitor(`❌ Failed to save topic: ${err.message}`, 'error');
+      log(`❌ Save failed`, 'error');
     }
-  });
+  };
 
-  /* ===================== GENERATE POSTS NOW ===================== */
-  generatePostNowBtn.addEventListener('click', async () => {
-    if (!currentTopicId) {
-      logMonitor('❌ Save topic first', 'error');
-      return;
-    }
+  /* =====================================================
+     GENERATE POSTS
+  ===================================================== */
+  els.generateBtn.onclick = async () => {
+    if (!currentTopicId) return log('❌ Select a topic first', 'error');
 
-    try {
-      logMonitor(`⏳ Starting post generation for topic ${currentTopicId}...`);
+    log('⏳ Generating posts...');
 
-      await fetch(`/api/ai/topic/${currentTopicId}/generate-now`, { method: 'POST' });
+    await fetch(`/api/ai/topic/${currentTopicId}/generate-now`, { method: 'POST' });
 
-      const pollPosts = async (retries = 30, interval = 2000) => {
-        if (retries <= 0) {
-          logMonitor('❌ Post generation timed out', 'error');
-          return;
-        }
+    let attempts = 0;
 
-        try {
-          const res = await fetch(`/api/ai/page/${pageId}/upcoming-posts`);
-          const data = await res.json();
-          const posts = Array.isArray(data) ? data : [];
-          const topicPosts = posts.filter(p => p.topicId?._id === currentTopicId);
+    clearInterval(pollTimer);
+    pollTimer = setInterval(async () => {
+      attempts++;
 
-          if (topicPosts.length >= Number(postsPerDaySelect.value)) {
-            logMonitor(`🚀 All posts generated for topic ${currentTopicId}`);
-            loadUpcomingPosts();
-            loadLogs();
-          } else {
-            logMonitor(`⏳ Waiting for posts... (${topicPosts.length}/${postsPerDaySelect.value})`);
-            setTimeout(() => pollPosts(retries - 1, interval), interval);
-          }
-        } catch (err) {
-          logMonitor(`❌ Polling error: ${err.message}`, 'error');
-        }
-      };
+      const res = await fetch(`/api/ai/page/${pageId}/upcoming-posts`);
+      const posts = await res.json();
+      const count = posts.filter(p => p.topicId?._id === currentTopicId).length;
 
-      pollPosts();
+      if (count >= Number(els.postsPerDay.value)) {
+        clearInterval(pollTimer);
+        log(`🚀 Posts generated`);
+        loadUpcomingPosts();
+        loadLogs();
+      }
 
-    } catch (err) {
-      logMonitor(`❌ Generate failed: ${err.message}`, 'error');
-    }
-  });
+      if (attempts > 20) {
+        clearInterval(pollTimer);
+        log('⚠️ Generation timeout', 'warn');
+      }
+    }, 2000);
+  };
 
-  /* ===================== DELETE / EDIT TOPIC ===================== */
-  deleteTopicBtn.addEventListener('click', async () => {
-    if (!currentTopicId) return logMonitor('❌ Select a topic first', 'error');
-    if (!confirm('Delete this topic and all its posts?')) return;
-
-    await fetch(`/api/ai/topic/${currentTopicId}`, { method: 'DELETE' });
-    logMonitor(`🗑 Topic ${currentTopicId} deleted`);
-    currentTopicId = null;
-    topicNameInput.value = '';
-    timesContainer.innerHTML = '';
-    loadTopics();
-    loadUpcomingPosts();
-    loadLogs();
-  });
-
-  editTopicBtn.addEventListener('click', () => {
-    if (!currentTopicId) return logMonitor('❌ Select a topic first', 'error');
-    logMonitor(`✏️ Editing topic ${currentTopicId}`);
-  });
-
-  /* ===================== LOAD UPCOMING POSTS ===================== */
+  /* =====================================================
+     POSTS
+  ===================================================== */
   async function loadUpcomingPosts() {
     try {
       const res = await fetch(`/api/ai/page/${pageId}/upcoming-posts`);
-      const data = await res.json();
-      const posts = Array.isArray(data) ? data : [];
+      const posts = await res.json();
 
-      upcomingPostsTable.innerHTML = '';
+      els.postsTable.innerHTML = '';
+
       posts.forEach(p => {
         const tr = document.createElement('tr');
         tr.innerHTML = `
@@ -224,78 +202,56 @@ document.addEventListener('DOMContentLoaded', () => {
           <td>${p.mediaUrl ? `<a href="${p.mediaUrl}" target="_blank">Media</a>` : ''}</td>
           <td>${p.status}</td>
           <td>
-            <button onclick="postNowAi('${p._id}')">Post Now</button>
-            <button onclick="editAiPost('${p._id}')">Edit</button>
-            <button onclick="deleteAiPost('${p._id}')">Delete</button>
+            <button onclick="postNow('${p._id}')">Post</button>
+            <button onclick="editPost('${p._id}')">Edit</button>
+            <button onclick="deletePost('${p._id}')">Delete</button>
           </td>
-          <td>${p.contentType || ''}</td>
         `;
-        upcomingPostsTable.appendChild(tr);
+        els.postsTable.appendChild(tr);
       });
-
-      logMonitor('📋 Upcoming posts loaded');
-    } catch (err) {
-      logMonitor(`❌ Failed loading posts: ${err.message}`, 'error');
+    } catch {
+      log('❌ Failed loading posts', 'error');
     }
   }
 
-  /* ===================== LOAD LOGS ===================== */
+  /* =====================================================
+     LOGS
+  ===================================================== */
   async function loadLogs() {
-    const logsTable = document.getElementById('ai-logs');
-    if (!logsTable) return;
-
     try {
       const res = await fetch(`/api/ai/page/${pageId}/logs`);
       const logs = await res.json();
 
-      logsTable.innerHTML = '';
-
-      if (!Array.isArray(logs) || logs.length === 0) {
-        logsTable.innerHTML = `<tr><td colspan="6" style="text-align:center;opacity:.6">No logs yet</td></tr>`;
-        return;
-      }
-
-      logs.forEach(log => {
-        const tr = document.createElement('tr');
-        tr.innerHTML = `
-          <td>${log.postId?.text || log.topicId?.topicName || '-'}</td>
-          <td>${log.action || '-'}</td>
-          <td>${log.message || '-'}</td>
-          <td>${new Date(log.createdAt).toLocaleString()}</td>
-          <td><button onclick="deleteAiLog('${log._id}')">Delete</button></td>
-          <td><button onclick="retryAiPost('${log.postId?._id || ''}')">Retry</button></td>
-        `;
-        logsTable.appendChild(tr);
-      });
-    } catch (err) {
-      console.error('Failed to load logs:', err);
-      logsTable.innerHTML = `<tr><td colspan="6" style="color:red">Error loading logs</td></tr>`;
+      els.logsTable.innerHTML = logs.length
+        ? logs.map(l => `
+          <tr>
+            <td>${l.action}</td>
+            <td>${l.message}</td>
+            <td>${new Date(l.createdAt).toLocaleString()}</td>
+          </tr>
+        `).join('')
+        : `<tr><td colspan="3">No logs</td></tr>`;
+    } catch {
+      log('❌ Failed loading logs', 'error');
     }
   }
 
-  /* ===================== CLEAR LOGS ===================== */
-  clearLogsBtn.addEventListener('click', async () => {
-    await fetch(`/api/ai/page/${pageId}/logs`, { method: 'DELETE' });
-    logMonitor('🧹 Logs cleared');
-    loadLogs();
-  });
-
-  /* ===================== POST / DELETE / EDIT HELPERS ===================== */
-  window.postNowAi = async id => {
+  /* =====================================================
+     GLOBAL HELPERS
+  ===================================================== */
+  window.postNow = async id => {
     await fetch(`/api/ai/post/${id}/post-now`, { method: 'POST' });
-    logMonitor(`📤 Post ${id} published`);
+    log('📤 Posted');
     loadUpcomingPosts();
-    loadLogs();
   };
 
-  window.deleteAiPost = async id => {
+  window.deletePost = async id => {
     await fetch(`/api/ai/post/${id}`, { method: 'DELETE' });
-    logMonitor(`🗑 Post ${id} deleted`);
+    log('🗑 Post deleted');
     loadUpcomingPosts();
-    loadLogs();
   };
 
-  window.editAiPost = async id => {
+  window.editPost = async id => {
     const text = prompt('Edit post text');
     if (!text) return;
     await fetch(`/api/ai/post/${id}`, {
@@ -303,29 +259,16 @@ document.addEventListener('DOMContentLoaded', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ text })
     });
-    logMonitor(`✏️ Post ${id} edited`);
+    log('✏️ Post updated');
     loadUpcomingPosts();
   };
 
-  /* ===================== LOG BUTTON HELPERS ===================== */
-  window.deleteAiLog = async logId => {
-    if (!confirm('Delete this log?')) return;
-    await fetch(`/api/ai/log/${logId}`, { method: 'DELETE' });
-    logMonitor(`🗑 Log ${logId} deleted`);
-    loadLogs();
-  };
-
-  window.retryAiPost = async postId => {
-    if (!postId) return alert('❌ No post associated with this log');
-    await fetch(`/api/ai/post/${postId}/retry`, { method: 'POST' });
-    logMonitor(`🔄 Retry triggered for post ${postId}`);
-    loadLogs();
-  };
-
-  /* ===================== INIT ===================== */
+  /* =====================================================
+     INIT
+  ===================================================== */
   loadTopics();
   loadUpcomingPosts();
   loadLogs();
   setInterval(loadLogs, 5000);
-  logMonitor('✅ AI Scheduler ready');
+  log('✅ AI Scheduler ready');
 });
