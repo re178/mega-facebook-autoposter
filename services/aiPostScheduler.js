@@ -6,9 +6,11 @@ const SCHEDULE_INTERVAL = 30000; // 30 seconds
 const MAX_RETRIES = 3;
 
 let isRunning = false;
+let lastTickLog = 0;
+const LOG_INTERVAL = 5 * 60 * 1000; // log ticks every 5 minutes
 
 /* =========================================================
-   MONITOR LOGGER (PLAIN LANGUAGE CCTV)
+   MONITOR LOGGER (CLEANER)
 ========================================================= */
 async function monitor(pageId, postId, action, message) {
   try {
@@ -20,6 +22,21 @@ async function monitor(pageId, postId, action, message) {
     });
   } catch (err) {
     console.error('⚠️ Scheduler monitor failed:', err.message);
+  }
+}
+
+/* =========================================================
+   AUTO-CLEAR OLD LOGS
+========================================================= */
+async function clearOldLogs(minutes = 30) {
+  try {
+    const cutoff = new Date(Date.now() - minutes * 60 * 1000);
+    const result = await AiLog.deleteMany({ createdAt: { $lt: cutoff } });
+    if (result.deletedCount > 0) {
+      console.log(`🧹 Cleared ${result.deletedCount} old logs`);
+    }
+  } catch (err) {
+    console.error('❌ Failed clearing old logs:', err.message);
   }
 }
 
@@ -94,18 +111,20 @@ async function startAiPostScheduler() {
     try {
       const now = new Date();
 
-      await monitor(null, null, 'SCHEDULER_TICK',
-        'Scheduler is scanning database for pending AI posts.');
+      // Only log ticks every 5 minutes
+      if (Date.now() - lastTickLog > LOG_INTERVAL) {
+        await monitor(null, null, 'SCHEDULER_TICK',
+          'Scheduler is scanning database for pending AI posts.');
+        lastTickLog = Date.now();
+      }
+
+      // Clear old logs older than 30 minutes
+      await clearOldLogs(30);
 
       const posts = await AiScheduledPost.find({
         status: 'PENDING',
         scheduledTime: { $lte: now }
       }).populate('pageId');
-
-      if (posts.length === 0) {
-        await monitor(null, null, 'NO_PENDING_POSTS',
-          'No AI posts are ready to be published at this time.');
-      }
 
       for (const post of posts) {
         if (!post.pageId) {
@@ -130,10 +149,8 @@ async function startAiPostScheduler() {
 
     } catch (err) {
       console.error('❌ Scheduler crashed:', err.message);
-
       await monitor(null, null, 'SCHEDULER_ERROR',
         `Scheduler encountered an error: ${err.message}`);
-
     } finally {
       isRunning = false;
       setTimeout(runScheduler, SCHEDULE_INTERVAL);
@@ -143,6 +160,4 @@ async function startAiPostScheduler() {
   runScheduler();
 }
 
-module.exports = { startAiPostScheduler }; 
-
-
+module.exports = { startAiPostScheduler };
