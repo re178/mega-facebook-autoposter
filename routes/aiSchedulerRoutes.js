@@ -18,11 +18,17 @@ const {
    HELPERS
 ========================================================= */
 
+// Unified response helpers
 const safeJson = (res, data) => res.json(data || []);
-
-const handleError = (res, err) => {
+const handleError = (res, err, status = 500) => {
   console.error(err);
-  return res.status(500).json({ error: err.message || 'Server error' });
+  return res.status(status).json({ error: err.message || 'Server error' });
+};
+
+// Logging wrapper
+const logAction = async ({ pageId, topicId = null, postId = null, action, message }) => {
+  try { await createAiLog(topicId || pageId, postId, action, message); } 
+  catch (err) { console.error('Failed to log action:', err.message); }
 };
 
 /* =========================================================
@@ -32,9 +38,7 @@ const handleError = (res, err) => {
 // Get topics for a page
 router.get('/page/:pageId/topics', async (req, res) => {
   try {
-    const topics = await AiTopic.find({ pageId: req.params.pageId })
-      .sort({ createdAt: -1 });
-
+    const topics = await AiTopic.find({ pageId: req.params.pageId }).sort({ createdAt: -1 });
     safeJson(res, topics);
   } catch (err) {
     handleError(res, err);
@@ -44,18 +48,8 @@ router.get('/page/:pageId/topics', async (req, res) => {
 // Create topic
 router.post('/page/:pageId/topic', async (req, res) => {
   try {
-    const {
-      topicName,
-      postsPerDay,
-      times,
-      startDate,
-      endDate,
-      repeatType,
-      includeMedia
-    } = req.body;
-
-    if (!topicName?.trim())
-      return res.status(400).json({ error: 'Topic name is required' });
+    const { topicName, postsPerDay, times, startDate, endDate, repeatType, includeMedia } = req.body;
+    if (!topicName?.trim()) return handleError(res, new Error('Topic name is required'), 400);
 
     const topic = await AiTopic.create({
       pageId: req.params.pageId,
@@ -68,64 +62,34 @@ router.post('/page/:pageId/topic', async (req, res) => {
       includeMedia
     });
 
-    await createAiLog(
-      req.params.pageId,
-      topic._id,
-      'TOPIC_CREATED',
-      `Topic "${topic.topicName}" created`
-    );
-
+    await logAction({ pageId: req.params.pageId, topicId: topic._id, action: 'TOPIC_CREATED', message: `Topic "${topic.topicName}" created` });
     res.status(201).json(topic);
-  } catch (err) {
-    handleError(res, err);
-  }
+  } catch (err) { handleError(res, err); }
 });
 
 // Update topic
 router.put('/topic/:topicId', async (req, res) => {
   try {
-    const topic = await AiTopic.findByIdAndUpdate(
-      req.params.topicId,
-      req.body,
-      { new: true }
-    );
+    const topic = await AiTopic.findByIdAndUpdate(req.params.topicId, req.body, { new: true });
+    if (!topic) return handleError(res, new Error('Topic not found'), 404);
 
-    if (!topic)
-      return res.status(404).json({ error: 'Topic not found' });
-
-    await createAiLog(
-      topic.pageId,
-      topic._id,
-      'TOPIC_UPDATED',
-      `Topic "${topic.topicName}" updated`
-    );
-
+    await logAction({ pageId: topic.pageId, topicId: topic._id, action: 'TOPIC_UPDATED', message: `Topic "${topic.topicName}" updated` });
     res.json(topic);
-  } catch (err) {
-    handleError(res, err);
-  }
+  } catch (err) { handleError(res, err); }
 });
 
 // Delete topic + posts
 router.delete('/topic/:topicId', async (req, res) => {
   try {
     const topic = await AiTopic.findById(req.params.topicId);
-    if (!topic) return res.status(404).json({ error: 'Topic not found' });
+    if (!topic) return handleError(res, new Error('Topic not found'), 404);
 
     await deleteTopicPosts(topic._id);
     await AiTopic.findByIdAndDelete(topic._id);
 
-    await createAiLog(
-      topic.pageId,
-      topic._id,
-      'TOPIC_DELETED',
-      `Topic "${topic.topicName}" deleted`
-    );
-
+    await logAction({ pageId: topic.pageId, topicId: topic._id, action: 'TOPIC_DELETED', message: `Topic "${topic.topicName}" deleted` });
     res.json({ success: true });
-  } catch (err) {
-    handleError(res, err);
-  }
+  } catch (err) { handleError(res, err); }
 });
 
 /* =========================================================
@@ -135,24 +99,12 @@ router.delete('/topic/:topicId', async (req, res) => {
 // Generate immediately
 router.post('/topic/:topicId/generate-now', async (req, res) => {
   try {
-    const posts = await generatePostsForTopic(
-      req.params.topicId,
-      { immediate: true }
-    );
-
+    const posts = await generatePostsForTopic(req.params.topicId, { immediate: true });
     const topic = await AiTopic.findById(req.params.topicId);
 
-    await createAiLog(
-      topic.pageId,
-      null,
-      'POSTS_GENERATED',
-      `${posts.length} posts generated`
-    );
-
+    await logAction({ pageId: topic.pageId, action: 'POSTS_GENERATED', message: `${posts.length} posts generated` });
     res.json(posts);
-  } catch (err) {
-    handleError(res, err);
-  }
+  } catch (err) { handleError(res, err); }
 });
 
 // Delete all topic posts
@@ -160,9 +112,7 @@ router.delete('/topic/:topicId/posts', async (req, res) => {
   try {
     await deleteTopicPosts(req.params.topicId);
     res.json({ success: true });
-  } catch (err) {
-    handleError(res, err);
-  }
+  } catch (err) { handleError(res, err); }
 });
 
 /* =========================================================
@@ -172,40 +122,28 @@ router.delete('/topic/:topicId/posts', async (req, res) => {
 // Get upcoming posts
 router.get('/page/:pageId/upcoming-posts', async (req, res) => {
   try {
-    const posts = await AiScheduledPost.find({
-      pageId: req.params.pageId
-    })
+    const posts = await AiScheduledPost.find({ pageId: req.params.pageId })
       .sort({ scheduledTime: 1 })
       .limit(100)
       .populate('topicId');
 
     safeJson(res, posts);
-  } catch (err) {
-    handleError(res, err);
-  }
+  } catch (err) { handleError(res, err); }
 });
 
 // Retry post
 router.post('/post/:postId/retry', async (req, res) => {
   try {
     const post = await AiScheduledPost.findById(req.params.postId);
-    if (!post) return res.status(404).json({ error: 'Post not found' });
+    if (!post) return handleError(res, new Error('Post not found'), 404);
 
     post.status = 'PENDING';
     post.retryCount = 0;
     await post.save();
 
-    await createAiLog(
-      post.pageId,
-      post._id,
-      'RETRY_TRIGGERED',
-      'Manual retry'
-    );
-
+    await logAction({ pageId: post.pageId, postId: post._id, action: 'RETRY_TRIGGERED', message: 'Manual retry' });
     res.json({ success: true });
-  } catch (err) {
-    handleError(res, err);
-  }
+  } catch (err) { handleError(res, err); }
 });
 
 /* =========================================================
@@ -220,18 +158,14 @@ router.get('/page/:pageId/logs', async (req, res) => {
       .populate('postId');
 
     safeJson(res, logs);
-  } catch (err) {
-    handleError(res, err);
-  }
+  } catch (err) { handleError(res, err); }
 });
 
 router.delete('/page/:pageId/logs', async (req, res) => {
   try {
     await AiLog.deleteMany({ pageId: req.params.pageId });
     res.json({ success: true });
-  } catch (err) {
-    handleError(res, err);
-  }
+  } catch (err) { handleError(res, err); }
 });
 
 /* =========================================================
@@ -242,95 +176,55 @@ router.delete('/page/:pageId/logs', async (req, res) => {
 router.post('/post/:postId/post-now', async (req, res) => {
   try {
     const post = await AiScheduledPost.findById(req.params.postId);
-    if (!post) return res.status(404).json({ error: 'Post not found' });
+    if (!post) return handleError(res, new Error('Post not found'), 404);
 
     post.status = 'POSTED';
     post.postedAt = new Date();
     await post.save();
 
-    await createAiLog(
-      post.pageId,
-      post._id,
-      'POSTED_NOW',
-      'Post manually published'
-    );
-
+    await logAction({ pageId: post.pageId, postId: post._id, action: 'POSTED_NOW', message: 'Post manually published' });
     res.json({ success: true });
-  } catch (err) {
-    handleError(res, err);
-  }
+  } catch (err) { handleError(res, err); }
 });
 
 // Delete post
 router.delete('/post/:postId', async (req, res) => {
   try {
     const post = await AiScheduledPost.findById(req.params.postId);
-    if (!post) return res.status(404).json({ error: 'Post not found' });
+    if (!post) return handleError(res, new Error('Post not found'), 404);
 
     await post.deleteOne();
-
-    await createAiLog(
-      post.pageId,
-      post._id,
-      'POST_DELETED',
-      'Post deleted manually'
-    );
-
+    await logAction({ pageId: post.pageId, postId: post._id, action: 'POST_DELETED', message: 'Post deleted manually' });
     res.json({ success: true });
-  } catch (err) {
-    handleError(res, err);
-  }
+  } catch (err) { handleError(res, err); }
 });
 
 // Edit post
 router.put('/post/:postId', async (req, res) => {
   try {
-    const post = await AiScheduledPost.findByIdAndUpdate(
-      req.params.postId,
-      {
-        text: req.body.text,
-        mediaUrl: req.body.mediaUrl
-      },
-      { new: true }
-    );
+    const { text, mediaUrl } = req.body;
+    const post = await AiScheduledPost.findByIdAndUpdate(req.params.postId, { text, mediaUrl }, { new: true });
+    if (!post) return handleError(res, new Error('Post not found'), 404);
 
-    if (!post) return res.status(404).json({ error: 'Post not found' });
-
-    await createAiLog(
-      post.pageId,
-      post._id,
-      'POST_EDITED',
-      'Post edited manually'
-    );
-
+    await logAction({ pageId: post.pageId, postId: post._id, action: 'POST_EDITED', message: 'Post edited manually' });
     res.json(post);
-  } catch (err) {
-    handleError(res, err);
-  }
+  } catch (err) { handleError(res, err); }
 });
 
 // Set content type
 router.patch('/post/:postId/content-type', async (req, res) => {
   try {
     const { contentType } = req.body;
-
     const post = await AiScheduledPost.findById(req.params.postId);
-    if (!post) return res.status(404).json({ error: 'Post not found' });
+    if (!post) return handleError(res, new Error('Post not found'), 404);
 
     post.contentType = contentType;
     await post.save();
 
-    await createAiLog(
-      post.pageId,
-      post._id,
-      'CONTENT_TYPE_UPDATED',
-      `Content type set to ${contentType}`
-    );
-
+    await logAction({ pageId: post.pageId, postId: post._id, action: 'CONTENT_TYPE_UPDATED', message: `Content type set to ${contentType}` });
     res.json({ success: true });
-  } catch (err) {
-    handleError(res, err);
-  }
+  } catch (err) { handleError(res, err); }
 });
 
 module.exports = router;
+
