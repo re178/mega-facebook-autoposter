@@ -6,9 +6,7 @@ const AiTopic = require('../models/AiTopic');
 const AiLog = require('../models/AiLog');
 const Page = require('../models/Page');
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY
-});
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 /* =========================================================
    SAFE LOGGER
@@ -45,7 +43,7 @@ const ANGLES = [
 ========================================================= */
 function cleanText(text = '') {
   return text
-    .replace(/[-_•:*#"`]/g, '')
+    .replace(/[•#*_`]/g, '')  // remove problematic symbols but keep normal punctuation
     .replace(/\s{2,}/g, ' ')
     .trim();
 }
@@ -78,13 +76,13 @@ No opinions. No emotion. No advice.`;
 ${base}
 
 Rules:
-Write like a real human
-No advice
-No teaching
-No lists
-No emojis
-No hashtags
-No AI tone
+- Write like a real human
+- No advice
+- No teaching
+- No lists
+- No emojis
+- No hashtags
+- No AI tone
 `;
 }
 
@@ -130,7 +128,7 @@ async function generatePostsForTopic(topicId, options = {}) {
     `Started generating posts for "${topic.topicName}"`);
 
   for (let day = new Date(start); day <= end; ) {
-    if (++safety > 500) break; // hard stop
+    if (++safety > 500) break; // hard safety stop
 
     for (let i = 0; i < postsPerDay; i++) {
       const angle = ANGLES[angleIndex % ANGLES.length];
@@ -140,21 +138,28 @@ async function generatePostsForTopic(topicId, options = {}) {
         `Generating post using angle "${angle}"`);
 
       let text = '';
+      let attempt = 0;
 
-      try {
-        const response = await openai.responses.create({
-          model: 'gpt-4.1-mini',
-          input: [
-            { role: 'system', content: 'You write Facebook posts that sound fully human.' },
-            { role: 'user', content: buildPrompt({ topic: topic.topicName, angle, isTrending, isCritical }) }
-          ]
-        });
+      // RETRY LOOP for text generation
+      while (!text && attempt < 3) {
+        attempt++;
+        try {
+          const response = await openai.responses.create({
+            model: 'gpt-4.1-mini',
+            input: [
+              { role: 'system', content: 'You write Facebook posts that sound fully human.' },
+              { role: 'user', content: buildPrompt({ topic: topic.topicName, angle, isTrending, isCritical }) }
+            ]
+          });
 
-        text = cleanText(response.output_text);
-      } catch (err) {
-        await monitor(topic._id, topic.pageId, null, 'TEXT_FAILED', err.message);
-        continue;
+          text = cleanText(response.output?.[0]?.content?.[0]?.text || '');
+        } catch (err) {
+          await monitor(topic._id, topic.pageId, null, 'TEXT_FAILED', `Attempt ${attempt}: ${err.message}`);
+          await new Promise(r => setTimeout(r, 1000)); // backoff
+        }
       }
+
+      if (!text) continue; // skip this post if text failed
 
       let mediaUrl = null;
 
@@ -165,16 +170,15 @@ async function generatePostsForTopic(topicId, options = {}) {
             prompt: `A realistic everyday photo related to ${topic.topicName}. No text.`,
             size: '1024x1024'
           });
-
           mediaUrl = image.data?.[0]?.url || null;
         } catch (err) {
           await monitor(topic._id, topic.pageId, null, 'IMAGE_FAILED', err.message);
         }
       }
 
+      // Schedule time
       const time = times[i % times.length] || '09:00';
       const [h, m] = time.split(':');
-
       const scheduledTime = new Date(day);
       scheduledTime.setHours(Number(h), Number(m), 0, 0);
 
@@ -197,8 +201,11 @@ async function generatePostsForTopic(topicId, options = {}) {
 
       await monitor(topic._id, topic.pageId, post._id, 'POST_CREATED',
         `Post scheduled for ${scheduledTime.toLocaleString()}`);
+
+      await new Promise(r => setTimeout(r, 200)); // rate-limiting
     }
 
+    // Increment day safely
     if (repeatType === 'weekly') day.setDate(day.getDate() + 7);
     else if (repeatType === 'monthly') day.setMonth(day.getMonth() + 1);
     else day.setDate(day.getDate() + 1);
