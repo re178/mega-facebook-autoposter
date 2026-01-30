@@ -13,17 +13,25 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 ========================================================= */
 async function monitor(topicId, pageId, postId, action, message) {
   try {
+    if (!pageId) {
+      console.warn(`⚠️ LOG SKIPPED: Missing pageId → ${action}`);
+      return;
+    }
+
     await AiLog.create({
       topicId: topicId || null,
-      pageId: pageId?.toString() || null,
+      pageId,
       postId: postId || null,
       action,
       message
     });
+
+    console.log(`🧾 LOG SAVED → ${action}`);
   } catch (err) {
-    console.error('⚠️ Monitor log failed:', err.message);
+    console.error('❌ LOG ERROR:', err.message);
   }
 }
+
 
 /* =========================================================
    CONTENT ANGLES
