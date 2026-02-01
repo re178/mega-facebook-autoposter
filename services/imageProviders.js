@@ -1,46 +1,71 @@
-require('dotenv').config();
+src/services/imageProviders.js
 const OpenAI = require('openai');
 const axios = require('axios');
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+// ===================== PROVIDERS =====================
 
-/* ===================== STABILITY AI ===================== */
-const StabilityImage = {
-  name: 'StabilityAI',
-  generate: async (prompt) => {
-    const res = await axios.post('https://api.stability.ai/v1/generate', {
-      prompt,
-      width: 1024,
-      height: 1024
-    }, { headers: { Authorization: `Bearer ${process.env.STABILITY_API_KEY}` } });
-    return res.data?.artifacts?.[0]?.url || null;
-  }
-};
-
-/* ===================== DALLE ===================== */
-const DALLEImage = {
-  name: 'DALLE',
-  generate: async (prompt) => {
-    const response = await openai.images.generate({
+// 1️⃣ OpenAI DALL·E
+class DALLEImage {
+  static name = 'DALLE';
+  static dailyLimit = 50; // Free tier limit example
+  static async generate(prompt) {
+    const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+    const res = await client.images.generate({
       model: 'gpt-image-1',
       prompt,
       size: '1024x1024'
     });
-    return response.data?.[0]?.url || null;
+    return res.data?.[0]?.url || null;
   }
-};
+}
 
-/* ===================== LEONARDO ===================== */
-const LeonardoImage = {
-  name: 'Leonardo',
-  generate: async (prompt) => {
-    const res = await axios.post('https://api.leonardo.ai/generate', {
+// 2️⃣ Stability AI
+class StabilityImage {
+  static name = 'StabilityAI';
+  static dailyLimit = 50;
+  static async generate(prompt) {
+    const res = await axios.post('https://api.stability.ai/v1/generation/stable-diffusion-v1-5/text-to-image', {
+      text_prompts: [{ text: prompt }],
+      height: 1024,
+      width: 1024,
+      samples: 1
+    }, { headers: { Authorization: `Bearer ${process.env.STABILITY_API_KEY}` } });
+    return res.data?.artifacts?.[0]?.url || null;
+  }
+}
+
+// 3️⃣ Leonardo AI
+class LeonardoImage {
+  static name = 'Leonardo';
+  static dailyLimit = 50;
+  static async generate(prompt) {
+    const res = await axios.post('https://cloud.leonardo.ai/api/rest/v1/generate', {
       prompt,
       width: 1024,
       height: 1024
     }, { headers: { Authorization: `Bearer ${process.env.LEONARDO_API_KEY}` } });
     return res.data?.images?.[0]?.url || null;
   }
-};
+}
 
-module.exports = { StabilityImage, DALLEImage, LeonardoImage };
+// 4️⃣ Cloudflare Images AI
+class CloudflareImage {
+  static name = 'Cloudflare';
+  static dailyLimit = 50;
+  static async generate(prompt) {
+    const res = await axios.post(
+      'https://api.cloudflare.com/client/v4/accounts/YOUR_ACCOUNT_ID/workers/ai-image',
+      { prompt },
+      { headers: { Authorization: `Bearer ${process.env.CLOUDFLARE_API_KEY}` } }
+    );
+    return res.data?.result?.url || null;
+  }
+}
+
+// ===================== EXPORT =====================
+module.exports = {
+  DALLEImage,
+  StabilityImage,
+  LeonardoImage,
+  CloudflareImage
+};
