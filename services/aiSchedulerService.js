@@ -7,19 +7,63 @@ const AiLog = require('../models/AiLog');
 const Page = require('../models/Page');
 
 // ===================== AI PROVIDERS =====================
-const { GrokText, OpenAIText, CohereText, ClaudeText, AI21Text } = require('../services/textProviders');
-const { StabilityImage, DALLEImage, LeonardoImage } = require('../services/imageProviders');
+const {
+  GrokText,
+  OpenAIText,
+  CohereText,
+  ClaudeText,
+  AI21Text,
+  CloudflareText
+} = require('../services/textProviders');
+
+const {
+  StabilityImage,
+  DALLEImage,
+  LeonardoImage,
+  CloudflareImage
+} = require('../services/imageProviders');
 
 // Unified arrays
-const TextProviders = [GrokText, OpenAIText, CohereText, ClaudeText, AI21Text];
-const ImageProviders = [StabilityImage, DALLEImage, LeonardoImage];
+const TextProviders = [
+  CloudflareText,
+  GrokText,
+  OpenAIText,
+  CohereText,
+  ClaudeText,
+  AI21Text
+];
+
+const ImageProviders = [
+  CloudflareImage,
+  StabilityImage,
+  LeonardoImage,
+  DALLEImage
+];
+
+// ===================== PROVIDER STATE =====================
+const providerState = {};
+
+function initProviderState() {
+  TextProviders.concat(ImageProviders).forEach(p => {
+    providerState[p.name] = {
+      name: p.name,
+      failures: 0,
+      lastFailure: null,
+      cooldownUntil: null,
+      disabled: false,
+      callsToday: 0,
+      quota: p.dailyLimit || 99999
+    };
+  });
+}
+initProviderState();
 
 // ===================== SAFE LOGGER =====================
 async function monitor(topicId, pageId, postId, action, message) {
   try {
     if (!pageId) return console.warn(`⚠️ LOG SKIPPED: Missing pageId → ${action}`);
     await AiLog.create({ topicId: topicId || null, pageId, postId: postId || null, action, message });
-    console.log(`🧾 LOG SAVED → ${action}`);
+    console.log(`🧾 LOG → ${action} : ${message}`);
   } catch (err) {
     console.error('❌ LOG ERROR:', err.message);
   }
@@ -58,7 +102,6 @@ function buildPrompt({ topic, angle, isTrending, isCritical }) {
     };
     base = map[angle] || map.casual;
   }
-
   return `${base}
 
 Rules:
@@ -72,31 +115,71 @@ Rules:
 `;
 }
 
-// ===================== GENERATE TEXT =====================
-async function generateText(topic, angle, options = {}) {
-  for (const provider of TextProviders) {
-    try {
-      const text = await provider.generate(buildPrompt({ topic, angle, ...options }));
-      if (text) return cleanText(text);
-    } catch (err) {
-      console.warn(`⚠️ ${provider.name} failed: ${err.message}`);
+// ===================== PROVIDER SELECTION =====================
+function selectProvider(providers) {
+  for (const p of providers) {
+    const state = providerState[p.name];
+    const now = new Date();
+    if (state.disabled) continue;
+    if (state.cooldownUntil && now < state.cooldownUntil) continue;
+    if (state.callsToday >= state.quota) {
+      monitor(null, null, null, 'PROVIDER_DISABLED', `${p.name} quota exhausted for today`);
       continue;
     }
+    return p;
   }
+  return null;
+}
+
+// ===================== GENERATE TEXT =====================
+async function generateText(topic, angle, options = {}) {
+  let lastError = null;
+  for (let attempt = 0; attempt < TextProviders.length; attempt++) {
+    const provider = selectProvider(TextProviders);
+    if (!provider) break;
+    const state = providerState[provider.name];
+    await monitor(null, null, null, 'TEXT_REQUEST', `Attempting text from ${provider.name}`);
+    try {
+      const text = await provider.generate(buildPrompt({ topic, angle, ...options }));
+      state.callsToday++;
+      if (!text) throw new Error('Empty response');
+      state.failures = 0;
+      return cleanText(text);
+    } catch (err) {
+      lastError = err;
+      state.failures++;
+      state.lastFailure = new Date();
+      state.cooldownUntil = new Date(Date.now() + Math.min(state.failures * 1000 * 60, 10 * 60 * 1000)); // 1-10 min
+      await monitor(null, null, null, 'TEXT_FAILED', `${provider.name} failed: ${err.message}`);
+    }
+  }
+  await monitor(null, null, null, 'GENERATION_ABORTED', `All text providers failed: ${lastError?.message}`);
   return null;
 }
 
 // ===================== GENERATE IMAGE =====================
 async function generateImage(topic) {
-  for (const provider of ImageProviders) {
+  let lastError = null;
+  for (let attempt = 0; attempt < ImageProviders.length; attempt++) {
+    const provider = selectProvider(ImageProviders);
+    if (!provider) break;
+    const state = providerState[provider.name];
+    await monitor(null, null, null, 'IMAGE_REQUEST', `Attempting image from ${provider.name}`);
     try {
       const url = await provider.generate(`A realistic everyday photo related to ${topic}. No text.`);
-      if (url) return url;
+      state.callsToday++;
+      if (!url) throw new Error('Empty response');
+      state.failures = 0;
+      return url;
     } catch (err) {
-      console.warn(`⚠️ ${provider.name} failed: ${err.message}`);
-      continue;
+      lastError = err;
+      state.failures++;
+      state.lastFailure = new Date();
+      state.cooldownUntil = new Date(Date.now() + Math.min(state.failures * 1000 * 60, 10 * 60 * 1000));
+      await monitor(null, null, null, 'IMAGE_FAILED', `${provider.name} failed: ${err.message}`);
     }
   }
+  await monitor(null, null, null, 'GENERATION_ABORTED', `All image providers failed: ${lastError?.message}`);
   return null;
 }
 
@@ -106,7 +189,6 @@ async function generatePostsForTopic(topicId, options = {}) {
   if (!topic) throw new Error('Topic not found');
   const page = await Page.findOne({ pageId: topic.pageId });
   if (!page) throw new Error('Page not found');
-
   if (!Array.isArray(topic.times) || topic.times.length === 0) throw new Error('Invalid posting times');
   if (!topic.postsPerDay || topic.postsPerDay < 1) throw new Error('postsPerDay must be > 0');
 
@@ -116,7 +198,7 @@ async function generatePostsForTopic(topicId, options = {}) {
   const start = immediate ? new Date() : new Date(startDate);
   const end = immediate ? new Date() : new Date(endDate);
 
-  let angleIndex = 0, createdPosts = [], safety=0;
+  let angleIndex = 0, createdPosts = [], safety = 0;
 
   await monitor(topic._id, topic.pageId, null, 'GENERATION_START', `Started generating posts for "${topic.topicName}"`);
 
@@ -127,14 +209,12 @@ async function generatePostsForTopic(topicId, options = {}) {
       const angle = ANGLES[angleIndex % ANGLES.length];
       angleIndex++;
 
-      await monitor(topic._id, topic.pageId, null, 'TEXT_REQUEST', `Generating post using angle "${angle}"`);
       const text = await generateText(topic.topicName, angle, { isTrending, isCritical });
       if (!text) continue;
 
       let mediaUrl = null;
       if (!isCritical && includeMedia && Math.random()>0.4) mediaUrl = await generateImage(topic.topicName);
 
-      // schedule
       const time = times[i % times.length] || '09:00';
       const [h,m] = time.split(':');
       const scheduledTime = new Date(day);
@@ -153,7 +233,7 @@ async function generatePostsForTopic(topicId, options = {}) {
 
       createdPosts.push(post);
       await monitor(topic._id, topic.pageId, post._id, 'POST_CREATED', `Post scheduled for ${scheduledTime.toLocaleString()}`);
-      await new Promise(r=>setTimeout(r, 200)); // rate limit
+      await new Promise(r => setTimeout(r, 200)); // rate limit
     }
 
     if (repeatType==='weekly') day.setDate(day.getDate()+7);
@@ -173,6 +253,9 @@ async function deleteTopicPosts(topicId) {
 }
 
 // ===================== EXPORTS =====================
-module.exports = { generatePostsForTopic, deleteTopicPosts, createAiLog: monitor };
-
-       
+module.exports = {
+  generatePostsForTopic,
+  deleteTopicPosts,
+  createAiLog: monitor
+};
+      
