@@ -16,8 +16,12 @@
     "express": "^4.19.2",
     "mongoose": "^7.6.3",
     "express-session": "^1.17.3",
+
     "openai": "^4.10.0",
     "cohere-ai": "^3.0.0",
-    "stability-client": "^1.0.0"
+    "stability-client": "^1.0.0",
+
+    "bottleneck": "^2.19.5",
+    "p-retry": "^5.1.0"
   }
 }
