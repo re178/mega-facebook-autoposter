@@ -1,77 +1,98 @@
-require('dotenv').config();
+// src/services/textProviders.js
 const OpenAI = require('openai');
 const axios = require('axios');
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+// ===================== PROVIDERS =====================
 
-/* ===================== GROK ===================== */
-const GrokText = {
-  name: 'Grok',
-  generate: async (prompt) => {
-    try {
-      // Example Grok API call
-      const res = await axios.post('https://api.grok.ai/text', {
-        prompt,
-        max_tokens: 300
-      }, { headers: { 'Authorization': `Bearer ${process.env.GROQ_API_KEY}` } });
-      return res.data?.text || null;
-    } catch (err) {
-      throw new Error(err.response?.data?.message || err.message);
-    }
-  }
-};
-
-/* ===================== OPENAI ===================== */
-const OpenAIText = {
-  name: 'OpenAI',
-  generate: async (prompt) => {
-    const response = await openai.responses.create({
+// 1️⃣ OpenAI
+class OpenAIText {
+  static name = 'OpenAI';
+  static dailyLimit = 1000; // adjust per free tier
+  static async generate(prompt) {
+    const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+    const response = await client.responses.create({
       model: 'gpt-4.1-mini',
       input: [
-        { role: 'system', content: 'You write Facebook posts that sound fully human.' },
+        { role: 'system', content: 'You write human-like Facebook posts.' },
         { role: 'user', content: prompt }
       ]
     });
-    return response.output?.[0]?.content?.[0]?.text || null;
+    return response.output?.[0]?.content?.[0]?.text || '';
   }
-};
+}
 
-/* ===================== COHERE ===================== */
-const CohereText = {
-  name: 'Cohere',
-  generate: async (prompt) => {
-    const res = await axios.post('https://api.cohere.ai/generate', {
-      model: 'command-xlarge',
+// 2️⃣ Cohere
+class CohereText {
+  static name = 'Cohere';
+  static dailyLimit = 500;
+  static async generate(prompt) {
+    const url = 'https://api.cohere.ai/generate';
+    const res = await axios.post(url, {
+      model: 'command-xlarge-nightly',
       prompt,
-      max_tokens: 300
+      max_tokens: 200
     }, { headers: { Authorization: `Bearer ${process.env.COHERE_API_KEY}` } });
-    return res.data?.generations?.[0]?.text || null;
+    return res.data?.generations?.[0]?.text || '';
   }
-};
+}
 
-/* ===================== CLAUDE ===================== */
-const ClaudeText = {
-  name: 'Claude',
-  generate: async (prompt) => {
+// 3️⃣ Claude
+class ClaudeText {
+  static name = 'Claude';
+  static dailyLimit = 1000;
+  static async generate(prompt) {
     const res = await axios.post('https://api.anthropic.com/v1/complete', {
-      model: 'claude-2',
+      model: 'claude-v1',
       prompt,
-      max_tokens: 300
-    }, { headers: { 'x-api-key': process.env.CLAUDE_API_KEY } });
-    return res.data?.completion || null;
+      max_tokens_to_sample: 200
+    }, { headers: { 'X-API-Key': process.env.CLAUDE_API_KEY } });
+    return res.data?.completion || '';
   }
-};
+}
 
-/* ===================== AI21 ===================== */
-const AI21Text = {
-  name: 'AI21',
-  generate: async (prompt) => {
-    const res = await axios.post('https://api.ai21.com/studio/v1/j2-large/complete', {
+// 4️⃣ AI21
+class AI21Text {
+  static name = 'AI21';
+  static dailyLimit = 500;
+  static async generate(prompt) {
+    const res = await axios.post('https://api.ai21.com/studio/v1/j1-large/complete', {
       prompt,
-      maxTokens: 300
+      maxTokens: 200
     }, { headers: { Authorization: `Bearer ${process.env.AI21_API_KEY}` } });
-    return res.data?.completions?.[0]?.data?.text || null;
+    return res.data?.completions?.[0]?.data?.text || '';
   }
-};
+}
 
-module.exports = { GrokText, OpenAIText, CohereText, ClaudeText, AI21Text };
+// 5️⃣ Grok (xAI)
+class GrokText {
+  static name = 'Grok';
+  static dailyLimit = 1000;
+  static async generate(prompt) {
+    const res = await axios.post('https://api.grok.ai/v1/generate', { prompt }, {
+      headers: { Authorization: `Bearer ${process.env.GROK_API_KEY}` }
+    });
+    return res.data?.text || '';
+  }
+}
+
+// 6️⃣ Cloudflare
+class CloudflareText {
+  static name = 'Cloudflare';
+  static dailyLimit = 500;
+  static async generate(prompt) {
+    const res = await axios.post('https://api.cloudflare.com/client/v4/accounts/YOUR_ACCOUNT_ID/workers/ai-text', {
+      prompt
+    }, { headers: { Authorization: `Bearer ${process.env.CLOUDFLARE_API_KEY}` } });
+    return res.data?.result?.text || '';
+  }
+}
+
+// ===================== EXPORT =====================
+module.exports = {
+  OpenAIText,
+  CohereText,
+  ClaudeText,
+  AI21Text,
+  GrokText,
+  CloudflareText
+};
