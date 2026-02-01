@@ -1,4 +1,4 @@
-src/services/imageProviders.js
+
 const OpenAI = require('openai');
 const axios = require('axios');
 
