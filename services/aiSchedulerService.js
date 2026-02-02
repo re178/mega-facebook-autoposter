@@ -13,6 +13,7 @@ const {
   OpenAIText,
   CohereText,
   ClaudeText,
+  AIHordeText,
   AI21Text
 } = require('../services/textProviders');
 
@@ -30,6 +31,7 @@ const TextProviders = [
   OpenAIText,
   CohereText,
   ClaudeText,
+  AIHordeText,
   AI21Text
 ];
 
