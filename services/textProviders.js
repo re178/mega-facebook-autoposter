@@ -1,5 +1,31 @@
 
-const OpenAI = require('openai');
+ {
+  static name = 'Claude';
+  static dailyLimit = 1000;
+  static async generate(prompt) {
+    const res = await axios.post('https://api.anthropic.com/v1/complete', {
+      model: 'claude-v1',
+      prompt,
+      max_tokens_to_sample: 200
+    }, { headers: { 'X-API-Key': process.env.CLAUDE_API_KEY } });
+    return res.data?.completion || '';
+  }
+}
+
+// 4️⃣ AI21
+class AI21Text {
+  static name = 'AI21';
+  static dailyLimit = 500;
+  static async generate(prompt) {
+    const res = await axios.post('https://api.ai21.com/studio/v1/j1-large/complete', {
+      prompt,
+      maxTokens: 200
+    }, { headers: { Authorization: `Bearer ${process.env.AI21_API_KEY}` } });
+    return res.data?.completions?.[0]?.data?.text || '';
+  }
+}
+
+// 5️⃣ const OpenAI = require('openai');
 const axios = require('axios');
 
 // ===================== PROVIDERS =====================
@@ -7,7 +33,7 @@ const axios = require('axios');
 // 1️⃣ OpenAI
 class OpenAIText {
   static name = 'OpenAI';
-  static dailyLimit = 1000; // adjust per free tier
+  static dailyLimit = 1000; 
   static async generate(prompt) {
     const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
     const response = await client.responses.create({
@@ -75,15 +101,36 @@ class GrokText {
   }
 }
 
-// 6️⃣ Cloudflare
+// 6️⃣ Cloudflare Workers AI
 class CloudflareText {
   static name = 'Cloudflare';
   static dailyLimit = 500;
   static async generate(prompt) {
-    const res = await axios.post('https://api.cloudflare.com/client/v4/accounts/YOUR_ACCOUNT_ID/workers/ai-text', {
-      prompt
-    }, { headers: { Authorization: `Bearer ${process.env.CLOUDFLARE_API_KEY}` } });
+    const res = await axios.post(
+      `https://api.cloudflare.com/client/v4/accounts/${process.env.CLOUDFLARE_ACCOUNT_ID}/workers/ai-text`,
+      { prompt },
+      { headers: { Authorization: `Bearer ${process.env.CLOUDFLARE_API_TOKEN}` } }
+    );
     return res.data?.result?.text || '';
+  }
+}
+
+// 7️⃣ AI Horde
+class AIHordeText {
+  static name = 'AI Horde';
+  static dailyLimit = 1000; // can be adjusted
+  static async generate(prompt) {
+    try {
+      const res = await axios.post(
+        'https://api.aihorde.dev/text/gen', 
+        { prompt, model: 'gpt-neox' }, 
+        { headers: { 'Api-Key': process.env.AIHORDE_API_KEY } }
+      );
+      // AI Horde response may contain multiple generations, pick first
+      return res.data?.generations?.[0]?.text || '';
+    } catch (err) {
+      throw new Error(err.response?.data?.message || err.message);
+    }
   }
 }
 
@@ -94,5 +141,6 @@ module.exports = {
   ClaudeText,
   AI21Text,
   GrokText,
-  CloudflareText
+  CloudflareText,
+  AIHordeText
 };
