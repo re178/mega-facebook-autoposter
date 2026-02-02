@@ -1,31 +1,4 @@
-
- {
-  static name = 'Claude';
-  static dailyLimit = 1000;
-  static async generate(prompt) {
-    const res = await axios.post('https://api.anthropic.com/v1/complete', {
-      model: 'claude-v1',
-      prompt,
-      max_tokens_to_sample: 200
-    }, { headers: { 'X-API-Key': process.env.CLAUDE_API_KEY } });
-    return res.data?.completion || '';
-  }
-}
-
-// 4️⃣ AI21
-class AI21Text {
-  static name = 'AI21';
-  static dailyLimit = 500;
-  static async generate(prompt) {
-    const res = await axios.post('https://api.ai21.com/studio/v1/j1-large/complete', {
-      prompt,
-      maxTokens: 200
-    }, { headers: { Authorization: `Bearer ${process.env.AI21_API_KEY}` } });
-    return res.data?.completions?.[0]?.data?.text || '';
-  }
-}
-
-// 5️⃣ const OpenAI = require('openai');
+const OpenAI = require('openai');
 const axios = require('axios');
 
 // ===================== PROVIDERS =====================
