@@ -2,7 +2,7 @@ name: Keep Render Alive Ultra-Adaptive
 
 on:
   schedule:
-    - cron: '*/5 * * * *' # every 5 minutes
+    - cron: '*/5 * * * *'
   workflow_dispatch:
 
 jobs:
@@ -10,44 +10,28 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Self-adaptive ultra-smart ping
+      - name: Ultra-adaptive silent keep-alive
+        shell: bash
         run: |
+          set +e   # 🔑 CRITICAL: disable fail-on-error completely
+
           URL="https://mega-facebook-autoposter.onrender.com"
 
-          # Ultra-random main wait 60-240 seconds
-          MAIN_WAIT=$((RANDOM % 180 + 60))
-          sleep $MAIN_WAIT
+          # Random main delay: 60–240s
+          sleep $((RANDOM % 180 + 60))
 
-          # Adaptive ping function
-          ping_app() {
-            local retries=0
-            local max_retries=5
-            local success=0
+          # Adaptive ping loop (never fails)
+          for i in 1 2 3 4 5; do
+            curl -s --max-time 10 "$URL" > /dev/null 2>&1 || true
+            sleep $((RANDOM % 10 + 5))
+          done
 
-            while [ $retries -lt $max_retries ]; do
-              curl -s --max-time 10 "$URL" > /dev/null
-              if [ $? -eq 0 ]; then
-                success=1
-                break
-              fi
-              # If failed, wait a small random time before retrying
-              WAIT=$((RANDOM % 10 + 5))  # 5-14 seconds
-              sleep $WAIT
-              retries=$((retries + 1))
-            done
+          # Secondary insurance ping
+          sleep $((RANDOM % 15 + 10))
+          curl -s --max-time 10 "$URL" > /dev/null 2>&1 || true
 
-            # If first attempts fail, do a secondary ping after random wait
-            if [ $success -eq 0 ]; then
-              SECONDARY_WAIT=$((RANDOM % 11 + 10))  # 10-20 sec
-              sleep $SECONDARY_WAIT
-              curl -s --max-time 10 "$URL" > /dev/null || true
-            fi
-          }
+          # Tertiary insurance ping
+          sleep $((RANDOM % 20 + 15))
+          curl -s --max-time 10 "$URL" > /dev/null 2>&1 || true
 
-          # Execute adaptive ping
-          ping_app
-
-          # Extra tertiary ping after random 15-30 seconds for insurance
-          TERTIARY_WAIT=$((RANDOM % 16 + 15))
-          sleep $TERTIARY_WAIT
-          curl -s --max-time 10 "$URL" > /dev/null || true
+          exit 0
