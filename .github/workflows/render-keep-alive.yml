@@ -1,6 +1,5 @@
-name: Keep Render Alive Irregular
+name: Keep Render Alive Ultra-Adaptive
 
-# Trigger every 5 minutes, and also allows manual run
 on:
   schedule:
     - cron: '*/5 * * * *' # every 5 minutes
@@ -11,15 +10,44 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Wait random seconds before ping
+      - name: Self-adaptive ultra-smart ping
         run: |
-          # Random delay between 1 and 4 minutes (60-240 seconds)
-          SECONDS=$((RANDOM % 180 + 60))
-          echo "Waiting $SECONDS seconds before pinging Render..."
-          sleep $SECONDS
+          URL="https://mega-facebook-autoposter.onrender.com"
 
-      - name: Ping Render app
-        run: |
-          echo "Pinging Render app..."
-          curl -s https://mega-facebook-autoposter.onrender.com > /dev/null
-          echo "Ping complete."
+          # Ultra-random main wait 60-240 seconds
+          MAIN_WAIT=$((RANDOM % 180 + 60))
+          sleep $MAIN_WAIT
+
+          # Adaptive ping function
+          ping_app() {
+            local retries=0
+            local max_retries=5
+            local success=0
+
+            while [ $retries -lt $max_retries ]; do
+              curl -s --max-time 10 "$URL" > /dev/null
+              if [ $? -eq 0 ]; then
+                success=1
+                break
+              fi
+              # If failed, wait a small random time before retrying
+              WAIT=$((RANDOM % 10 + 5))  # 5-14 seconds
+              sleep $WAIT
+              retries=$((retries + 1))
+            done
+
+            # If first attempts fail, do a secondary ping after random wait
+            if [ $success -eq 0 ]; then
+              SECONDARY_WAIT=$((RANDOM % 11 + 10))  # 10-20 sec
+              sleep $SECONDARY_WAIT
+              curl -s --max-time 10 "$URL" > /dev/null || true
+            fi
+          }
+
+          # Execute adaptive ping
+          ping_app
+
+          # Extra tertiary ping after random 15-30 seconds for insurance
+          TERTIARY_WAIT=$((RANDOM % 16 + 15))
+          sleep $TERTIARY_WAIT
+          curl -s --max-time 10 "$URL" > /dev/null || true
