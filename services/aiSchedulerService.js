@@ -210,9 +210,11 @@ async function generatePostsForTopic(topicId) {
 async function autoGenerate() {
   if (!AUTO_GENERATION_ENABLED) return;
 
-  const totalPending = await AiScheduledPost.countDocuments({ status: 'PENDING' });
-  if (totalPending >= MAX_SCHEDULED_POSTS) return;
-
+  const totalPending = await AiScheduledPost.countDocuments({ 
+  status: 'PENDING', 
+  pageId: topic.pageId 
+});
+if (totalPending >= MAX_SCHEDULED_POSTS) continue;
   const topics = await AiTopic.find();
   for (const topic of topics) {
     const generated = await AiLog.countDocuments({
