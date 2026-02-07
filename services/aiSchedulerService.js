@@ -79,9 +79,10 @@ async function monitor(topicId, pageId, postId, action, message) {
 // ===================== LOG CLEANUP =====================
 async function cleanupLogs() {
   const cutoff = new Date(Date.now() - 30 * 60 * 1000);
+  // Only delete MANUAL logs (non-auto)
   await AiLog.deleteMany({
     createdAt: { $lt: cutoff },
-    action: { $not: /^AUTO_/ }
+    action: { $not: /^AUTO_/ } // preserve AUTO logs
   });
 }
 setInterval(cleanupLogs, 15 * 60 * 1000);
@@ -177,11 +178,10 @@ async function generatePostsForTopic(topicId) {
         TIMEZONE
       ).toDate();
 
-      const exists = await AiScheduledPost.findOne({
-        topicId,
-        scheduledTime: scheduled
-      });
-      if (exists) continue;
+      // --- Check if post already exists (scheduled or logged) ---
+      const existsScheduled = await AiScheduledPost.findOne({ topicId, scheduledTime: scheduled });
+      const existsLogged = await AiLog.findOne({ topicId, action: /POST_CREATED|AUTO_POST_CREATED/, message: new RegExp(time) });
+      if (existsScheduled || existsLogged) continue;
 
       const text = await generateText(topic.topicName, angle, topic.pageId);
       if (!text) continue;
@@ -206,7 +206,7 @@ async function generatePostsForTopic(topicId) {
 }
 
 // ===================== AUTO GENERATION CORE =====================
-//async function autoGenerate() {
+async function autoGenerate() {
   if (!AUTO_GENERATION_ENABLED) return;
 
   const topics = await AiTopic.find();
@@ -219,31 +219,24 @@ async function generatePostsForTopic(topicId) {
     });
     if (totalPending >= MAX_SCHEDULED_POSTS) continue;
 
-    // --- Check max posts per topic ---
-    const generated = await AiScheduledPost.countDocuments({
-      topicId: topic._id,
-      'meta.auto': true
-    });
-    if (generated >= MAX_POSTS_PER_TOPIC) {
-      await AiTopic.deleteOne({ _id: topic._id }); // optional: mark completed instead
-      await AiLog.deleteMany({ topicId: topic._id });
+    // --- Check max posts per topic using AiScheduledPost + AiLog (deleted posts included) ---
+    const generatedFromScheduled = await AiScheduledPost.countDocuments({ topicId: topic._id, 'meta.auto': true });
+    const generatedFromLogs = await AiLog.countDocuments({ topicId: topic._id, action: 'AUTO_POST_CREATED' });
+    if ((generatedFromScheduled + generatedFromLogs) >= MAX_POSTS_PER_TOPIC) {
+      // optional: mark completed instead
+      await AiTopic.deleteOne({ _id: topic._id });
       continue;
     }
 
     // --- Skip if topic already has a pending post ---
-    const pending = await AiScheduledPost.findOne({
-      topicId: topic._id,
-      status: 'PENDING'
-    });
+    const pending = await AiScheduledPost.findOne({ topicId: topic._id, status: 'PENDING' });
     if (pending) continue;
 
-    // --- Pick an unused angle ---
-    const usedAngles = await AiScheduledPost.find({
-      topicId: topic._id,
-      'meta.auto': true
-    }).distinct('meta.angle');
-
-    const angle = ANGLES.find(a => !usedAngles.includes(a));
+    // --- Pick an unused angle (consider last successful posts including deleted ones) ---
+    const usedAnglesScheduled = await AiScheduledPost.find({ topicId: topic._id, 'meta.auto': true }).distinct('meta.angle');
+    const usedAnglesLogs = await AiLog.find({ topicId: topic._id, action: 'AUTO_POST_CREATED' }).distinct('message'); // store angle in message
+    const allUsedAngles = [...new Set([...usedAnglesScheduled, ...usedAnglesLogs])];
+    const angle = ANGLES.find(a => !allUsedAngles.includes(a));
     if (!angle) continue;
 
     // --- Pick a time avoiding collisions ---
@@ -251,18 +244,12 @@ async function generatePostsForTopic(topicId) {
     let scheduled = null;
 
     for (const t of times) {
-      const base = moment.tz(
-        `${moment().format('YYYY-MM-DD')} ${t}`,
-        TIMEZONE
-      ).toDate();
+      const base = moment.tz(`${moment().format('YYYY-MM-DD')} ${t}`, TIMEZONE).toDate();
 
       let attempts = 0;
       let slot = base;
       while (attempts < 5) {
-        const collision = await AiScheduledPost.findOne({
-          pageId: topic.pageId,
-          scheduledTime: slot
-        });
+        const collision = await AiScheduledPost.findOne({ pageId: topic.pageId, scheduledTime: slot });
         if (!collision) break;
         slot = shiftTime(base, (Math.random() > 0.5 ? 10 : -10) * (attempts + 1));
         attempts++;
@@ -310,3 +297,4 @@ module.exports = {
   disableAutoGeneration,
   createAiLog: monitor
 };
+ 
