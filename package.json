@@ -17,6 +17,9 @@
     "mongoose": "^7.6.3",
     "express-session": "^1.17.3",
 
+    "moment-timezone": "^0.5.45",
+    "connect-mongo": "^5.1.0",
+
     "openai": "^4.10.0",
     "cohere-ai": "^3.0.0",
     "stability-client": "^1.0.0",
