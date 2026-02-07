@@ -42,7 +42,6 @@ const ImageProviders = [
   CloudflareImage,
   StabilityImage,
   LeonardoImage,
-  LeonardoImage,
   DALLEImage
 ];
 
@@ -77,7 +76,7 @@ async function monitor(topicId, pageId, postId, action, message) {
   }
 }
 
-// ===================== LOG CLEANUP (KEEP INTACT) =====================
+// ===================== LOG CLEANUP =====================
 async function cleanupLogs() {
   const cutoff = new Date(Date.now() - 30 * 60 * 1000);
   await AiLog.deleteMany({
@@ -103,7 +102,7 @@ function shiftTime(base, minutes) {
   return moment(base).add(minutes, 'minutes').toDate();
 }
 
-// ===================== PROMPT BUILDER (IMPROVED) =====================
+// ===================== PROMPT BUILDER =====================
 function buildPrompt({ topic, angle }) {
   return `
 Write a natural, relatable Facebook post about "${topic}".
@@ -158,7 +157,7 @@ async function generateImage(topic, pageId) {
   return null;
 }
 
-// ===================== MANUAL GENERATOR (UNCHANGED LOGIC) =====================
+// ===================== MANUAL GENERATOR =====================
 async function generatePostsForTopic(topicId) {
   const topic = await AiTopic.findById(topicId);
   if (!topic) return [];
@@ -210,38 +209,44 @@ async function generatePostsForTopic(topicId) {
 async function autoGenerate() {
   if (!AUTO_GENERATION_ENABLED) return;
 
-  const totalPending = await AiScheduledPost.countDocuments({ 
-  status: 'PENDING', 
-  pageId: topic.pageId 
-});
-if (totalPending >= MAX_SCHEDULED_POSTS) continue;
   const topics = await AiTopic.find();
   for (const topic of topics) {
-    const generated = await AiLog.countDocuments({
-      topicId: topic._id,
-      action: 'AUTO_POST_CREATED'
-    });
 
+    // --- Respect max scheduled posts per page ---
+    const totalPending = await AiScheduledPost.countDocuments({ 
+      status: 'PENDING', 
+      pageId: topic.pageId 
+    });
+    if (totalPending >= MAX_SCHEDULED_POSTS) continue;
+
+    // --- Check max posts per topic ---
+    const generated = await AiScheduledPost.countDocuments({
+      topicId: topic._id,
+      'meta.auto': true
+    });
     if (generated >= MAX_POSTS_PER_TOPIC) {
-      await AiTopic.deleteOne({ _id: topic._id });
+      await AiTopic.deleteOne({ _id: topic._id }); // optional: mark completed instead
       await AiLog.deleteMany({ topicId: topic._id });
       continue;
     }
 
+    // --- Skip if topic already has a pending post ---
     const pending = await AiScheduledPost.findOne({
       topicId: topic._id,
       status: 'PENDING'
     });
     if (pending) continue;
 
-    const usedAngles = await AiLog.find({
+    // --- Pick an unused angle ---
+    const usedAngles = await AiScheduledPost.find({
       topicId: topic._id,
-      action: 'AUTO_POST_CREATED'
-    }).distinct('message');
+      'meta.auto': true
+    }).distinct('meta.angle');
 
     const angle = ANGLES.find(a => !usedAngles.includes(a));
     if (!angle) continue;
 
+    // --- Pick a time avoiding collisions ---
     const times = shuffleTimes(topic.times);
     let scheduled = null;
 
@@ -251,20 +256,27 @@ if (totalPending >= MAX_SCHEDULED_POSTS) continue;
         TIMEZONE
       ).toDate();
 
-      const collision = await AiScheduledPost.findOne({
-        pageId: topic.pageId,
-        scheduledTime: base
-      });
-
-      scheduled = collision ? shiftTime(base, Math.random() > 0.5 ? 10 : -10) : base;
-      break;
+      let attempts = 0;
+      let slot = base;
+      while (attempts < 5) {
+        const collision = await AiScheduledPost.findOne({
+          pageId: topic.pageId,
+          scheduledTime: slot
+        });
+        if (!collision) break;
+        slot = shiftTime(base, (Math.random() > 0.5 ? 10 : -10) * (attempts + 1));
+        attempts++;
+      }
+      if (attempts < 5) {
+        scheduled = slot;
+        break;
+      }
     }
-
     if (!scheduled) continue;
 
+    // --- Generate text & media ---
     const text = await generateText(topic.topicName, angle, topic.pageId);
     if (!text) continue;
-
     const mediaUrl = topic.includeMedia ? await generateImage(topic.topicName, topic.pageId) : null;
 
     const post = await AiScheduledPost.create({
@@ -278,6 +290,8 @@ if (totalPending >= MAX_SCHEDULED_POSTS) continue;
     });
 
     await monitor(topic._id, topic.pageId, post._id, 'AUTO_POST_CREATED', angle);
+
+    // Only generate one post per run
     break;
   }
 }
