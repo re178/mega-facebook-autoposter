@@ -206,7 +206,7 @@ async function generatePostsForTopic(topicId) {
 }
 
 // ===================== AUTO GENERATION CORE =====================
-async function autoGenerate() {
+//async function autoGenerate() {
   if (!AUTO_GENERATION_ENABLED) return;
 
   const topics = await AiTopic.find();
