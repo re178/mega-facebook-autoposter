@@ -39,6 +39,41 @@ document.addEventListener('DOMContentLoaded', () => {
     logsTable: document.getElementById('ai-logs'),
     monitor: document.getElementById('ai-monitor-log')
   };
+// AUTO-GENERATION TOGGLE
+els.autoGenToggle = document.getElementById('autoGenToggle');
+
+// Load current state from backend
+async function loadAutoGenState() {
+  try {
+    const res = await fetch('/api/ai/auto-generation/state');
+    const data = await res.json();
+    els.autoGenToggle.dataset.enabled = data.enabled;
+    els.autoGenToggle.textContent = data.enabled ? 'Auto-Generation: ON' : 'Auto-Generation: OFF';
+  } catch (err) {
+    log('❌ Failed to load auto-generation state', 'error');
+  }
+}
+
+// Toggle button click
+els.autoGenToggle.addEventListener('click', async () => {
+  const currentlyEnabled = els.autoGenToggle.dataset.enabled === 'true';
+  try {
+    const res = await fetch('/api/ai/auto-generation/toggle', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: !currentlyEnabled })
+    });
+    const data = await res.json();
+    els.autoGenToggle.dataset.enabled = data.enabled;
+    els.autoGenToggle.textContent = data.enabled ? 'Auto-Generation: ON' : 'Auto-Generation: OFF';
+    log(`🔄 Auto-Generation ${data.enabled ? 'enabled' : 'disabled'}`);
+  } catch (err) {
+    log('❌ Failed to toggle auto-generation', 'error');
+  }
+});
+
+// Initialize button state on page load
+loadAutoGenState();
 
   /* =====================================================
      LOGGER
