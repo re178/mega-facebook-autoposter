@@ -11,7 +11,9 @@ const Page = require('../models/Page');
 const {
   generatePostsForTopic,
   deleteTopicPosts,
-  createAiLog
+  createAiLog,
+  setAutoGeneration,
+  getAutoGeneration
 } = require('../services/aiSchedulerService');
 
 /* =========================================================
@@ -224,6 +226,19 @@ router.patch('/post/:postId/content-type', async (req, res) => {
     await logAction({ pageId: post.pageId, postId: post._id, action: 'CONTENT_TYPE_UPDATED', message: `Content type set to ${contentType}` });
     res.json({ success: true });
   } catch (err) { handleError(res, err); }
+});
+/* =========================================================
+   AUTO-GENERATION TOGGLE
+========================================================= */
+
+router.get('/auto-generation/state', (req, res) => {
+  res.json({ enabled: getAutoGeneration() });
+});
+
+router.post('/auto-generation/toggle', (req, res) => {
+  const { enabled } = req.body;
+  setAutoGeneration(!!enabled);
+  res.json({ enabled: getAutoGeneration() });
 });
 
 module.exports = router;
