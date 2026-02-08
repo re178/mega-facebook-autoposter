@@ -204,7 +204,7 @@ async function generatePostsForTopic(topicId) {
   }
   return created;
 }
-
+//===================== AUTO GENERATION CORE =====================//
 async function autoGenerate() {
   if (!AUTO_GENERATION_ENABLED) return;
 
