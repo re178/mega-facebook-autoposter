@@ -231,15 +231,20 @@ router.patch('/post/:postId/content-type', async (req, res) => {
    AUTO-GENERATION TOGGLE
 ========================================================= */
 
+let AUTO_GENERATION_ENABLED = false;
+
+// Get current state
 router.get('/auto-generation/state', (req, res) => {
-  res.json({ enabled: getAutoGeneration() });
+  res.json({ enabled: AUTO_GENERATION_ENABLED });
 });
 
+// Toggle state
 router.post('/auto-generation/toggle', (req, res) => {
   const { enabled } = req.body;
-  setAutoGeneration(!!enabled);
-  res.json({ enabled: getAutoGeneration() });
+  AUTO_GENERATION_ENABLED = !!enabled;
+  res.json({ enabled: AUTO_GENERATION_ENABLED });
 });
+
 
 module.exports = router;
 
