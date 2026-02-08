@@ -205,81 +205,122 @@ async function generatePostsForTopic(topicId) {
   return created;
 }
 
-// ===================== AUTO GENERATION CORE =====================
 async function autoGenerate() {
   if (!AUTO_GENERATION_ENABLED) return;
 
+  const now = moment.tz(TIMEZONE);
   const topics = await AiTopic.find();
+
   for (const topic of topics) {
-
-    // --- Respect max scheduled posts per page ---
-    const totalPending = await AiScheduledPost.countDocuments({ 
-      status: 'PENDING', 
-      pageId: topic.pageId 
-    });
-    if (totalPending >= MAX_SCHEDULED_POSTS) continue;
-
-    // --- Check max posts per topic using AiScheduledPost + AiLog (deleted posts included) ---
-    const generatedFromScheduled = await AiScheduledPost.countDocuments({ topicId: topic._id, 'meta.auto': true });
-    const generatedFromLogs = await AiLog.countDocuments({ topicId: topic._id, action: 'AUTO_POST_CREATED' });
-    if ((generatedFromScheduled + generatedFromLogs) >= MAX_POSTS_PER_TOPIC) {
-      // optional: mark completed instead
-      await AiTopic.deleteOne({ _id: topic._id });
-      continue;
-    }
-
-    // --- Skip if topic already has a pending post ---
-    const pending = await AiScheduledPost.findOne({ topicId: topic._id, status: 'PENDING' });
-    if (pending) continue;
-
-    // --- Pick an unused angle (consider last successful posts including deleted ones) ---
-    const usedAnglesScheduled = await AiScheduledPost.find({ topicId: topic._id, 'meta.auto': true }).distinct('meta.angle');
-    const usedAnglesLogs = await AiLog.find({ topicId: topic._id, action: 'AUTO_POST_CREATED' }).distinct('message'); // store angle in message
-    const allUsedAngles = [...new Set([...usedAnglesScheduled, ...usedAnglesLogs])];
-    const angle = ANGLES.find(a => !allUsedAngles.includes(a));
-    if (!angle) continue;
-
-    // --- Pick a time avoiding collisions ---
-    const times = shuffleTimes(topic.times);
-    let scheduled = null;
-
-    for (const t of times) {
-      const base = moment.tz(`${moment().format('YYYY-MM-DD')} ${t}`, TIMEZONE).toDate();
-
-      let attempts = 0;
-      let slot = base;
-      while (attempts < 5) {
-        const collision = await AiScheduledPost.findOne({ pageId: topic.pageId, scheduledTime: slot });
-        if (!collision) break;
-        slot = shiftTime(base, (Math.random() > 0.5 ? 10 : -10) * (attempts + 1));
-        attempts++;
+    try {
+      /* ---------------- 1. AUTO DELETE — TOPIC EXPIRED ---------------- */
+      if (moment(topic.endDate).isBefore(now)) {
+        await AiLog.deleteMany({ topicId: topic._id });
+        await AiTopic.deleteOne({ _id: topic._id });
+        await monitor(topic._id, topic.pageId, null, 'TOPIC_EXPIRED', 'Topic expired and deleted');
+        continue;
       }
-      if (attempts < 5) {
-        scheduled = slot;
-        break;
+
+      /* ---------------- 2. AUTO DELETE — MAX POSTS REACHED -------------- */
+      const logCount = await AiLog.countDocuments({
+        topicId: topic._id,
+        action: 'AUTO_POST_CREATED'
+      });
+
+      const scheduledCount = await AiScheduledPost.countDocuments({
+        topicId: topic._id,
+        'meta.auto': true
+      });
+
+      if ((logCount + scheduledCount) >= MAX_POSTS_PER_TOPIC) {
+        await AiLog.deleteMany({ topicId: topic._id });
+        await AiTopic.deleteOne({ _id: topic._id });
+        await monitor(topic._id, topic.pageId, null, 'TOPIC_MAX_POSTS', 'Topic max posts reached');
+        continue;
       }
+
+      /* ---------------- 3. ENFORCE ONE PENDING POST PER TOPIC ----------- */
+      const pending = await AiScheduledPost.findOne({
+        topicId: topic._id,
+        status: 'PENDING'
+      });
+      if (pending) continue;
+
+      /* ---------------- 4. ANGLE SELECTION ----------------------------- */
+      const usedAngles = await AiLog.distinct('message', {
+        topicId: topic._id,
+        action: 'AUTO_POST_CREATED'
+      });
+
+      const angle = ANGLES.find(a => !usedAngles.includes(a));
+      if (!angle) {
+        await AiLog.deleteMany({ topicId: topic._id });
+        await AiTopic.deleteOne({ _id: topic._id });
+        await monitor(topic._id, topic.pageId, null, 'TOPIC_ANGLES_EXHAUSTED', 'All angles used');
+        continue;
+      }
+
+      /* ---------------- 5. SLOT DISCOVERY ------------------------------ */
+      const startDate = moment.tz(topic.startDate, TIMEZONE);
+      const endDate = moment.tz(topic.endDate, TIMEZONE);
+
+      let scheduledTime = null;
+      let day = moment.max(now.clone().startOf('day'), startDate.clone().startOf('day'));
+
+      while (day.isSameOrBefore(endDate)) {
+        const times = shuffleTimes(topic.times);
+
+        for (const t of times) {
+          const slot = moment.tz(`${day.format('YYYY-MM-DD')} ${t}`, TIMEZONE);
+
+          if (slot.isSameOrBefore(now)) continue;
+          if (slot.isBefore(startDate) || slot.isAfter(endDate)) continue;
+
+          const collision = await AiScheduledPost.findOne({
+            pageId: topic.pageId,
+            scheduledTime: slot.toDate()
+          });
+
+          if (!collision) {
+            scheduledTime = slot.toDate();
+            break;
+          }
+        }
+
+        if (scheduledTime) break;
+        day.add(1, 'day');
+      }
+
+      if (!scheduledTime) continue;
+
+      /* ---------------- 6. GENERATE CONTENT ---------------------------- */
+      const text = await generateText(topic.topicName, angle, topic.pageId);
+      if (!text) continue;
+
+      const mediaUrl = topic.includeMedia
+        ? await generateImage(topic.topicName, topic.pageId)
+        : null;
+
+      /* ---------------- 7. CREATE SCHEDULED POST ----------------------- */
+      const post = await AiScheduledPost.create({
+        topicId: topic._id,
+        pageId: topic.pageId,
+        text,
+        mediaUrl,
+        scheduledTime,
+        status: 'PENDING',
+        meta: { angle, auto: true }
+      });
+
+      await monitor(topic._id, topic.pageId, post._id, 'AUTO_POST_CREATED', angle);
+
+      // One post per scheduler run
+      break;
+
+    } catch (err) {
+      console.error(`Auto-generation failed for topic ${topic._id}:`, err.message);
+      await monitor(topic._id, topic.pageId, null, 'AUTO_GEN_ERROR', err.message);
     }
-    if (!scheduled) continue;
-
-    // --- Generate text & media ---
-    const text = await generateText(topic.topicName, angle, topic.pageId);
-    if (!text) continue;
-    const mediaUrl = topic.includeMedia ? await generateImage(topic.topicName, topic.pageId) : null;
-
-    const post = await AiScheduledPost.create({
-      topicId: topic._id,
-      pageId: topic.pageId,
-      text,
-      mediaUrl,
-      scheduledTime: scheduled,
-      status: 'PENDING',
-      meta: { angle, auto: true }
-    });
-
-    await monitor(topic._id, topic.pageId, post._id, 'AUTO_POST_CREATED', angle);
-
-    // Only generate one post per run
-    break;
   }
 }
 
