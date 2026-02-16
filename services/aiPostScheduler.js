@@ -1,76 +1,101 @@
 const AiScheduledPost = require('../models/AiScheduledPost');
 const AiLog = require('../models/AiLog');
+const Page = require('../models/Page'); // optional, in case pageId is a string
 const { postToFacebook } = require('../services/facebookService');
 
 const SCHEDULE_INTERVAL = 30000; // 30 seconds
 const MAX_RETRIES = 3;
-
 let isRunning = false;
 let lastTickLog = 0;
-const LOG_INTERVAL = 5 * 60 * 1000; // log ticks every 5 minutes
+const LOG_INTERVAL = 5 * 60 * 1000; // 5 minutes
+const LOG_SOURCE = 'AI_SCHEDULER'; // <--- tag for logs created by this scheduler
 
-/* =========================================================
-   MONITOR LOGGER (CLEANER)
-========================================================= */
+/* =========================
+   MONITOR LOGGING
+========================= */
 async function monitor(pageId, postId, action, message) {
   try {
-    await AiLog.create({
-      pageId,
-      postId,
-      action,
-      message
-    });
+    await AiLog.create({ pageId, postId, action, message, source: LOG_SOURCE });
   } catch (err) {
     console.error('⚠️ Scheduler monitor failed:', err.message);
   }
 }
 
-/* =========================================================
-   AUTO-CLEAR OLD LOGS
-========================================================= */
+/* =========================
+   CLEAR OLD AI LOGS
+========================= */
 async function clearOldLogs(minutes = 30) {
   try {
     const cutoff = new Date(Date.now() - minutes * 60 * 1000);
-    const result = await AiLog.deleteMany({ createdAt: { $lt: cutoff } });
+    const result = await AiLog.deleteMany({ source: LOG_SOURCE, createdAt: { $lt: cutoff } });
     if (result.deletedCount > 0) {
-      console.log(`🧹 Cleared ${result.deletedCount} old logs`);
+      console.log(`🧹 Cleared ${result.deletedCount} old AI scheduler logs`);
     }
   } catch (err) {
-    console.error('❌ Failed clearing old logs:', err.message);
+    console.error('❌ Failed clearing old AI scheduler logs:', err.message);
   }
 }
 
-/* =========================================================
-   EXPONENTIAL BACKOFF
-========================================================= */
+/* =========================
+   DELETE POSTS AFTER TIME
+========================= */
+async function deleteOldPosts() {
+  try {
+    const now = new Date();
+
+    // Successful posts older than 10 minutes
+    const deletedSuccess = await AiScheduledPost.deleteMany({
+      status: 'POSTED',
+      updatedAt: { $lt: new Date(now - 10 * 60 * 1000) }
+    });
+
+    // Failed posts older than 30 minutes
+    const deletedFailed = await AiScheduledPost.deleteMany({
+      status: 'FAILED',
+      updatedAt: { $lt: new Date(now - 30 * 60 * 1000) }
+    });
+
+    if (deletedSuccess.deletedCount > 0 || deletedFailed.deletedCount > 0) {
+      console.log(`🗑️ Deleted AI posts → Success: ${deletedSuccess.deletedCount}, Failed: ${deletedFailed.deletedCount}`);
+    }
+  } catch (err) {
+    console.error('❌ Failed deleting old AI posts:', err.message);
+  }
+}
+
+/* =========================
+   BACKOFF CALCULATION
+========================= */
 function getBackoffTime(retryCount) {
   return SCHEDULE_INTERVAL * Math.pow(2, retryCount - 1);
 }
 
-/* =========================================================
+/* =========================
    PROCESS SINGLE POST
-========================================================= */
+========================= */
 async function processAiPost(post) {
-  const page = post.pageId;
+  let page = post.pageId;
+
+  // Handle string pageId (current schema) → fetch Page document
+  if (typeof page === 'string') {
+    page = await Page.findOne({ pageId: page }).exec();
+    if (!page) {
+      await monitor(null, post._id, 'SKIPPED_POST', 'AI post skipped because linked Page was not found.');
+      return;
+    }
+  }
 
   await monitor(page._id, post._id, 'POST_ATTEMPT',
-    `Scheduler is attempting to post AI content scheduled for ${post.scheduledTime.toLocaleString()}.`);
+    `Attempting AI post scheduled for ${post.scheduledTime.toLocaleString()}`);
 
   try {
-    await postToFacebook(
-      page.pageId,
-      page.pageToken,
-      post.text,
-      post.mediaUrl
-    );
+    await postToFacebook(page.pageId, page.pageToken, post.text, post.mediaUrl);
 
     post.status = 'POSTED';
     post.retryCount = 0;
     await post.save();
 
-    await monitor(page._id, post._id, 'POST_SUCCESS',
-      'AI post was successfully published to Facebook.');
-
+    await monitor(page._id, post._id, 'POST_SUCCESS', 'AI post published successfully');
     console.log(`✅ AI POSTED → ${post._id}`);
 
   } catch (err) {
@@ -79,30 +104,24 @@ async function processAiPost(post) {
     if (post.retryCount >= MAX_RETRIES) {
       post.status = 'FAILED';
       await post.save();
-
       await monitor(page._id, post._id, 'POST_FAILED',
-        `AI post permanently failed after ${MAX_RETRIES} attempts. Reason: ${err.message}`);
-
+        `AI post permanently failed after ${MAX_RETRIES} retries. Reason: ${err.message}`);
       console.error(`❌ AI FAILED → ${post._id}`);
-
     } else {
       await post.save();
-
       const delay = getBackoffTime(post.retryCount) / 1000;
-
       await monitor(page._id, post._id, 'POST_RETRY_SCHEDULED',
-        `Post failed. Retry ${post.retryCount} will occur after ${delay} seconds. Reason: ${err.message}`);
-
+        `Retry ${post.retryCount} scheduled after ${delay} seconds. Reason: ${err.message}`);
       console.warn(`⚠️ AI RETRY ${post.retryCount} → ${post._id}`);
     }
   }
 }
 
-/* =========================================================
+/* =========================
    MAIN SCHEDULER LOOP
-========================================================= */
+========================= */
 async function startAiPostScheduler() {
-  console.log('🕒 AI Scheduler started and watching scheduled posts');
+  console.log('🕒 AI Scheduler started');
 
   const runScheduler = async () => {
     if (isRunning) return;
@@ -111,35 +130,31 @@ async function startAiPostScheduler() {
     try {
       const now = new Date();
 
-      // Only log ticks every 5 minutes
+      // Scheduler tick logging every 5 minutes
       if (Date.now() - lastTickLog > LOG_INTERVAL) {
-        await monitor(null, null, 'SCHEDULER_TICK',
-          'Scheduler is scanning database for pending AI posts.');
+        monitor(null, null, 'SCHEDULER_TICK', 'Scanning database for pending AI posts').catch(console.error);
         lastTickLog = Date.now();
       }
 
-      // Clear old logs older than 30 minutes
-      await clearOldLogs(30);
+      // Clear old AI scheduler logs
+      clearOldLogs(30).catch(console.error);
 
+      // Delete old posts (posted 10m ago, failed 30m ago)
+      deleteOldPosts().catch(console.error);
+
+      // Fetch pending AI posts
       const posts = await AiScheduledPost.find({
         status: 'PENDING',
         scheduledTime: { $lte: now }
-      }).populate('pageId');
+      });
 
       for (const post of posts) {
-        if (!post.pageId) {
-          await monitor(null, post._id, 'SKIPPED_POST',
-            'Post skipped because linked page record was missing.');
-          continue;
-        }
-
+        // If retry > 0, check backoff
         if (post.retryCount > 0) {
-          const backoff = getBackoffTime(post.retryCount);
           const lastAttempt = post.updatedAt || post.createdAt;
-
+          const backoff = getBackoffTime(post.retryCount);
           if (now - lastAttempt < backoff) {
-            await monitor(post.pageId._id, post._id, 'BACKOFF_WAIT',
-              `Post is waiting for retry backoff period to finish.`);
+            await monitor(null, post._id, 'BACKOFF_WAIT', `Waiting for retry backoff`);
             continue;
           }
         }
@@ -148,9 +163,8 @@ async function startAiPostScheduler() {
       }
 
     } catch (err) {
-      console.error('❌ Scheduler crashed:', err.message);
-      await monitor(null, null, 'SCHEDULER_ERROR',
-        `Scheduler encountered an error: ${err.message}`);
+      console.error('❌ AI Scheduler crashed:', err.message);
+      await monitor(null, null, 'SCHEDULER_ERROR', `Scheduler error: ${err.message}`);
     } finally {
       isRunning = false;
       setTimeout(runScheduler, SCHEDULE_INTERVAL);
