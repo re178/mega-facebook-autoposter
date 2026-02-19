@@ -9,10 +9,12 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_SECRET
 });
 
-// Upload helper
+// ===================== UPLOAD HELPER =====================
 async function uploadToCloudinary(imageUrlOrBase64) {
   try {
-    // If it's already a URL, upload directly
+    if (!imageUrlOrBase64) return null;
+
+    // If URL
     if (imageUrlOrBase64.startsWith('http')) {
       const result = await cloudinary.uploader.upload(imageUrlOrBase64, {
         folder: "ai-images"
@@ -20,9 +22,11 @@ async function uploadToCloudinary(imageUrlOrBase64) {
       return result.secure_url;
     }
 
-    // If it's base64
+    // Clean base64 if it contains header
+    const cleanBase64 = imageUrlOrBase64.replace(/^data:image\/\w+;base64,/, '');
+
     const result = await cloudinary.uploader.upload(
-      `data:image/png;base64,${imageUrlOrBase64}`,
+      `data:image/png;base64,${cleanBase64}`,
       { folder: "ai-images" }
     );
 
@@ -36,103 +40,142 @@ async function uploadToCloudinary(imageUrlOrBase64) {
 
 // ===================== PROVIDERS =====================
 
-// 1️⃣ OpenAI DALL·E
+// 1️⃣ OpenAI DALL·E (FIXED)
 class DALLEImage {
   static name = 'DALLE';
   static dailyLimit = 50;
 
   static async generate(prompt) {
-    const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+    try {
+      if (!process.env.OPENAI_API_KEY) return null;
 
-    const res = await client.images.generate({
-      model: 'gpt-image-1',
-      prompt,
-      size: '1024x1024'
-    });
+      const client = new OpenAI({
+        apiKey: process.env.OPENAI_API_KEY
+      });
 
-    const imageUrl = res.data?.[0]?.url;
-    if (!imageUrl) return null;
+      const res = await client.images.generate({
+        model: 'gpt-image-1',
+        prompt,
+        size: '1024x1024'
+      });
 
-    return await uploadToCloudinary(imageUrl);
+      const base64 = res.data?.[0]?.b64_json;
+      if (!base64) return null;
+
+      return await uploadToCloudinary(base64);
+
+    } catch (err) {
+      console.error("DALLE Error:", err.message);
+      return null;
+    }
   }
 }
 
-// 2️⃣ Stability AI
+// 2️⃣ Stability AI (Safer version)
 class StabilityImage {
   static name = 'StabilityAI';
   static dailyLimit = 50;
 
   static async generate(prompt) {
-    const res = await axios.post(
-      'https://api.stability.ai/v1/generation/stable-diffusion-v1-5/text-to-image',
-      {
-        text_prompts: [{ text: prompt }],
-        height: 1024,
-        width: 1024,
-        samples: 1
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${process.env.STABILITY_API_KEY}`,
-          Accept: "application/json"
+    try {
+      if (!process.env.STABILITY_API_KEY) return null;
+
+      const res = await axios.post(
+        'https://api.stability.ai/v1/generation/stable-diffusion-v1-5/text-to-image',
+        {
+          text_prompts: [{ text: prompt }],
+          height: 1024,
+          width: 1024,
+          samples: 1
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${process.env.STABILITY_API_KEY}`,
+            Accept: "application/json"
+          },
+          timeout: 20000
         }
-      }
-    );
+      );
 
-    const base64 = res.data?.artifacts?.[0]?.base64;
-    if (!base64) return null;
+      const base64 = res.data?.artifacts?.[0]?.base64;
+      if (!base64) return null;
 
-    return await uploadToCloudinary(base64);
+      return await uploadToCloudinary(base64);
+
+    } catch (err) {
+      console.error("Stability Error:", err.response?.data || err.message);
+      return null;
+    }
   }
 }
 
-// 3️⃣ Leonardo AI
+// 3️⃣ Leonardo AI (Safe + Non-blocking)
 class LeonardoImage {
   static name = 'Leonardo';
   static dailyLimit = 50;
 
   static async generate(prompt) {
-    const res = await axios.post(
-      'https://cloud.leonardo.ai/api/rest/v1/generate',
-      {
-        prompt,
-        width: 1024,
-        height: 1024
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${process.env.LEONARDO_API_KEY}`
+    try {
+      if (!process.env.LEONARDO_API_KEY) return null;
+
+      const res = await axios.post(
+        'https://cloud.leonardo.ai/api/rest/v1/generations',
+        {
+          prompt,
+          width: 1024,
+          height: 1024
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${process.env.LEONARDO_API_KEY}`,
+            "Content-Type": "application/json"
+          },
+          timeout: 20000
         }
-      }
-    );
+      );
 
-    const imageUrl = res.data?.images?.[0]?.url;
-    if (!imageUrl) return null;
+      const imageUrl = res.data?.generations_by_pk?.generated_images?.[0]?.url;
+      if (!imageUrl) return null;
 
-    return await uploadToCloudinary(imageUrl);
+      return await uploadToCloudinary(imageUrl);
+
+    } catch (err) {
+      console.error("Leonardo Error:", err.response?.data || err.message);
+      return null;
+    }
   }
 }
 
-// 4️⃣ Cloudflare AI
+// 4️⃣ Cloudflare AI (Fixed base64 handling)
 class CloudflareImage {
   static name = 'Cloudflare';
   static dailyLimit = 50;
 
   static async generate(prompt) {
-    const res = await axios.post(
-      `https://api.cloudflare.com/client/v4/accounts/${process.env.CLOUDFLARE_ACCOUNT_ID}/ai/run/@cf/stabilityai/stable-diffusion-xl-base-1.0`,
-      { prompt },
-      {
-        headers: {
-          Authorization: `Bearer ${process.env.CLOUDFLARE_API_KEY}`
+    try {
+      if (!process.env.CLOUDFLARE_API_KEY || !process.env.CLOUDFLARE_ACCOUNT_ID)
+        return null;
+
+      const res = await axios.post(
+        `https://api.cloudflare.com/client/v4/accounts/${process.env.CLOUDFLARE_ACCOUNT_ID}/ai/run/@cf/stabilityai/stable-diffusion-xl-base-1.0`,
+        { prompt },
+        {
+          headers: {
+            Authorization: `Bearer ${process.env.CLOUDFLARE_API_KEY}`
+          },
+          timeout: 20000
         }
-      }
-    );
+      );
 
-    const base64 = res.data?.result?.image;
-    if (!base64) return null;
+      const base64 = res.data?.result?.image;
+      if (!base64) return null;
 
-    return await uploadToCloudinary(base64);
+      return await uploadToCloudinary(base64);
+
+    } catch (err) {
+      console.error("Cloudflare Error:", err.response?.data || err.message);
+      return null;
+    }
   }
 }
 
