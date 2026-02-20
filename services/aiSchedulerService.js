@@ -23,7 +23,8 @@ const {
   CloudflareImage,
   StabilityImage,
   LeonardoImage,
-  DALLEImage
+  DALLEImage,
+  SmartPexelsImage
 } = require('../services/imageProviders');
 
 // ===================== PROVIDER ARRAYS =====================
@@ -42,7 +43,8 @@ const ImageProviders = [
   CloudflareImage,
   StabilityImage,
   LeonardoImage,
-  DALLEImage
+  DALLEImage,
+  SmartPexelsImage
 ];
 
 // ===================== GLOBAL SETTINGS =====================
