@@ -38,9 +38,38 @@ async function uploadToCloudinary(imageUrlOrBase64) {
   }
 }
 
+// ===================== SMART KEYWORD EXTRACTION =====================
+function extractSmartKeywords(text) {
+  if (!text) return "business";
+
+  // 1️⃣ Use hashtags first
+  const hashtags = text.match(/#\w+/g);
+  if (hashtags && hashtags.length > 0) {
+    return hashtags.map(tag => tag.replace("#", "")).join(" ");
+  }
+
+  // 2️⃣ Clean punctuation
+  const cleaned = text
+    .replace(/[^\w\s]/gi, '')
+    .toLowerCase();
+
+  const stopWords = [
+    "the","and","is","in","at","of","a","to","for",
+    "on","with","this","that","it","as","an","be",
+    "are","was","were","by","from","about","into",
+    "after","before","over","under","again"
+  ];
+
+  const words = cleaned
+    .split(" ")
+    .filter(w => w.length > 3 && !stopWords.includes(w));
+
+  return words.slice(0, 6).join(" ") || "business";
+}
+
 // ===================== PROVIDERS =====================
 
-// 1️⃣ OpenAI DALL·E (FIXED)
+// 1️⃣ OpenAI DALL·E
 class DALLEImage {
   static name = 'DALLE';
   static dailyLimit = 50;
@@ -71,7 +100,7 @@ class DALLEImage {
   }
 }
 
-// 2️⃣ Stability AI (Safer version)
+// 2️⃣ Stability AI
 class StabilityImage {
   static name = 'StabilityAI';
   static dailyLimit = 50;
@@ -109,7 +138,7 @@ class StabilityImage {
   }
 }
 
-// 3️⃣ Leonardo AI (Safe + Non-blocking)
+// 3️⃣ Leonardo AI
 class LeonardoImage {
   static name = 'Leonardo';
   static dailyLimit = 50;
@@ -146,7 +175,7 @@ class LeonardoImage {
   }
 }
 
-// 4️⃣ Cloudflare AI (Fixed base64 handling)
+// 4️⃣ Cloudflare AI
 class CloudflareImage {
   static name = 'Cloudflare';
   static dailyLimit = 50;
@@ -180,10 +209,50 @@ class CloudflareImage {
   }
 }
 
+// 5️⃣ Smart Pexels (Vertical + Hashtag Intelligent)
+class SmartPexelsImage {
+  static name = 'SmartPexels';
+  static dailyLimit = 1000;
+
+  static async generate(prompt) {
+    try {
+      if (!process.env.PEXELS_API_KEY) return null;
+
+      const searchQuery = extractSmartKeywords(prompt);
+
+      const res = await axios.get(
+        `https://api.pexels.com/v1/search?query=${encodeURIComponent(searchQuery)}&per_page=15&orientation=portrait`,
+        {
+          headers: {
+            Authorization: process.env.PEXELS_API_KEY
+          },
+          timeout: 15000
+        }
+      );
+
+      const photos = res.data?.photos;
+      if (!photos || photos.length === 0) return null;
+
+      // Pick most vertical image
+      const bestPhoto = photos.sort((a, b) => b.height - a.height)[0];
+
+      const imageUrl = bestPhoto?.src?.large2x || bestPhoto?.src?.large;
+      if (!imageUrl) return null;
+
+      return await uploadToCloudinary(imageUrl);
+
+    } catch (err) {
+      console.error("SmartPexels Error:", err.response?.data || err.message);
+      return null;
+    }
+  }
+}
+
 // ===================== EXPORT =====================
 module.exports = {
   DALLEImage,
   StabilityImage,
   LeonardoImage,
-  CloudflareImage
+  CloudflareImage,
+  SmartPexelsImage
 };
