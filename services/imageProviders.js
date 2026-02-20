@@ -153,7 +153,7 @@ class CloudflareImage {
 
   static async generate(prompt) {
     try {
-      if (!process.env.CLOUDFLARE_API_TOKEN || !process.env.CLOUDFLARE_ACCOUNT_ID)
+      if (!process.env.CLOUDFLARE_API_KEY || !process.env.CLOUDFLARE_ACCOUNT_ID)
         return null;
 
       const res = await axios.post(
@@ -161,7 +161,7 @@ class CloudflareImage {
         { prompt },
         {
           headers: {
-            Authorization: `Bearer ${process.env.CLOUDFLARE_API_TOKEN}
+            Authorization: `Bearer ${process.env.CLOUDFLARE_API_KEY}
           },
           timeout: 20000
         }
