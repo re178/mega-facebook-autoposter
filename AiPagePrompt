@@ -1,0 +1,58 @@
+const mongoose = require('mongoose');
+
+const AiPagePromptSchema = new mongoose.Schema({
+  pageId: { 
+    type: mongoose.Schema.Types.ObjectId, 
+    ref: 'Page', 
+    required: true, 
+    unique: true 
+  },
+
+  // ===================== TEXT PROMPT SETTINGS =====================
+  text: {
+    tone: { type: String, required: true }, // friendly, professional, humorous, motivational, etc.
+    style: { type: String, required: true }, // storytelling, observational, casual, informative, etc.
+    preferredAngles: [{ 
+      type: String, 
+      enum: ['memory','observation','curiosity','experience','reflection','surprise','casual'] 
+    }], // subset of angles to prioritize for this page
+    length: { type: String, enum: ['short','medium','long'], required: true }, // length of posts
+    rules: {
+      noEmojis: { type: Boolean, default: true },
+      noHashtags: { type: Boolean, default: true },
+      noAdvice: { type: Boolean, default: true },
+      noLists: { type: Boolean, default: true }
+    },
+    keywords: [{ type: String }], // optional recurring page words/phrases
+    engagementStrategy: { type: String } // optional: storytelling, curiosity, provoke comments, emotional
+  },
+
+  // ===================== IMAGE PROMPT SETTINGS =====================
+  image: {
+    style: { type: String, required: true }, // realistic, cartoon, cinematic, editorial
+    colorPalette: { type: String }, // branding colors or palette hints
+    subjectPreferences: [{ type: String }], // people, products, environment, abstract, etc.
+    restrictions: [{ type: String }], // avoid logos, watermarks, certain objects
+    composition: { type: String }, // close-up, wide shot, cinematic, flat
+    preferredProviders: [{ type: String }] // optional: DALLE, Leonardo, SmartPexels
+  },
+
+  // ===================== METADATA FOR PROMPT OPTIMIZATION =====================
+  metadata: {
+    pagePurpose: { type: String }, // niche: tech, lifestyle, education, commerce
+    language: { type: String }, // preferred post language
+    postGoal: { type: String }, // awareness, engagement, conversion
+    primaryAudienceEmotion: { type: String } // fun, inspiring, persuasive, informative
+  },
+
+  createdAt: { type: Date, default: Date.now },
+  updatedAt: { type: Date, default: Date.now }
+});
+
+// Update timestamp automatically
+AiPagePromptSchema.pre('save', function(next) {
+  this.updatedAt = Date.now();
+  next();
+});
+
+module.exports = mongoose.model('AiPagePrompt', AiPagePromptSchema);
