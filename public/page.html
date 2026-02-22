@@ -22,6 +22,7 @@
   <a data-page="ads-section">Ads</a>
   <a data-page="manage-section">Manage</a>
  <a data-page="ai-scheduler-section">AI Post Scheduler</a>
+   <a data-page="page-profile-section">Page Profile</a>     
      
 </nav>
 
@@ -238,6 +239,56 @@
   </div>
 </section>
 
+<!-- PAGE PROFILE SECTION -->
+<section class="card" id="page-profile-section" style="display:none;">
+  <h3>Page Profile</h3>
+
+  <label>Name:
+    <input type="text" id="profile-name">
+  </label>
+
+  <label>Tone:
+    <select id="profile-tone">
+      <option value="friendly">Friendly</option>
+      <option value="professional">Professional</option>
+      <option value="humorous">Humorous</option>
+      <option value="motivational">Motivational</option>
+    </select>
+  </label>
+
+  <label>Writing Style:
+    <select id="profile-writing-style">
+      <option value="conversational">Conversational</option>
+      <option value="formal">Formal</option>
+      <option value="informative">Informative</option>
+    </select>
+  </label>
+
+  <label>Voice:
+    <input type="text" id="profile-voice">
+  </label>
+
+  <label>Audience Tone:
+    <input type="text" id="profile-audience-tone">
+  </label>
+
+  <label>Audience Age:
+    <input type="text" id="profile-audience-age">
+  </label>
+
+  <label>Audience Interest (comma-separated):
+    <input type="text" id="profile-audience-interest">
+  </label>
+
+  <label>Extra Notes:
+    <textarea id="profile-extra-notes"></textarea>
+  </label>
+
+  <div class="actions">
+    <button id="profile-save">💾 Save Profile</button>
+    <button id="profile-delete">🗑 Delete Profile</button>
+  </div>
+</section>      
 
     </main>
   </div>
