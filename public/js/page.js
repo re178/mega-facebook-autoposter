@@ -115,7 +115,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   }, 30000);
 });
 // ======= Sidebar Navigation for New Sections =======
-const sections = ['create-post', 'posts-list', 'page-logs', 'messaging-section', 'analytics-section', 'ads-section', 'manage-section', 'ai-scheduler-section'];
+const sections = ['create-post', 'posts-list', 'page-logs', 'messaging-section', 'analytics-section', 'ads-section', 'manage-section', 'ai-scheduler-section', 'page-profile-section'];
 document.querySelectorAll('#page-nav a').forEach(link => {
   link.addEventListener('click', () => {
     const page = link.dataset.page;
