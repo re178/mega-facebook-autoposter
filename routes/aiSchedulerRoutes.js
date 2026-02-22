@@ -6,6 +6,7 @@ const AiTopic = require('../models/AiTopic');
 const AiScheduledPost = require('../models/AiScheduledPost');
 const AiLog = require('../models/AiLog');
 const Page = require('../models/Page');
+const PageProfile = require('../models/PageProfile');
 
 // SERVICES
 const {
@@ -245,6 +246,43 @@ router.post('/auto-generation/toggle', (req, res) => {
   res.json({ enabled: AUTO_GENERATION_ENABLED });
 });
 
+/* =========================================================
+   PAGE PROFILE CRUD
+========================================================= */
+
+// Get PageProfile for a page
+router.get('/page/:pageId/profile', async (req, res) => {
+  try {
+    const profile = await PageProfile.findOne({ pageId: req.params.pageId });
+    safeJson(res, profile);
+  } catch (err) { handleError(res, err); }
+});
+
+// Create or update profile
+router.post('/page/:pageId/profile', async (req, res) => {
+  try {
+    const { name, tone, writingStyle, voice, audienceTone, audienceAge, audienceInterest, extraNotes } = req.body;
+    
+    const profile = await PageProfile.findOneAndUpdate(
+      { pageId: req.params.pageId },
+      { name, tone, writingStyle, voice, audienceTone, audienceAge, audienceInterest, extraNotes },
+      { new: true, upsert: true }
+    );
+
+    await logAction({ pageId: req.params.pageId, action: 'PROFILE_UPDATED', message: 'Page profile saved/updated' });
+
+    res.json(profile);
+  } catch (err) { handleError(res, err); }
+});
+
+// Delete profile
+router.delete('/page/:pageId/profile', async (req, res) => {
+  try {
+    await PageProfile.deleteOne({ pageId: req.params.pageId });
+    await logAction({ pageId: req.params.pageId, action: 'PROFILE_DELETED', message: 'Page profile deleted' });
+    res.json({ success: true });
+  } catch (err) { handleError(res, err); }
+});
 
 module.exports = router;
 
