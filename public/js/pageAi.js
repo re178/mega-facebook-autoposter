@@ -76,6 +76,81 @@ els.autoGenToggle.addEventListener('click', async () => {
 loadAutoGenState();
 
   /* =====================================================
+   PAGE PROFILE
+==================================================== */
+const profileEls = {
+  name: document.getElementById('profile-name'),
+  tone: document.getElementById('profile-tone'),
+  writingStyle: document.getElementById('profile-writing-style'),
+  voice: document.getElementById('profile-voice'),
+  audienceTone: document.getElementById('profile-audience-tone'),
+  audienceAge: document.getElementById('profile-audience-age'),
+  audienceInterest: document.getElementById('profile-audience-interest'),
+  extraNotes: document.getElementById('profile-extra-notes'),
+  saveBtn: document.getElementById('profile-save'),
+  deleteBtn: document.getElementById('profile-delete')
+};
+
+async function loadProfile() {
+  try {
+    const res = await fetch(`/api/ai/page/${pageId}/profile`);
+    const data = await res.json();
+    if (!data) return;
+
+    profileEls.name.value = data.name || '';
+    profileEls.tone.value = data.tone || 'friendly';
+    profileEls.writingStyle.value = data.writingStyle || 'conversational';
+    profileEls.voice.value = data.voice || 'first-person plural';
+    profileEls.audienceTone.value = data.audienceTone || 'casual';
+    profileEls.audienceAge.value = data.audienceAge || 'all ages';
+    profileEls.audienceInterest.value = (data.audienceInterest || []).join(', ');
+    profileEls.extraNotes.value = data.extraNotes || '';
+  } catch (err) {
+    log('❌ Failed to load page profile', 'error');
+  }
+}
+
+profileEls.saveBtn.onclick = async () => {
+  try {
+    const payload = {
+      name: profileEls.name.value,
+      tone: profileEls.tone.value,
+      writingStyle: profileEls.writingStyle.value,
+      voice: profileEls.voice.value,
+      audienceTone: profileEls.audienceTone.value,
+      audienceAge: profileEls.audienceAge.value,
+      audienceInterest: profileEls.audienceInterest.value.split(',').map(i => i.trim()),
+      extraNotes: profileEls.extraNotes.value
+    };
+
+    const res = await fetch(`/api/ai/page/${pageId}/profile`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    const data = await res.json();
+    log('💾 Page profile saved');
+  } catch (err) {
+    log('❌ Failed saving page profile', 'error');
+  }
+};
+
+profileEls.deleteBtn.onclick = async () => {
+  if (!confirm('Are you sure you want to delete the page profile?')) return;
+
+  await fetch(`/api/ai/page/${pageId}/profile`, { method: 'DELETE' });
+  log('🗑 Page profile deleted');
+
+  // Clear fields
+  Object.values(profileEls).forEach(el => {
+    if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') el.value = '';
+  });
+};
+
+loadProfile();
+
+  /* =====================================================
      LOGGER
   ===================================================== */
   function log(msg, type = 'info') {
