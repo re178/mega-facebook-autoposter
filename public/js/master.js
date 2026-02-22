@@ -1,20 +1,6 @@
-
-
 // =========================
-// MASTER DASHBOARD API
+// MASTER DASHBOARD CONTROLLER (FULL REWRITE SAFE)
 // =========================
-async function getMasterSummary() {
-  const res = await fetch(`${API_BASE}/master/summary`);
-  return res.json();
-}
-
-// =========================
-// PAGES API
-// =========================
-async function getPages() {
-  const res = await fetch(`${API_BASE}/pages`);
-  return res.json();
-}
 
 document.addEventListener('DOMContentLoaded', async () => {
   const summaryContainer = document.getElementById('summary-cards');
@@ -25,33 +11,94 @@ document.addEventListener('DOMContentLoaded', async () => {
     return;
   }
 
-  // === Load pages for navigation ===
-  let pages = [];
-  try {
-    pages = await getPages();
-  } catch (err) {
-    console.error('Failed to load pages', err);
+  /* =====================================================
+     HELPERS
+  ===================================================== */
+
+  async function safeFetch(url) {
+    try {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error('Request failed');
+      return await res.json();
+    } catch (err) {
+      console.error('Fetch failed:', url);
+      return [];
+    }
   }
 
-  // === Fetch master summary ===
-  let summary;
-  try {
-    summary = await getMasterSummary();
-  } catch (err) {
-    console.error('Failed to load summary', err);
-    return;
+  /* =====================================================
+     LOAD ALL PAGES
+  ===================================================== */
+
+  let pages = await safeFetch(`${API_BASE}/pages`);
+
+  if (!Array.isArray(pages)) pages = [];
+
+  /* =====================================================
+     AGGREGATE POSTS ACROSS ALL PAGES
+  ===================================================== */
+
+  let totalPosts = 0;
+  let posted = 0;
+  let failed = 0;
+
+  for (const page of pages) {
+    const pageId = page.pageId || page._id;
+
+    if (!pageId) continue;
+
+    // ---- Manual Posts ----
+    const manualPosts = await safeFetch(`/api/pages/${pageId}/posts`);
+
+    if (Array.isArray(manualPosts)) {
+      totalPosts += manualPosts.length;
+      posted += manualPosts.filter(p => p.status === 'posted').length;
+      failed += manualPosts.filter(p => p.status === 'failed').length;
+    }
+
+    // ---- AI Posts ----
+    const aiPosts = await safeFetch(`/api/ai/page/${pageId}/upcoming-posts`);
+
+    if (Array.isArray(aiPosts)) {
+      totalPosts += aiPosts.length;
+      posted += aiPosts.filter(p => p.status === 'posted').length;
+      failed += aiPosts.filter(p => p.status === 'failed').length;
+    }
   }
 
-  // === Clear containers ===
+  /* =====================================================
+     LOAD RECENT LOGS (FROM ALL PAGES)
+  ===================================================== */
+
+  let recentLogs = [];
+
+  for (const page of pages) {
+    const pageId = page.pageId || page._id;
+    if (!pageId) continue;
+
+    const logs = await safeFetch(`/api/pages/${pageId}/logs`);
+
+    if (Array.isArray(logs)) {
+      recentLogs.push(...logs);
+    }
+  }
+
+  // Sort logs by newest
+  recentLogs.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+  recentLogs = recentLogs.slice(0, 10);
+
+  /* =====================================================
+     RENDER SUMMARY CARDS
+  ===================================================== */
+
   summaryContainer.innerHTML = '';
-  logsContainer.innerHTML = '';
 
-  // === Display Stats Cards ===
   const cards = [
-    { title: 'Total Pages', value: summary.totalPages ?? 0 },
-    { title: 'Total Posts', value: summary.totalPosts ?? 0 },
-    { title: 'Posted', value: summary.posted ?? 0 },
-    { title: 'Failed', value: summary.failed ?? 0 }
+    { title: 'Total Pages', value: pages.length },
+    { title: 'Total Posts', value: totalPosts },
+    { title: 'Posted', value: posted },
+    { title: 'Failed', value: failed }
   ];
 
   cards.forEach(card => {
@@ -64,30 +111,34 @@ document.addEventListener('DOMContentLoaded', async () => {
     summaryContainer.appendChild(div);
   });
 
-  // === Display Recent Logs ===
-  if (Array.isArray(summary.recentLogs)) {
-    summary.recentLogs.forEach(log => {
-      const logDiv = document.createElement('div');
-      logDiv.className = 'log';
-      logDiv.innerHTML = `
-        <span>${log.pageId?.name ? log.pageId.name + ': ' : ''}${log.action} - ${log.message}</span>
-        <span>${new Date(log.createdAt).toLocaleTimeString()}</span>
-      `;
-      logsContainer.appendChild(logDiv);
-    });
-  }
+  /* =====================================================
+     RENDER RECENT LOGS
+  ===================================================== */
 
-  // ===============================
-  // Sidebar navigation: Pages Modal
-  // ===============================
+  logsContainer.innerHTML = '';
+
+  recentLogs.forEach(log => {
+    const logDiv = document.createElement('div');
+    logDiv.className = 'log';
+    logDiv.innerHTML = `
+      <span>${log.action} - ${log.message}</span>
+      <span>${new Date(log.createdAt).toLocaleTimeString()}</span>
+    `;
+    logsContainer.appendChild(logDiv);
+  });
+
+  /* =====================================================
+     PAGE SELECTION MODAL (UNCHANGED LOGIC)
+  ===================================================== */
+
   const pageNavLink = document.querySelector('.nav a[data-page="page"]');
 
-  // create modal container
   const pageModal = document.createElement('div');
   pageModal.style = `
     display:none; position:fixed; top:0; left:0; width:100%; height:100%;
     background:rgba(0,0,0,0.6); justify-content:center; align-items:center; z-index:1000;
   `;
+
   pageModal.innerHTML = `
     <div style="background:#0b1220; padding:20px; border-radius:12px; max-width:400px; width:90%;">
       <h3 style="margin-top:0; color:#fff;">Select a Page</h3>
@@ -98,6 +149,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       </div>
     </div>
   `;
+
   document.body.appendChild(pageModal);
 
   if (pageNavLink) {
@@ -111,29 +163,30 @@ document.addEventListener('DOMContentLoaded', async () => {
 
       const select = pageModal.querySelector('#page-select');
       select.innerHTML = '';
+
       pages.forEach(p => {
         const opt = document.createElement('option');
-        opt.value = p.pageId;
+        opt.value = p.pageId || p._id;
         opt.textContent = p.name;
         select.appendChild(opt);
       });
 
       pageModal.style.display = 'flex';
 
-      // cancel button
       pageModal.querySelector('#page-cancel').onclick = () => {
         pageModal.style.display = 'none';
       };
 
-      // go button
       pageModal.querySelector('#page-go').onclick = () => {
         const selectedPageId = select.value;
         pageModal.style.display = 'none';
+
         const url = new URL('/pages', window.location.origin);
         url.searchParams.set('pageId', selectedPageId);
-        window.location.href = url.toString(); // safe redirect
+        window.location.href = url.toString();
       };
     });
   }
+
 });
 
