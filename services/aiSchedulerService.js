@@ -6,7 +6,7 @@ const AiScheduledPost = require('../models/AiScheduledPost');
 const AiTopic = require('../models/AiTopic');
 const AiLog = require('../models/AiLog');
 const Page = require('../models/Page');
-
+const PageProfile = require('../models/PageProfile');
 // ===================== AI PROVIDERS =====================
 const {
   CloudflareText,
@@ -106,10 +106,29 @@ function shiftTime(base, minutes) {
 }
 
 // ===================== PROMPT BUILDER =====================
-function buildPrompt({ topic, angle }) {
+async function buildPrompt({ topic, angle, pageId, textSeed }) {
+  // fetch page profile
+  const profile = await PageProfile.findOne({ pageId });
+
+  const tone = profile?.tone || 'friendly';
+  const writingStyle = profile?.writingStyle || 'conversational';
+  const voice = profile?.voice || 'first-person plural';
+  const audienceTone = profile?.audienceTone || 'casual';
+  const audienceInterest = profile?.audienceInterest.join(', ') || 'general audience';
+  const extraNotes = profile?.extraNotes || '';
+
+  // textSeed ensures uniqueness for images later
+  const seedText = textSeed ? ` Reference previous text: "${textSeed}"` : '';
+
   return `
 Write a natural, relatable Facebook post about "${topic}".
 Angle: ${angle}
+Tone: ${tone}
+Style: ${writingStyle}
+Voice: ${voice}
+Audience: ${audienceTone}, interests: ${audienceInterest}
+${extraNotes}
+${seedText}
 
 Rules:
 - Human tone
@@ -122,6 +141,7 @@ Rules:
 `;
 }
 
+
 // ===================== PROVIDER SELECT =====================
 function selectProvider(providers) {
   const now = Date.now();
@@ -132,10 +152,11 @@ function selectProvider(providers) {
 }
 
 // ===================== TEXT GENERATION =====================
-async function generateText(topic, angle, pageId) {
+async function generateText(topic, angle, pageId, textSeed = null) {
   for (const provider of TextProviders) {
     try {
-      const text = await provider.generate(buildPrompt({ topic, angle }));
+      const prompt = await buildPrompt({ topic, angle, pageId, textSeed });
+      const text = await provider.generate(prompt);
       providerState[provider.name].callsToday++;
       if (text) return cleanText(text);
     } catch {
@@ -149,10 +170,11 @@ async function generateText(topic, angle, pageId) {
 }
 
 // ===================== IMAGE GENERATION =====================
-async function generateImage(topic, pageId) {
+async function generateImage(topic, pageId, textSeed = null) {
+  const seedText = textSeed ? ` with context: "${textSeed}"` : '';
   for (const provider of ImageProviders) {
     try {
-      const url = await provider.generate(`Realistic photo about ${topic}`);
+      const url = await provider.generate(`Realistic photo about ${topic}${seedText}`);
       if (url) return url;
     } catch {}
   }
