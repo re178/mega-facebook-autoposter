@@ -1,4 +1,4 @@
-const mongoose = require('mongoose');
+toconst mongoose = require('mongoose');
 const moment = require('moment-timezone');
 
 // ===================== MODELS =====================
@@ -228,24 +228,46 @@ async function generatePostsForTopic(topicId) {
   }
   return created;
 }
-//===================== AUTO GENERATION CORE =====================//
+//===================== AUTO GENERATION CORE (SAFE ORIGINAL LOGIC) =====================//
 async function autoGenerate() {
   if (!AUTO_GENERATION_ENABLED) return;
 
-  const now = moment.tz(TIMEZONE);
-  const topics = await AiTopic.find();
+  let now;
+  try {
+    now = moment().tz(TIMEZONE);
+  } catch (err) {
+    console.error('TIMEZONE ERROR:', err.message);
+    return;
+  }
+
+  let topics;
+  try {
+    topics = await AiTopic.find();
+  } catch (err) {
+    console.error('DB ERROR FETCHING TOPICS:', err.message);
+    return;
+  }
+
+  if (!topics || topics.length === 0) return;
 
   for (const topic of topics) {
     try {
+
       /* ---------------- 1. AUTO DELETE — TOPIC EXPIRED ---------------- */
-      if (moment(topic.endDate).isBefore(now)) {
+      const endMoment = moment(topic.endDate).tz(TIMEZONE);
+      if (!endMoment.isValid()) {
+        await monitor(topic._id, topic.pageId, null, 'AUTO_INVALID_ENDDATE', 'Invalid endDate');
+        continue;
+      }
+
+      if (endMoment.isBefore(now)) {
         await AiLog.deleteMany({ topicId: topic._id });
         await AiTopic.deleteOne({ _id: topic._id });
         await monitor(topic._id, topic.pageId, null, 'TOPIC_EXPIRED', 'Topic expired and deleted');
         continue;
       }
 
-      /* ---------------- 2. AUTO DELETE — MAX POSTS REACHED -------------- */
+      /* ---------------- 2. MAX POSTS CHECK ---------------- */
       const logCount = await AiLog.countDocuments({
         topicId: topic._id,
         action: 'AUTO_POST_CREATED'
@@ -263,14 +285,14 @@ async function autoGenerate() {
         continue;
       }
 
-      /* ---------------- 3. ENFORCE ONE PENDING POST PER TOPIC ----------- */
+      /* ---------------- 3. ONE PENDING ONLY ---------------- */
       const pending = await AiScheduledPost.findOne({
         topicId: topic._id,
         status: 'PENDING'
       });
       if (pending) continue;
 
-      /* ---------------- 4. ANGLE SELECTION ----------------------------- */
+      /* ---------------- 4. ANGLE SELECTION (UNCHANGED LOGIC) ---------------- */
       const usedAngles = await AiLog.distinct('message', {
         topicId: topic._id,
         action: 'AUTO_POST_CREATED'
@@ -284,9 +306,14 @@ async function autoGenerate() {
         continue;
       }
 
-      /* ---------------- 5. SLOT DISCOVERY ------------------------------ */
-      const startDate = moment.tz(topic.startDate, TIMEZONE);
-      const endDate = moment.tz(topic.endDate, TIMEZONE);
+      /* ---------------- 5. SLOT DISCOVERY ---------------- */
+      if (!Array.isArray(topic.times) || topic.times.length === 0) {
+        await monitor(topic._id, topic.pageId, null, 'AUTO_NO_TIMES', 'No time slots defined');
+        continue;
+      }
+
+      const startDate = moment(topic.startDate).tz(TIMEZONE);
+      const endDate = moment(topic.endDate).tz(TIMEZONE);
 
       let scheduledTime = null;
       let day = moment.max(now.clone().startOf('day'), startDate.clone().startOf('day'));
@@ -297,6 +324,7 @@ async function autoGenerate() {
         for (const t of times) {
           const slot = moment.tz(`${day.format('YYYY-MM-DD')} ${t}`, TIMEZONE);
 
+          if (!slot.isValid()) continue;
           if (slot.isSameOrBefore(now)) continue;
           if (slot.isBefore(startDate) || slot.isAfter(endDate)) continue;
 
@@ -317,7 +345,7 @@ async function autoGenerate() {
 
       if (!scheduledTime) continue;
 
-      /* ---------------- 6. GENERATE CONTENT ---------------------------- */
+      /* ---------------- 6. GENERATE CONTENT ---------------- */
       const text = await generateText(topic.topicName, angle, topic.pageId);
       if (!text) continue;
 
@@ -325,7 +353,7 @@ async function autoGenerate() {
         ? await generateImage(topic.topicName, topic.pageId, text)
         : null;
 
-      /* ---------------- 7. CREATE SCHEDULED POST ----------------------- */
+      /* ---------------- 7. CREATE POST ---------------- */
       const post = await AiScheduledPost.create({
         topicId: topic._id,
         pageId: topic.pageId,
@@ -338,12 +366,12 @@ async function autoGenerate() {
 
       await monitor(topic._id, topic.pageId, post._id, 'AUTO_POST_CREATED', angle);
 
-      // One post per scheduler run
-      break;
+      break; // same behavior as your original
 
-    } catch (err) {
-      console.error(`Auto-generation failed for topic ${topic._id}:`, err.message);
-      await monitor(topic._id, topic.pageId, null, 'AUTO_GEN_ERROR', err.message);
+    } catch (topicErr) {
+      console.error(`AUTO TOPIC ERROR ${topic._id}:`, topicErr.message);
+      await monitor(topic._id, topic.pageId, null, 'AUTO_GEN_ERROR', topicErr.message);
+      continue;
     }
   }
 }
