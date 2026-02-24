@@ -210,7 +210,7 @@ async function generatePostsForTopic(topicId) {
       const text = await generateText(topic.topicName, angle, topic.pageId);
       if (!text) continue;
 
-      const mediaUrl = topic.includeMedia ? await generateImage(topic.topicName, topic.pageId) : null;
+      const mediaUrl = topic.includeMedia ? await generateImage(topic.topicName, topic.pageId, text) : null;
 
       const post = await AiScheduledPost.create({
         topicId,
@@ -322,7 +322,7 @@ async function autoGenerate() {
       if (!text) continue;
 
       const mediaUrl = topic.includeMedia
-        ? await generateImage(topic.topicName, topic.pageId)
+        ? await generateImage(topic.topicName, topic.pageId, text)
         : null;
 
       /* ---------------- 7. CREATE SCHEDULED POST ----------------------- */
