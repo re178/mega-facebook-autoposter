@@ -158,7 +158,19 @@ class CloudflareText {
       `https://api.cloudflare.com/client/v4/accounts/${process.env.CLOUDFLARE_ACCOUNT_ID}/ai/run/@cf/meta/llama-3-8b-instruct`,
       {
         messages: [
-          { role: 'system', content: 'You write human-like Facebook posts.' },
+          {
+  role: 'system',
+  content: `
+You generate Facebook posts.
+
+Strictly follow all formatting rules in the user prompt.
+Never add emojis.
+Never add hashtags.
+Never use bullet points or lists.
+Never explain anything.
+Return only the final post text.
+`
+},
           { role: 'user', content: prompt }
         ]
       },
