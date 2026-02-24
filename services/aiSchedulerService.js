@@ -308,7 +308,7 @@ async function autoGenerate() {
 
       /* ---------------- 5. SLOT DISCOVERY ---------------- */
       if (!Array.isArray(topic.times) || topic.times.length === 0) {
-        await monitor(topic._id, topic.pageId, null, 'AUTO_NO_TIMES', 'No time slots defined');
+        await monitor(topic._id, topic.pageId, null, 'TOPIC_NO_TIMES', 'No time slots defined');
         continue;
       }
 
