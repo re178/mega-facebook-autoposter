@@ -197,7 +197,10 @@ class CloudflareImage {
         }
       );
 
-      const base64 = res.data?.result?.image;
+      const base64 =
+  res.data?.result?.image ||
+  res.data?.result?.images?.[0] ||
+  null;
       if (!base64) return null;
 
       return await uploadToCloudinary(base64);
