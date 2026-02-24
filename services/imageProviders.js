@@ -26,7 +26,7 @@ async function uploadToCloudinary(imageUrlOrBase64) {
     const cleanBase64 = imageUrlOrBase64.replace(/^data:image\/\w+;base64,/, '');
 
     const result = await cloudinary.uploader.upload(
-      `data:image/png;base64,${cleanBase64}`,
+      `data:image/jpeg;base64,${cleanBase64}`,
       { folder: "ai-images" }
     );
 
