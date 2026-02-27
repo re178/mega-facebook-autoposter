@@ -223,6 +223,42 @@ loadProfile();
   };
 
   /* =====================================================
+   EDIT TOPIC
+===================================================== */
+els.editBtn.onclick = async () => {
+  if (!currentTopicId)
+    return log('❌ Select a topic first', 'error');
+
+  try {
+    const payload = {
+      topicName: els.topicName.value.trim(),
+      postsPerDay: Number(els.postsPerDay.value),
+      times: [...els.timesContainer.querySelectorAll('input')].map(i => i.value),
+      startDate: els.startDate.value,
+      endDate: els.endDate.value,
+      repeatType: els.repeatType.value,
+      includeMedia: els.includeMedia.checked
+    };
+
+    const res = await fetch(`/api/ai/topic/${currentTopicId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    if (!res.ok) throw new Error('Update failed');
+
+    log('✏️ Topic updated');
+    loadTopics();
+    loadUpcomingPosts();
+    loadLogs();
+
+  } catch (err) {
+    log('❌ Failed updating topic', 'error');
+  }
+};
+
+  /* =====================================================
      SAVE TOPIC
   ===================================================== */
   els.saveBtn.onclick = async () => {
