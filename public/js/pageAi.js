@@ -273,7 +273,24 @@ els.editBtn.onclick = async () => {
         includeMedia: els.includeMedia.checked
       };
 
-      if (!payload.topicName) return log('❌ Topic name required', 'error');
+      // STRICT SAFE VALIDATION (NO BACKEND CHANGE)
+if (!payload.topicName)
+  return log('❌ Topic name required', 'error');
+
+if (!payload.postsPerDay || payload.postsPerDay <= 0)
+  return log('❌ Posts per day must be greater than 0', 'error');
+
+if (!payload.times.length || payload.times.some(t => !t))
+  return log('❌ At least one valid time is required', 'error');
+
+if (!payload.startDate)
+  return log('❌ Start date required', 'error');
+
+if (!payload.endDate)
+  return log('❌ End date required', 'error');
+
+if (new Date(payload.endDate) < new Date(payload.startDate))
+  return log('❌ End date cannot be before start date', 'error');
 
       const res = await fetch(`/api/ai/page/${pageId}/topic`, {
         method: 'POST',
