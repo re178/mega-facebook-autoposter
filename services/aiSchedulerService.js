@@ -251,7 +251,7 @@ try {
   return;
 }
 if (!topics.length) return;
-  }
+  
 
   if (!topics || topics.length === 0) return;
 
