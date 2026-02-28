@@ -45,10 +45,13 @@ els.autoGenToggle = document.getElementById('autoGenToggle');
 // Load current state from backend
 async function loadAutoGenState() {
   try {
-    const res = await fetch('/api/ai/auto-generation/state');
+    const res = await fetch(`/api/ai/page/${pageId}/auto-generation`);
     const data = await res.json();
+
     els.autoGenToggle.dataset.enabled = data.enabled;
-    els.autoGenToggle.textContent = data.enabled ? 'Auto-Generation: ON' : 'Auto-Generation: OFF';
+    els.autoGenToggle.textContent =
+      data.enabled ? 'Auto-Generation: ON' : 'Auto-Generation: OFF';
+
   } catch (err) {
     log('❌ Failed to load auto-generation state', 'error');
   }
@@ -58,7 +61,7 @@ async function loadAutoGenState() {
 els.autoGenToggle.addEventListener('click', async () => {
   const currentlyEnabled = els.autoGenToggle.dataset.enabled === 'true';
   try {
-    const res = await fetch('/api/ai/auto-generation/toggle', {
+    const res = await fetch(`/api/ai/page/${pageId}/auto-generation`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ enabled: !currentlyEnabled })
