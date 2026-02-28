@@ -51,7 +51,6 @@ const ImageProviders = [
 const TIMEZONE = 'Africa/Nairobi';
 const MAX_POSTS_PER_TOPIC = 4;
 const MAX_SCHEDULED_POSTS = 10;
-let AUTO_GENERATION_ENABLED = true;
 
 // ===================== PROVIDER STATE =====================
 const providerState = {};
@@ -230,7 +229,6 @@ async function generatePostsForTopic(topicId) {
 }
 //===================== AUTO GENERATION CORE (SAFE ORIGINAL LOGIC) =====================//
 async function autoGenerate() {
-  if (!AUTO_GENERATION_ENABLED) return;
 
   let now;
   try {
@@ -239,6 +237,16 @@ async function autoGenerate() {
     console.error('TIMEZONE ERROR:', err.message);
     return;
   }
+  // ✅ Only get pages where auto generation is enabled
+  const activePages = await Page.find({ autoGenerationEnabled: true }).select('pageId');
+  if (!activePages.length) return;
+
+  const activePageIds = activePages.map(p => p.pageId);
+
+  // ✅ Only get topics for those pages
+  const topics = await AiTopic.find({ pageId: { $in: activePageIds } });
+  if (!topics.length) return;
+  
 
   let topics;
   try {
