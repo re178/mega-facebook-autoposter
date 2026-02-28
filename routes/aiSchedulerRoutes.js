@@ -232,18 +232,34 @@ router.patch('/post/:postId/content-type', async (req, res) => {
    AUTO-GENERATION TOGGLE
 ========================================================= */
 
-let AUTO_GENERATION_ENABLED = false;
-
-// Get current state
-router.get('/auto-generation/state', (req, res) => {
-  res.json({ enabled: AUTO_GENERATION_ENABLED });
+// Get auto generation state per page
+router.get('/page/:pageId/auto-generation', async (req, res) => {
+  try {
+    const page = await Page.findOne({ pageId: req.params.pageId });
+    if (!page) return handleError(res, new Error('Page not found'), 404);
+    res.json({ enabled: page.autoGenerationEnabled });
+  } catch (err) {
+    handleError(res, err);
+  }
 });
 
-// Toggle state
-router.post('/auto-generation/toggle', (req, res) => {
-  const { enabled } = req.body;
-  AUTO_GENERATION_ENABLED = !!enabled;
-  res.json({ enabled: AUTO_GENERATION_ENABLED });
+// Toggle auto generation per page
+router.post('/page/:pageId/auto-generation', async (req, res) => {
+  try {
+    const { enabled } = req.body;
+
+    const page = await Page.findOneAndUpdate(
+      { pageId: req.params.pageId },
+      { autoGenerationEnabled: !!enabled },
+      { new: true }
+    );
+
+    if (!page) return handleError(res, new Error('Page not found'), 404);
+
+    res.json({ enabled: page.autoGenerationEnabled });
+  } catch (err) {
+    handleError(res, err);
+  }
 });
 
 /* =========================================================
