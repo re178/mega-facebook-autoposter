@@ -9,31 +9,39 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_SECRET
 });
 
-// ===================== UPLOAD HELPER =====================
-async function uploadToCloudinary(imageUrlOrBase64) {
-  try {
-    if (!imageUrlOrBase64) return null;
+// ===================== SAFE TIMEOUT AXIOS =====================
+const safeAxios = axios.create({
+  timeout: 45000
+});
 
-    // If URL
-    if (imageUrlOrBase64.startsWith('http')) {
-      const result = await cloudinary.uploader.upload(imageUrlOrBase64, {
+// ===================== SAFE CLOUDINARY UPLOAD =====================
+async function uploadToCloudinary(imageInput) {
+  try {
+    if (!imageInput) return null;
+
+    // URL upload
+    if (typeof imageInput === 'string' && imageInput.startsWith('http')) {
+      const result = await cloudinary.uploader.upload(imageInput, {
         folder: "ai-images"
       });
-      return result.secure_url;
+      return result?.secure_url || null;
     }
 
-    // Clean base64 if it contains header
-    const cleanBase64 = imageUrlOrBase64.replace(/^data:image\/\w+;base64,/, '');
+    // Handle base64 (auto-detect format)
+    let base64 = imageInput;
 
-    const result = await cloudinary.uploader.upload(
-      `data:image/jpeg;base64,${cleanBase64}`,
-      { folder: "ai-images" }
-    );
+    if (!base64.startsWith("data:image")) {
+      base64 = `data:image/png;base64,${base64}`;
+    }
 
-    return result.secure_url;
+    const result = await cloudinary.uploader.upload(base64, {
+      folder: "ai-images"
+    });
+
+    return result?.secure_url || null;
 
   } catch (err) {
-    console.error("Cloudinary Upload Error:", err.message);
+    console.error("Cloudinary Upload Error:", err?.message || err);
     return null;
   }
 }
@@ -42,13 +50,11 @@ async function uploadToCloudinary(imageUrlOrBase64) {
 function extractSmartKeywords(text) {
   if (!text) return "business";
 
-  // 1️⃣ Use hashtags first
   const hashtags = text.match(/#\w+/g);
-  if (hashtags && hashtags.length > 0) {
-    return hashtags.map(tag => tag.replace("#", "")).join(" ");
+  if (hashtags?.length) {
+    return hashtags.map(t => t.replace("#", "")).join(" ");
   }
 
-  // 2️⃣ Clean punctuation
   const cleaned = text
     .replace(/[^\w\s]/gi, '')
     .toLowerCase();
@@ -67,9 +73,11 @@ function extractSmartKeywords(text) {
   return words.slice(0, 6).join(" ") || "business";
 }
 
-// ===================== PROVIDERS =====================
+// ================================================================
+// ===================== PROVIDERS ================================
+// ================================================================
 
-// 1️⃣ OpenAI DALL·E
+// ===================== 1️⃣ OPENAI =====================
 class DALLEImage {
   static name = 'DALLE';
   static dailyLimit = 50;
@@ -83,24 +91,24 @@ class DALLEImage {
       });
 
       const res = await client.images.generate({
-        model: 'gpt-image-1',
+        model: "gpt-image-1",
         prompt,
-        size: '1024x1024'
+        size: "1024x1024"
       });
 
-      const base64 = res.data?.[0]?.b64_json;
+      const base64 = res?.data?.[0]?.b64_json;
       if (!base64) return null;
 
       return await uploadToCloudinary(base64);
 
     } catch (err) {
-      console.error("DALLE Error:", err.message);
+      console.error("DALLE Error:", err?.response?.data || err?.message);
       return null;
     }
   }
 }
 
-// 2️⃣ Stability AI
+// ===================== 2️⃣ STABILITY (UPDATED API) =====================
 class StabilityImage {
   static name = 'StabilityAI';
   static dailyLimit = 50;
@@ -109,36 +117,35 @@ class StabilityImage {
     try {
       if (!process.env.STABILITY_API_KEY) return null;
 
-      const res = await axios.post(
-        'https://api.stability.ai/v1/generation/stable-diffusion-v1-5/text-to-image',
+      const res = await safeAxios.post(
+        "https://api.stability.ai/v2beta/stable-image/generate/sd3",
         {
-          text_prompts: [{ text: prompt }],
-          height: 1024,
-          width: 1024,
-          samples: 1
+          prompt,
+          aspect_ratio: "1:1",
+          output_format: "png"
         },
         {
           headers: {
             Authorization: `Bearer ${process.env.STABILITY_API_KEY}`,
-            Accept: "application/json"
-          },
-          timeout: 20000
+            Accept: "application/json",
+            "Content-Type": "application/json"
+          }
         }
       );
 
-      const base64 = res.data?.artifacts?.[0]?.base64;
+      const base64 = res?.data?.image;
       if (!base64) return null;
 
       return await uploadToCloudinary(base64);
 
     } catch (err) {
-      console.error("Stability Error:", err.response?.data || err.message);
+      console.error("Stability Error:", err?.response?.data || err?.message);
       return null;
     }
   }
 }
 
-// 3️⃣ Leonardo AI
+// ===================== 3️⃣ LEONARDO (SAFE POLLING) =====================
 class LeonardoImage {
   static name = 'Leonardo';
   static dailyLimit = 50;
@@ -147,8 +154,8 @@ class LeonardoImage {
     try {
       if (!process.env.LEONARDO_API_KEY) return null;
 
-      const res = await axios.post(
-        'https://cloud.leonardo.ai/api/rest/v1/generations',
+      const start = await safeAxios.post(
+        "https://cloud.leonardo.ai/api/rest/v1/generations",
         {
           prompt,
           width: 1024,
@@ -158,24 +165,43 @@ class LeonardoImage {
           headers: {
             Authorization: `Bearer ${process.env.LEONARDO_API_KEY}`,
             "Content-Type": "application/json"
-          },
-          timeout: 20000
+          }
         }
       );
 
-      const imageUrl = res.data?.generations_by_pk?.generated_images?.[0]?.url;
-      if (!imageUrl) return null;
+      const generationId = start?.data?.sdGenerationJob?.generationId;
+      if (!generationId) return null;
 
-      return await uploadToCloudinary(imageUrl);
+      for (let i = 0; i < 10; i++) {
+        await new Promise(r => setTimeout(r, 3000));
+
+        const poll = await safeAxios.get(
+          `https://cloud.leonardo.ai/api/rest/v1/generations/${generationId}`,
+          {
+            headers: {
+              Authorization: `Bearer ${process.env.LEONARDO_API_KEY}`
+            }
+          }
+        );
+
+        const imageUrl =
+          poll?.data?.generations_by_pk?.generated_images?.[0]?.url;
+
+        if (imageUrl) {
+          return await uploadToCloudinary(imageUrl);
+        }
+      }
+
+      return null;
 
     } catch (err) {
-      console.error("Leonardo Error:", err.response?.data || err.message);
+      console.error("Leonardo Error:", err?.response?.data || err?.message);
       return null;
     }
   }
 }
 
-// 4️⃣ Cloudflare AI
+// ===================== 4️⃣ CLOUDFLARE =====================
 class CloudflareImage {
   static name = 'Cloudflare';
   static dailyLimit = 50;
@@ -185,34 +211,34 @@ class CloudflareImage {
       if (!process.env.CLOUDFLARE_API_TOKEN || !process.env.CLOUDFLARE_ACCOUNT_ID)
         return null;
 
-      const res = await axios.post(
+      const res = await safeAxios.post(
         `https://api.cloudflare.com/client/v4/accounts/${process.env.CLOUDFLARE_ACCOUNT_ID}/ai/run/@cf/stabilityai/stable-diffusion-xl-base-1.0`,
         { prompt },
         {
           headers: {
             Authorization: `Bearer ${process.env.CLOUDFLARE_API_TOKEN}`,
             "Content-Type": "application/json"
-          },
-          timeout: 20000
+          }
         }
       );
 
       const base64 =
-  res.data?.result?.image ||
-  res.data?.result?.images?.[0] ||
-  null;
+        res?.data?.result?.image ||
+        res?.data?.result?.images?.[0] ||
+        null;
+
       if (!base64) return null;
 
       return await uploadToCloudinary(base64);
 
     } catch (err) {
-      console.error("Cloudflare Error:", err.response?.data || err.message);
+      console.error("Cloudflare Error:", err?.response?.data || err?.message);
       return null;
     }
   }
 }
 
-// 5️⃣ Smart Pexels (Vertical + Hashtag Intelligent)
+// ===================== 5️⃣ SMART PEXELS (LAST OPTION) =====================
 class SmartPexelsImage {
   static name = 'SmartPexels';
   static dailyLimit = 1000;
@@ -223,32 +249,55 @@ class SmartPexelsImage {
 
       const searchQuery = extractSmartKeywords(prompt);
 
-      const res = await axios.get(
+      const res = await safeAxios.get(
         `https://api.pexels.com/v1/search?query=${encodeURIComponent(searchQuery)}&per_page=15&orientation=portrait`,
         {
           headers: {
             Authorization: process.env.PEXELS_API_KEY
-          },
-          timeout: 15000
+          }
         }
       );
 
-      const photos = res.data?.photos;
-      if (!photos || photos.length === 0) return null;
+      const photos = res?.data?.photos;
+      if (!photos?.length) return null;
 
-      // Pick most vertical image
       const bestPhoto = photos.sort((a, b) => b.height - a.height)[0];
-
       const imageUrl = bestPhoto?.src?.large2x || bestPhoto?.src?.large;
+
       if (!imageUrl) return null;
 
       return await uploadToCloudinary(imageUrl);
 
     } catch (err) {
-      console.error("SmartPexels Error:", err.response?.data || err.message);
+      console.error("SmartPexels Error:", err?.response?.data || err?.message);
       return null;
     }
   }
+}
+
+// ================================================================
+// ===================== SMART ENGINE ==============================
+// ================================================================
+
+async function generateSmartImage(prompt) {
+  const providers = [
+    DALLEImage,
+    StabilityImage,
+    LeonardoImage,
+    CloudflareImage,
+    SmartPexelsImage // ALWAYS LAST
+  ];
+
+  for (const provider of providers) {
+    try {
+      const result = await provider.generate(prompt);
+      if (result) return result;
+    } catch (err) {
+      console.error(`${provider.name} failed safely.`);
+    }
+  }
+
+  return null;
 }
 
 // ===================== EXPORT =====================
@@ -257,5 +306,6 @@ module.exports = {
   StabilityImage,
   LeonardoImage,
   CloudflareImage,
-  SmartPexelsImage
+  SmartPexelsImage,
+  generateSmartImage
 };
