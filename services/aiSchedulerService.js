@@ -229,7 +229,6 @@ async function generatePostsForTopic(topicId) {
 }
 //===================== AUTO GENERATION CORE (SAFE ORIGINAL LOGIC) =====================//
 async function autoGenerate() {
-
   let now;
   try {
     now = moment().tz(TIMEZONE);
