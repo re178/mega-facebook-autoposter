@@ -113,6 +113,34 @@ document.addEventListener('DOMContentLoaded', async () => {
     await loadPosts();
     await loadLogs();
   }, 30000);
+  // ================= RESPONSIVE SIDEBAR SYSTEM =================
+
+const menuToggle = document.getElementById("menu-toggle");
+const sidebar = document.querySelector(".sidebar");
+const overlay = document.getElementById("overlay");
+const layout = document.querySelector(".layout");
+
+if (menuToggle) {
+  menuToggle.addEventListener("click", () => {
+
+    if (window.innerWidth <= 768) {
+      // MOBILE MODE
+      sidebar.classList.toggle("active");
+      overlay.classList.toggle("active");
+    } else {
+      // DESKTOP COLLAPSE MODE
+      layout.classList.toggle("collapsed");
+    }
+
+  });
+}
+
+if (overlay) {
+  overlay.addEventListener("click", () => {
+    sidebar.classList.remove("active");
+    overlay.classList.remove("active");
+  });
+                          }
 });
 // ======= Sidebar Navigation for New Sections =======
 const sections = ['create-post', 'posts-list', 'page-logs', 'messaging-section', 'analytics-section', 'ads-section', 'manage-section', 'ai-scheduler-section', 'page-profile-section'];
