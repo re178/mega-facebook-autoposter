@@ -244,16 +244,14 @@ async function autoGenerate() {
   const activePageIds = activePages.map(p => p.pageId);
 
   // ✅ Only get topics for those pages
-  const topics = await AiTopic.find({ pageId: { $in: activePageIds } });
-  if (!topics.length) return;
-  
-
   let topics;
-  try {
-    topics = await AiTopic.find();
-  } catch (err) {
-    console.error('DB ERROR FETCHING TOPICS:', err.message);
-    return;
+try {
+  topics = await AiTopic.find({ pageId: { $in: activePageIds } });
+} catch (err) {
+  console.error('DB ERROR FETCHING TOPICS:', err.message);
+  return;
+}
+if (!topics.length) return;
   }
 
   if (!topics || topics.length === 0) return;
