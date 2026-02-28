@@ -207,6 +207,7 @@ th {
   justify-content: space-between;
 }
 
+
 /* FORM ELEMENTS */
 textarea {
   width: 100%;
@@ -240,5 +241,120 @@ input[type="datetime-local"] {
 .actions button:hover {
   opacity: 0.9;
 }
+
+
+/* ========================================= */
+/* PROFESSIONAL RESPONSIVE DASHBOARD SYSTEM */
+/* ========================================= */
+
+/* HAMBURGER BUTTON */
+.menu-btn {
+  display: none;
+  background: var(--soft);
+  border: 1px solid #0f172a;
+  color: var(--text);
+  padding: 6px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+/* OVERLAY */
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.6);
+  backdrop-filter: blur(3px);
+  opacity: 0;
+  visibility: hidden;
+  transition: 0.3s ease;
+  z-index: 5;
+}
+
+/* DESKTOP COLLAPSE MODE */
+.layout.collapsed {
+  grid-template-columns: 80px 1fr;
+}
+
+/* TABLET VIEW */
+@media (max-width: 1024px) {
+  .stats {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* MOBILE VIEW */
+@media (max-width: 768px) {
+
+  .layout {
+    grid-template-columns: 1fr;
+  }
+
+  .sidebar {
+    position: fixed;
+    left: -280px;
+    top: 0;
+    height: 100%;
+    width: 260px;
+    z-index: 10;
+    transition: 0.3s ease;
+  }
+
+  .sidebar.active {
+    left: 0;
+  }
+
+  .menu-btn {
+    display: block;
+  }
+
+  .overlay.active {
+    opacity: 1;
+    visibility: visible;
+  }
+
+  .stats {
+    grid-template-columns: 1fr;
+  }
+
+  .mini {
+    grid-template-columns: 1fr;
+  }
+
+  table {
+    display: block;
+    overflow-x: auto;
+    white-space: nowrap;
+  }
+
+  th, td {
+    font-size: 12px;
+  }
+
+  .topbar h1 {
+    font-size: 18px;
+  }
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
