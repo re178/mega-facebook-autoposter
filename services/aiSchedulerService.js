@@ -227,159 +227,211 @@ async function generatePostsForTopic(topicId) {
   }
   return created;
 }
-//===================== AUTO GENERATION CORE (SAFE ORIGINAL LOGIC) =====================//
+//===================== AUTO GENERATION CORE (HARDENED SAFE VERSION) =====================//
+
 async function autoGenerate() {
-  let now;
+
+  // 🛑 Prevent overlapping executions inside same process
+  if (global.__AUTO_GEN_RUNNING__) return;
+  global.__AUTO_GEN_RUNNING__ = true;
+
   try {
-    now = moment().tz(TIMEZONE);
-  } catch (err) {
-    console.error('TIMEZONE ERROR:', err.message);
-    return;
-  }
-  // ✅ Only get pages where auto generation is enabled
-  const activePages = await Page.find({ autoGenerationEnabled: true }).select('pageId');
-  if (!activePages.length) return;
 
-  const activePageIds = activePages.map(p => p.pageId);
+    /* ---------------- SYSTEM SAFETY CHECK ---------------- */
+    if (process.memoryUsage().heapUsed > 900 * 1024 * 1024) {
+      console.error("AUTO GEN SKIPPED: High memory usage");
+      return;
+    }
 
-  // ✅ Only get topics for those pages
-  let topics;
-try {
-  topics = await AiTopic.find({ pageId: { $in: activePageIds } });
-} catch (err) {
-  console.error('DB ERROR FETCHING TOPICS:', err.message);
-  return;
-}
-if (!topics.length) return;
-  
-
-  if (!topics || topics.length === 0) return;
-
-  for (const topic of topics) {
+    let now;
     try {
+      now = moment().tz(TIMEZONE);
+      if (!now.isValid()) throw new Error("Invalid timezone");
+    } catch (err) {
+      console.error("TIMEZONE ERROR:", err.message);
+      return;
+    }
 
-      /* ---------------- 1. AUTO DELETE — TOPIC EXPIRED ---------------- */
-      const endMoment = moment(topic.endDate).tz(TIMEZONE);
-      if (!endMoment.isValid()) {
-        await monitor(topic._id, topic.pageId, null, 'AUTO_INVALID_ENDDATE', 'Invalid endDate');
-        continue;
-      }
+    /* ---------------- FETCH ACTIVE PAGES ---------------- */
+    let activePages;
+    try {
+      activePages = await Page.find({ autoGenerationEnabled: true }).select("pageId").lean();
+    } catch (err) {
+      console.error("DB ERROR FETCHING PAGES:", err.message);
+      return;
+    }
 
-      if (endMoment.isBefore(now)) {
-        await AiLog.deleteMany({ topicId: topic._id });
-        await AiTopic.deleteOne({ _id: topic._id });
-        await monitor(topic._id, topic.pageId, null, 'TOPIC_EXPIRED', 'Topic expired and deleted');
-        continue;
-      }
+    if (!activePages.length) return;
 
-      /* ---------------- 2. MAX POSTS CHECK ---------------- */
-      const logCount = await AiLog.countDocuments({
-        topicId: topic._id,
-        action: 'AUTO_POST_CREATED'
-      });
+    const activePageIds = activePages.map(p => p.pageId);
 
-      const scheduledCount = await AiScheduledPost.countDocuments({
-        topicId: topic._id,
-        'meta.auto': true
-      });
+    /* ---------------- FETCH TOPICS ---------------- */
+    let topics;
+    try {
+      topics = await AiTopic.find({ pageId: { $in: activePageIds } }).lean();
+    } catch (err) {
+      console.error("DB ERROR FETCHING TOPICS:", err.message);
+      return;
+    }
 
-      if ((logCount + scheduledCount) >= MAX_POSTS_PER_TOPIC) {
-        await AiLog.deleteMany({ topicId: topic._id });
-        await AiTopic.deleteOne({ _id: topic._id });
-        await monitor(topic._id, topic.pageId, null, 'TOPIC_MAX_POSTS', 'Topic max posts reached');
-        continue;
-      }
+    if (!topics || topics.length === 0) return;
 
-      /* ---------------- 3. ONE PENDING ONLY ---------------- */
-      const pending = await AiScheduledPost.findOne({
-        topicId: topic._id,
-        status: 'PENDING'
-      });
-      if (pending) continue;
+    /* ================= LOOP THROUGH TOPICS ================= */
+    for (const topic of topics) {
 
-      /* ---------------- 4. ANGLE SELECTION (UNCHANGED LOGIC) ---------------- */
-      const usedAngles = await AiLog.distinct('message', {
-        topicId: topic._id,
-        action: 'AUTO_POST_CREATED'
-      });
+      try {
 
-      const angle = ANGLES.find(a => !usedAngles.includes(a));
-      if (!angle) {
-        await AiLog.deleteMany({ topicId: topic._id });
-        await AiTopic.deleteOne({ _id: topic._id });
-        await monitor(topic._id, topic.pageId, null, 'TOPIC_ANGLES_EXHAUSTED', 'All angles used');
-        continue;
-      }
+        /* -------- 1. AUTO DELETE IF EXPIRED -------- */
+        const endMoment = moment(topic.endDate).tz(TIMEZONE);
+        if (!endMoment.isValid()) {
+          await monitor(topic._id, topic.pageId, null, "AUTO_INVALID_ENDDATE", "Invalid endDate");
+          continue;
+        }
 
-      /* ---------------- 5. SLOT DISCOVERY ---------------- */
-      if (!Array.isArray(topic.times) || topic.times.length === 0) {
-        await monitor(topic._id, topic.pageId, null, 'TOPIC_NO_TIMES', 'No time slots defined');
-        continue;
-      }
+        if (endMoment.isBefore(now)) {
+          await AiLog.deleteMany({ topicId: topic._id });
+          await AiTopic.deleteOne({ _id: topic._id });
+          await monitor(topic._id, topic.pageId, null, "TOPIC_EXPIRED", "Topic expired and deleted");
+          continue;
+        }
 
-      const startDate = moment(topic.startDate).tz(TIMEZONE);
-      const endDate = moment(topic.endDate).tz(TIMEZONE);
+        /* -------- 2. MAX POSTS CHECK -------- */
+        const [logCount, scheduledCount] = await Promise.all([
+          AiLog.countDocuments({
+            topicId: topic._id,
+            action: "AUTO_POST_CREATED"
+          }),
+          AiScheduledPost.countDocuments({
+            topicId: topic._id,
+            "meta.auto": true
+          })
+        ]);
 
-      let scheduledTime = null;
-      let day = moment.max(now.clone().startOf('day'), startDate.clone().startOf('day'));
+        if ((logCount + scheduledCount) >= MAX_POSTS_PER_TOPIC) {
+          await AiLog.deleteMany({ topicId: topic._id });
+          await AiTopic.deleteOne({ _id: topic._id });
+          await monitor(topic._id, topic.pageId, null, "TOPIC_MAX_POSTS", "Topic max posts reached");
+          continue;
+        }
 
-      while (day.isSameOrBefore(endDate)) {
-        const times = shuffleTimes(topic.times);
+        /* -------- 3. ONE PENDING ONLY -------- */
+        const pending = await AiScheduledPost.findOne({
+          topicId: topic._id,
+          status: "PENDING"
+        }).lean();
 
-        for (const t of times) {
-          const slot = moment.tz(`${day.format('YYYY-MM-DD')} ${t}`, TIMEZONE);
+        if (pending) continue;
 
-          if (!slot.isValid()) continue;
-          if (slot.isSameOrBefore(now)) continue;
-          if (slot.isBefore(startDate) || slot.isAfter(endDate)) continue;
+        /* -------- 4. ANGLE SELECTION -------- */
+        const usedAngles = await AiLog.distinct("message", {
+          topicId: topic._id,
+          action: "AUTO_POST_CREATED"
+        });
 
-          const collision = await AiScheduledPost.findOne({
-            pageId: topic.pageId,
-            scheduledTime: slot.toDate()
-          });
+        const angle = ANGLES.find(a => !usedAngles.includes(a));
 
-          if (!collision) {
-            scheduledTime = slot.toDate();
-            break;
+        if (!angle) {
+          await AiLog.deleteMany({ topicId: topic._id });
+          await AiTopic.deleteOne({ _id: topic._id });
+          await monitor(topic._id, topic.pageId, null, "TOPIC_ANGLES_EXHAUSTED", "All angles used");
+          continue;
+        }
+
+        /* -------- 5. SLOT DISCOVERY -------- */
+        if (!Array.isArray(topic.times) || topic.times.length === 0) {
+          await monitor(topic._id, topic.pageId, null, "TOPIC_NO_TIMES", "No time slots defined");
+          continue;
+        }
+
+        const startDate = moment(topic.startDate).tz(TIMEZONE);
+        const endDate = moment(topic.endDate).tz(TIMEZONE);
+
+        let scheduledTime = null;
+        let day = moment.max(now.clone().startOf("day"), startDate.clone().startOf("day"));
+
+        let safetyCounter = 0;
+
+        while (day.isSameOrBefore(endDate) && safetyCounter < 365) {
+          safetyCounter++;
+
+          const times = shuffleTimes(topic.times);
+
+          for (const t of times) {
+
+            const slot = moment.tz(`${day.format("YYYY-MM-DD")} ${t}`, TIMEZONE);
+
+            if (!slot.isValid()) continue;
+            if (slot.isSameOrBefore(now)) continue;
+            if (slot.isBefore(startDate) || slot.isAfter(endDate)) continue;
+
+            const collision = await AiScheduledPost.findOne({
+              pageId: topic.pageId,
+              scheduledTime: slot.toDate()
+            }).lean();
+
+            if (!collision) {
+              scheduledTime = slot.toDate();
+              break;
+            }
+          }
+
+          if (scheduledTime) break;
+          day.add(1, "day");
+        }
+
+        if (!scheduledTime) continue;
+
+        /* -------- 6. GENERATE CONTENT (SAFE WRAP) -------- */
+        let text;
+        try {
+          text = await generateText(topic.topicName, angle, topic.pageId);
+        } catch (err) {
+          console.error("TEXT GENERATION ERROR:", err.message);
+          await monitor(topic._id, topic.pageId, null, "TEXT_GEN_ERROR", err.message);
+          continue;
+        }
+
+        if (!text) continue;
+
+        let mediaUrl = null;
+
+        if (topic.includeMedia) {
+          try {
+            mediaUrl = await generateImage(topic.topicName, topic.pageId, text);
+          } catch (err) {
+            console.error("IMAGE GENERATION ERROR:", err.message);
+            await monitor(topic._id, topic.pageId, null, "IMAGE_GEN_ERROR", err.message);
           }
         }
 
-        if (scheduledTime) break;
-        day.add(1, 'day');
+        /* -------- 7. CREATE POST -------- */
+        const post = await AiScheduledPost.create({
+          topicId: topic._id,
+          pageId: topic.pageId,
+          text,
+          mediaUrl,
+          scheduledTime,
+          status: "PENDING",
+          meta: { angle, auto: true }
+        });
+
+        await monitor(topic._id, topic.pageId, post._id, "AUTO_POST_CREATED", angle);
+
+        break; // original behavior preserved
+
+      } catch (topicErr) {
+        console.error(`AUTO TOPIC ERROR ${topic._id}:`, topicErr.message);
+        await monitor(topic._id, topic.pageId, null, "AUTO_GEN_ERROR", topicErr.message);
+        continue;
       }
-
-      if (!scheduledTime) continue;
-
-      /* ---------------- 6. GENERATE CONTENT ---------------- */
-      const text = await generateText(topic.topicName, angle, topic.pageId);
-      if (!text) continue;
-
-      const mediaUrl = topic.includeMedia
-        ? await generateImage(topic.topicName, topic.pageId, text)
-        : null;
-
-      /* ---------------- 7. CREATE POST ---------------- */
-      const post = await AiScheduledPost.create({
-        topicId: topic._id,
-        pageId: topic.pageId,
-        text,
-        mediaUrl,
-        scheduledTime,
-        status: 'PENDING',
-        meta: { angle, auto: true }
-      });
-
-      await monitor(topic._id, topic.pageId, post._id, 'AUTO_POST_CREATED', angle);
-
-      break; // same behavior as your original
-
-    } catch (topicErr) {
-      console.error(`AUTO TOPIC ERROR ${topic._id}:`, topicErr.message);
-      await monitor(topic._id, topic.pageId, null, 'AUTO_GEN_ERROR', topicErr.message);
-      continue;
     }
+
+  } catch (fatalError) {
+    console.error("FATAL AUTO GENERATION ERROR:", fatalError);
+  } finally {
+    global.__AUTO_GEN_RUNNING__ = false;
   }
-}
+                                     }
 
 // ===================== AUTO GENERATION CRON =====================
 setInterval(autoGenerate, 60 * 1000);
