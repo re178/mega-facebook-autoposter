@@ -130,6 +130,31 @@ async function syncPagesFromEnv() {
 const PORT = process.env.PORT || 10000;
 const MONGO_URI = process.env.MONGO_URI;
 
+// -------------------- TEMP: CREATE FIRST ADMIN --------------------
+const bcrypt = require('bcrypt');
+const User = require('./models/User'); // your new User model
+
+app.get('/setup-admin', async (req, res) => {
+  try {
+    const existing = await User.findOne({ role: 'admin' });
+    if (existing) return res.send('✅ Admin already exists');
+
+    const hashedPassword = await bcrypt.hash('Admin123!', 10);
+
+    const admin = await User.create({
+      email: 'admin@example.com', // choose your email
+      password: hashedPassword,
+      role: 'admin',
+      isActive: true
+    });
+
+    res.send(`✅ Admin created with email: ${admin.email}`);
+  } catch (err) {
+    console.error(err);
+    res.status(500).send('❌ Error creating admin');
+  }
+});
+
 mongoose
     .connect(MONGO_URI)
     .then(async () => {
