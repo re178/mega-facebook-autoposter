@@ -142,7 +142,7 @@ app.get('/setup-admin', async (req, res) => {
     const hashedPassword = await bcrypt.hash('Admin123!', 10);
 
     const admin = await User.create({
-      email: 'admin@example.com', // choose your email
+      email: 'esilesirayland@gmail.com', // choose your email
       password: hashedPassword,
       role: 'admin',
       isActive: true
