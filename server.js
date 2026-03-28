@@ -4,16 +4,16 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 const path = require('path');
 const session = require('express-session');
+const bcrypt = require('bcrypt');
+
 const Page = require('./models/Page');
+const User = require('./models/User'); // New User model
 
 // -------------------- CREATE APP --------------------
-const app = express(); 
+const app = express();
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-// -------------------- WEBHOOK ROUTES --------------------
-const webhookRoutes = require('./routes/webhookRoutes'); 
-app.use('/', webhookRoutes); 
 
 // -------------------- SESSION SETUP --------------------
 app.use(
@@ -33,35 +33,51 @@ app.use(
 // -------------------- ROUTES --------------------
 const dashboardRoutes = require('./routes/dashboardRoutes');
 const pageFeaturesRoutes = require('./routes/pageFeaturesRoutes');
+const webhookRoutes = require('./routes/webhookRoutes');
+const aiRoutes = require('./routes/aiSchedulerRoutes');
 
-
+app.use('/', webhookRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/dashboard', pageFeaturesRoutes);
-app.use('/api/ai', require('./routes/aiSchedulerRoutes'));
-
+app.use('/api/ai', aiRoutes);
 
 // -------------------- FRONTEND --------------------
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Login & logout (DO NOT TOUCH)
+// -------------------- AUTH MIDDLEWARE --------------------
+function requireLogin(req, res, next) {
+    if (req.session && req.session.userId) return next();
+    return res.redirect('/login');
+}
+
+// -------------------- LOGIN & LOGOUT --------------------
 app.get('/', (req, res) => res.redirect('/login'));
 
 app.get('/login', (req, res) =>
     res.sendFile(path.join(__dirname, 'public/login.html'))
 );
 
-app.post('/login', (req, res) => {
-    const { email, password } = req.body;
+app.post('/login', async (req, res) => {
+    try {
+        const { email, password } = req.body;
+        const user = await User.findOne({ email: email.toLowerCase() });
 
-    if (
-        email === process.env.APP_EMAIL &&
-        password === process.env.APP_PASSWORD
-    ) {
-        req.session.user = email;
-        return res.redirect('/index.html');
+        if (!user || !user.isActive) {
+            return res.send('<h2>Login failed. <a href="/login">Try again</a></h2>');
+        }
+
+        const match = await bcrypt.compare(password, user.password);
+        if (!match) {
+            return res.send('<h2>Login failed. <a href="/login">Try again</a></h2>');
+        }
+
+        req.session.userId = user._id;
+        req.session.userRole = user.role;
+        res.redirect('/index.html');
+    } catch (err) {
+        console.error('Login error:', err);
+        res.status(500).send('❌ Server error during login');
     }
-
-    res.send('<h2>Login failed. <a href="/login">Try again</a></h2>');
 });
 
 app.get('/logout', (req, res) => {
@@ -70,12 +86,6 @@ app.get('/logout', (req, res) => {
         res.redirect('/login');
     });
 });
-
-// -------------------- AUTH MIDDLEWARE --------------------
-function requireLogin(req, res, next) {
-    if (req.session && req.session.user) return next();
-    return res.redirect('/login');
-}
 
 // -------------------- PROTECTED PAGES --------------------
 app.get('/index.html', requireLogin, (req, res) =>
@@ -92,12 +102,10 @@ app.get('/schedule', requireLogin, (req, res) =>
 
 // -------------------- SERVICES --------------------
 const { startScheduler } = require('./services/scheduler');
-const { startAiPostScheduler } = require('./services/aiPostScheduler'); 
-
-
+const { startAiPostScheduler } = require('./services/aiPostScheduler');
 
 // -------------------- ENV PAGES SYNC --------------------
-async function syncPagesFromEnv() {
+async function syncPagesFromEnv(adminId) {
     if (!process.env.PAGES_JSON) {
         console.log('ℹ️ No PAGES_JSON found, skipping page sync');
         return;
@@ -119,24 +127,26 @@ async function syncPagesFromEnv() {
             await Page.create({
                 name: p.name,
                 pageId: p.pageId,
-                pageToken: p.pageToken
+                pageToken: p.pageToken,
+                userId: adminId // Assign to admin by default
             });
             console.log(`✅ Page synced: ${p.name}`);
         }
     }
 }
 
-// -------------------- DATABASE --------------------
+
+
+// -------------------- DATABASE & START --------------------
 const PORT = process.env.PORT || 10000;
 const MONGO_URI = process.env.MONGO_URI;
-
 
 mongoose
     .connect(MONGO_URI)
     .then(async () => {
         console.log('✅ MongoDB connected');
-        await syncPagesFromEnv();
 
+        // Start schedulers safely
         try {
             await startScheduler();
             await startAiPostScheduler();
