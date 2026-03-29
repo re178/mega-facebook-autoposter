@@ -139,30 +139,6 @@ async function syncPagesFromEnv(adminId) {
 const bcrypt = require('bcrypt');
 const User = require('./models/User'); // your new User model
 
-// -------------------- TEMP: CREATE FIRST USER --------------------
-app.get('/setup-User', async (req, res) => {
-  try {
-    // Check if user already exists
-    const existing = await User.findOne({ role: 'user' });
-    if (existing) return res.send('✅ User already exists');
-
-    // ✅ Hash password properly
-    const hashedPassword = await bcrypt.hash('42034318', 10);
-
-    // ✅ Create user
-    const user = await User.create({
-      email: 'user@example.com',
-      password: hashedPassword,
-      role: 'user',
-      isActive: true
-    });
-
-    res.send(`✅ User created with email: ${user.email}`);
-  } catch (err) {
-    console.error(err);
-    res.status(500).send('❌ Error creating user');
-  }
-});
 
 // -------------------- DATABASE & START --------------------
 const PORT = process.env.PORT || 10000;
