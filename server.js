@@ -146,8 +146,7 @@ app.get('/setup-User', async (req, res) => {
     const existing = await User.findOne({ role: 'user' });
     if (existing) return res.send('✅ user already exists');
 
-    // Hash the password
-    const hashedPassword = await bcrypt.hash('42034318', 10);
+    // Hash the passwor
 
     // Create admin user
     const user = await User.create({
