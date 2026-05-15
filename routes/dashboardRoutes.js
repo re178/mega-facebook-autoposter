@@ -29,12 +29,35 @@ router.get('/master/summary', async (req, res) => {
 // GET ALL PAGES (for master dashboard navigation)
 // =======================
 router.get('/pages', async (req, res) => {
-  try {
-    const pages = await Page.find().sort({ name: 1 }); // sorted by name
-    res.json(pages);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+
+    try {
+
+        let pages;
+
+        // ADMIN SEES EVERYTHING
+        if (req.session.userRole === 'admin') {
+
+            pages = await Page.find()
+                .sort({ name: 1 });
+
+        }
+
+        // NORMAL USERS SEE ONLY THEIR PAGES
+        else {
+
+            pages = await Page.find({
+                userId: req.session.userId
+            }).sort({ name: 1 });
+        }
+
+        res.json(pages);
+
+    } catch (err) {
+
+        res.status(500).json({
+            error: err.message
+        });
+    }
 });
 
 // =======================
