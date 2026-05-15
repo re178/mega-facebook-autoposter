@@ -294,7 +294,261 @@
     <button id="profile-save">💾 Save Profile</button>
     <button id="profile-delete">🗑 Delete Profile</button>
   </div>
-</section>      
+</section>   
+      <!-- ================= ADMIN SECTION ================= -->
+<section class="card" id="admin-section" style="display:none;">
+
+  <h2>Admin Control Center</h2>
+
+  <!-- ================= STATS ================= -->
+  <div class="stats-grid">
+
+    <div class="stat-box">
+      <h3>Total Users</h3>
+      <p id="total-users">0</p>
+    </div>
+
+    <div class="stat-box">
+      <h3>Active Users</h3>
+      <p id="active-users">0</p>
+    </div>
+
+    <div class="stat-box">
+      <h3>Suspended Users</h3>
+      <p id="suspended-users">0</p>
+    </div>
+
+    <div class="stat-box">
+      <h3>Total Pages</h3>
+      <p id="total-pages">0</p>
+    </div>
+
+    <div class="stat-box">
+      <h3>Total Posts</h3>
+      <p id="total-posts">0</p>
+    </div>
+
+    <div class="stat-box">
+      <h3>AI Posts</h3>
+      <p id="total-ai-posts">0</p>
+    </div>
+
+  </div>
+
+  <!-- ================= CHARTS ================= -->
+  <div class="chart-grid">
+
+    <div class="chart-box">
+      <h3>User Status</h3>
+      <canvas id="usersChart"></canvas>
+    </div>
+
+    <div class="chart-box">
+      <h3>Posts Per User</h3>
+      <canvas id="postsChart"></canvas>
+    </div>
+
+  </div>
+
+  <!-- ================= CREATE USER ================= -->
+  <div class="admin-card">
+
+    <h3>Create User</h3>
+
+    <div class="form-grid">
+
+      <input
+        type="email"
+        id="new-user-email"
+        placeholder="Email"
+      >
+
+      <input
+        type="password"
+        id="new-user-password"
+        placeholder="Password"
+      >
+
+      <select id="new-user-role">
+        <option value="user">User</option>
+        <option value="moderator">Moderator</option>
+        <option value="admin">Admin</option>
+      </select>
+
+      <input
+        type="text"
+        id="new-user-phone"
+        placeholder="Phone"
+      >
+
+      <select id="new-user-plan">
+        <option value="free">Free</option>
+        <option value="starter">Starter</option>
+        <option value="premium">Premium</option>
+      </select>
+
+      <input
+        type="date"
+        id="new-user-expiry"
+      >
+
+    </div>
+
+    <h4>Facebook Pages</h4>
+
+    <div id="pages-container">
+
+      <div class="page-item">
+
+        <input
+          type="text"
+          class="page-name"
+          placeholder="Page Name"
+        >
+
+        <input
+          type="text"
+          class="page-id"
+          placeholder="Page ID"
+        >
+
+        <input
+          type="text"
+          class="page-token"
+          placeholder="Page Token"
+        >
+
+      </div>
+
+    </div>
+
+    <div class="actions">
+
+      <button id="add-page-field">
+        Add Another Page
+      </button>
+
+      <button id="create-user-btn">
+        Create User
+      </button>
+
+    </div>
+
+  </div>
+
+  <!-- ================= USERS TABLE ================= -->
+  <div class="admin-card">
+
+    <h3>Users</h3>
+
+    <div class="table-wrapper">
+
+      <table class="admin-table">
+
+        <thead>
+
+          <tr>
+            <th>Email</th>
+            <th>Role</th>
+            <th>Phone</th>
+            <th>Subscription</th>
+            <th>Status</th>
+            <th>AI</th>
+            <th>Actions</th>
+          </tr>
+
+        </thead>
+
+        <tbody id="users-table-body"></tbody>
+
+      </table>
+
+    </div>
+
+  </div>
+
+  <!-- ================= PAGES TABLE ================= -->
+  <div class="admin-card">
+
+    <h3>All Pages</h3>
+
+    <div class="table-wrapper">
+
+      <table class="admin-table">
+
+        <thead>
+
+          <tr>
+            <th>Page Name</th>
+            <th>Facebook ID</th>
+            <th>Owner</th>
+            <th>Role</th>
+            <th>Actions</th>
+          </tr>
+
+        </thead>
+
+        <tbody id="pages-table-body"></tbody>
+
+      </table>
+
+    </div>
+
+  </div>
+
+  <!-- ================= BROADCAST ================= -->
+  <div class="admin-card">
+
+    <h3>Broadcast Message</h3>
+
+    <textarea
+      id="broadcast-message"
+      rows="5"
+      placeholder="Write message to all users..."
+    ></textarea>
+
+    <div class="actions">
+
+      <button id="send-broadcast-btn">
+        Send Broadcast
+      </button>
+
+    </div>
+
+  </div>
+
+  <!-- ================= LOGS ================= -->
+  <div class="admin-card">
+
+    <h3>System Logs</h3>
+
+    <div
+      class="logs-container"
+      id="system-logs-container"
+    ></div>
+
+  </div>
+
+  <!-- ================= MAINTENANCE ================= -->
+  <div class="admin-card">
+
+    <h3>Maintenance Mode</h3>
+
+    <div class="maintenance-actions">
+
+      <button id="maintenance-on-btn">
+        Enable Maintenance
+      </button>
+
+      <button id="maintenance-off-btn">
+        Disable Maintenance
+      </button>
+
+    </div>
+
+  </div>
+
+</section>
 
     </main>
   </div>
