@@ -42,33 +42,17 @@ router.get('/pages', async (req, res) => {
 // =======================
 
 // Get page info
-router.get('/pages', async (req, res) => {
-
-    try {
-
-        let pages;
-
-        if (req.session.userRole === 'admin') {
-
-            pages = await Page.find()
-                .sort({ name: 1 });
-
-        } else {
-
-            pages = await Page.find({
-                userId: req.session.userId
-            }).sort({ name: 1 });
-        }
-
-        res.json(pages);
-
-    } catch (err) {
-
-        res.status(500).json({
-            error: err.message
-        });
-    }
+router.get('/page/:fbId', async (req, res) => {
+  try {
+    const page = await Page.findOne({ pageId: req.params.fbId });
+    if (!page) return res.status(404).json({ error: 'Page not found' });
+    res.json(page);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
+
+
 
 // Get posts for page
 router.get('/page/:fbId/posts', async (req, res) => {
