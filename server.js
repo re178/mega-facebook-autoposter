@@ -35,11 +35,13 @@ const dashboardRoutes = require('./routes/dashboardRoutes');
 const pageFeaturesRoutes = require('./routes/pageFeaturesRoutes');
 const webhookRoutes = require('./routes/webhookRoutes');
 const aiRoutes = require('./routes/aiSchedulerRoutes');
+const adminRoutes = require('./routes/adminRoutes');
 
 app.use('/', webhookRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/dashboard', pageFeaturesRoutes);
 app.use('/api/ai', aiRoutes);
+app.use('/api/admin', adminRoutes);
 
 // -------------------- FRONTEND --------------------
 app.use(express.static(path.join(__dirname, 'public')));
