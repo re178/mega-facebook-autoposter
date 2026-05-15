@@ -139,7 +139,7 @@ async function syncPagesFromEnv(adminId) {
 
 
 
-const User = require('./models/User'); // your new User model
+
 
 
 // -------------------- DATABASE & START --------------------
