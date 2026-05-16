@@ -88,6 +88,36 @@ app.get('/logout', (req, res) => {
         res.redirect('/login');
     });
 });
+// -------------------- SESSION API --------------------
+app.get('/api/session', (req, res) => {
+
+    try {
+
+        if (!req.session.userId) {
+
+            return res.json({
+                loggedIn: false
+            });
+
+        }
+
+        return res.json({
+            loggedIn: true,
+            userId: req.session.userId,
+            role: req.session.userRole
+        });
+
+    } catch (err) {
+
+        console.error('Session route error:', err);
+
+        res.status(500).json({
+            error: 'Session error'
+        });
+
+    }
+
+});
 
 // -------------------- PROTECTED PAGES --------------------
 app.get('/index.html', requireLogin, (req, res) =>
