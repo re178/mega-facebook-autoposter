@@ -37,6 +37,7 @@ const pageFeaturesRoutes = require('./routes/pageFeaturesRoutes');
 const webhookRoutes = require('./routes/webhookRoutes');
 const aiRoutes = require('./routes/aiSchedulerRoutes');
 const adminRoutes = require('./routes/adminRoutes');
+const userMessagesRoutes = require('./routes/userMessages');
 
 app.use('/', webhookRoutes);
 app.use('/api/dashboard', dashboardRoutes);
