@@ -503,6 +503,66 @@
 
   </div>
 
+<!-- ================= NEW: ADD PAGE TO USER ================= -->
+<div class="admin-card">
+  <h3>Add Facebook Page to User</h3>
+  <button id="add-page-btn">➕ Add Page</button>
+</div>
+
+<!-- ================= NEW: SEND PRIVATE MESSAGE ================= -->
+<div class="admin-card">
+  <h3>Send Private Message to a User</h3>
+  <div class="form-grid">
+    <input type="text" id="private-message-user-id" placeholder="User ID (from Users table)">
+    <textarea id="private-message-text" rows="3" placeholder="Message content..."></textarea>
+  </div>
+  <button id="send-private-msg-btn">📨 Send Message</button>
+</div>
+
+<!-- ================= NEW: MANAGE POSTS (force publish / delete) ================= -->
+<div class="admin-card">
+  <h3>Manage All Posts</h3>
+  <button id="refresh-posts-btn">Refresh Posts</button>
+  <div class="table-wrapper">
+    <table class="admin-table">
+      <thead>
+        <tr><th>Post ID</th><th>Content</th><th>Status</th><th>Actions</th></tr>
+      </thead>
+      <tbody id="admin-posts-table-body">
+        <tr><td colspan="4">Click "Refresh Posts" to load</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ================= NEW: CREATE USER WITH PAGES (extended) ================= -->
+<div class="admin-card">
+  <h3>Create User + Facebook Pages</h3>
+  <div class="form-grid">
+    <input type="email" id="advanced-user-email" placeholder="Email">
+    <input type="password" id="advanced-user-password" placeholder="Password">
+    <select id="advanced-user-role">
+      <option value="user">User</option>
+      <option value="admin">Admin</option>
+    </select>
+    <input type="text" id="advanced-user-phone" placeholder="Phone">
+  </div>
+
+  <h4>Pages to attach (optional)</h4>
+  <div id="pages-list-container">
+    <div class="page-entry">
+      <input type="text" placeholder="Page Name" class="page-name">
+      <input type="text" placeholder="Facebook Page ID" class="page-id">
+      <input type="text" placeholder="Page Token" class="page-token">
+      <button type="button" class="remove-page-btn" disabled>Remove</button>
+    </div>
+  </div>
+  <button type="button" id="add-page-entry-btn">+ Add another page</button>
+  <div class="actions">
+    <button id="advanced-create-user-btn">🚀 Create User with Pages</button>
+  </div>
+</div>
+        
 </section>
 
 <!-- LOAD CHART.JS BEFORE admin.js -->
