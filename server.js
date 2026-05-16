@@ -43,6 +43,7 @@ app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/dashboard', pageFeaturesRoutes);
 app.use('/api/ai', aiRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/user/messages', require('./routes/userMessages'));
 
 // -------------------- FRONTEND --------------------
 app.use(express.static(path.join(__dirname, 'public')));
