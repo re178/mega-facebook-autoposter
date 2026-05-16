@@ -144,12 +144,15 @@ if (overlay) {
 });
 // ======= Sidebar Navigation for New Sections =======
 const sections = ['create-post', 'posts-list', 'page-logs', 'messaging-section', 'analytics-section', 'ads-section', 'manage-section', 'ai-scheduler-section', 'page-profile-section', 'admin-section'];
+
 document.querySelectorAll('#page-nav a').forEach(link => {
   link.addEventListener('click', () => {
     const page = link.dataset.page;
+
     sections.forEach(sec => {
       const el = document.getElementById(sec);
-      if (el) el.style.display = (sec === page || sec+'-section' === page+'-section') ? 'block' : 'none';
+      if (el) el.style.display =
+        (sec === page) ? 'block' : 'none';
     });
   });
 });
