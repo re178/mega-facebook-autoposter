@@ -12,18 +12,25 @@ document.addEventListener('DOMContentLoaded', async () => {
         const session =
             await sessionRes.json();
 
-        if (session.role !== 'admin') {
-            return;
-        }
+        const role = session.role || session.user?.role;
+const isAdmin = role === 'admin';
 
         // SHOW ADMIN NAV
-        const adminNav =
-            document.getElementById(
-                'admin-nav-link'
-            );
+        if (isAdmin) {
 
-        if (adminNav) {
-            adminNav.style.display = 'block';
+    const adminNav =
+        document.getElementById('admin-nav-link');
+
+    const adminSection =
+        document.getElementById('admin-section');
+
+    if (adminNav) {
+        adminNav.style.display = 'block';
+    }
+
+    if (adminSection) {
+        adminSection.style.display = 'block';
+    }
         }
 
         // LOAD EVERYTHING
