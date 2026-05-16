@@ -744,7 +744,7 @@ function setText(id, value) {
     }
 }
 
-async function reloadAdmin() {
+window.reloadAdmin = async function() {
 
     await loadDashboardStats();
     await loadUsers();
