@@ -14,6 +14,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         const role = session.role || session.user?.role;
 const isAdmin = role === 'admin';
+        console.log("SESSION:", session);
+console.log("ROLE:", role);
+console.log("IS ADMIN:", isAdmin);
 
         // SHOW ADMIN NAV
         if (isAdmin) {
