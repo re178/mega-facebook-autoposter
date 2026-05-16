@@ -294,7 +294,7 @@
   </div>
 </section>   
       <!-- ================= ADMIN SECTION ================= -->
-<section class="card" id="admin-section" style="display:none;">
+      <section class="card" id="admin-section" style="display:none;">
 
   <h2>Admin Control Center</h2>
 
@@ -303,32 +303,32 @@
 
     <div class="stat-box">
       <h3>Total Users</h3>
-      <p id="total-users">0</p>
+      <p id="stat-total-users">0</p>
     </div>
 
     <div class="stat-box">
       <h3>Active Users</h3>
-      <p id="active-users">0</p>
+      <p id="stat-active-users">0</p>
     </div>
 
     <div class="stat-box">
       <h3>Suspended Users</h3>
-      <p id="suspended-users">0</p>
+      <p id="stat-suspended-users">0</p>
     </div>
 
     <div class="stat-box">
       <h3>Total Pages</h3>
-      <p id="total-pages">0</p>
+      <p id="stat-total-pages">0</p>
     </div>
 
     <div class="stat-box">
       <h3>Total Posts</h3>
-      <p id="total-posts">0</p>
+      <p id="stat-total-posts">0</p>
     </div>
 
     <div class="stat-box">
       <h3>AI Posts</h3>
-      <p id="total-ai-posts">0</p>
+      <p id="stat-total-ai-posts">0</p>
     </div>
 
   </div>
@@ -357,17 +357,17 @@
 
       <input
         type="email"
-        id="new-user-email"
+        id="admin-user-email"
         placeholder="Email"
       >
 
       <input
         type="password"
-        id="new-user-password"
+        id="admin-user-password"
         placeholder="Password"
       >
 
-      <select id="new-user-role">
+      <select id="admin-user-role">
         <option value="user">User</option>
         <option value="moderator">Moderator</option>
         <option value="admin">Admin</option>
@@ -375,58 +375,15 @@
 
       <input
         type="text"
-        id="new-user-phone"
+        id="admin-user-phone"
         placeholder="Phone"
       >
-
-      <select id="new-user-plan">
-        <option value="free">Free</option>
-        <option value="starter">Starter</option>
-        <option value="premium">Premium</option>
-      </select>
-
-      <input
-        type="date"
-        id="new-user-expiry"
-      >
-
-    </div>
-
-    <h4>Facebook Pages</h4>
-
-    <div id="pages-container">
-
-      <div class="page-item">
-
-        <input
-          type="text"
-          class="page-name"
-          placeholder="Page Name"
-        >
-
-        <input
-          type="text"
-          class="page-id"
-          placeholder="Page ID"
-        >
-
-        <input
-          type="text"
-          class="page-token"
-          placeholder="Page Token"
-        >
-
-      </div>
 
     </div>
 
     <div class="actions">
 
-      <button id="add-page-field">
-        Add Another Page
-      </button>
-
-      <button id="create-user-btn">
+      <button id="admin-create-user-btn">
         Create User
       </button>
 
@@ -457,7 +414,7 @@
 
         </thead>
 
-        <tbody id="users-table-body"></tbody>
+        <tbody id="admin-users-table"></tbody>
 
       </table>
 
@@ -480,13 +437,13 @@
             <th>Page Name</th>
             <th>Facebook ID</th>
             <th>Owner</th>
-            <th>Role</th>
+            <th>Auto Generation</th>
             <th>Actions</th>
           </tr>
 
         </thead>
 
-        <tbody id="pages-table-body"></tbody>
+        <tbody id="admin-pages-table"></tbody>
 
       </table>
 
@@ -507,7 +464,7 @@
 
     <div class="actions">
 
-      <button id="send-broadcast-btn">
+      <button id="broadcast-btn">
         Send Broadcast
       </button>
 
@@ -522,7 +479,7 @@
 
     <div
       class="logs-container"
-      id="system-logs-container"
+      id="admin-logs"
     ></div>
 
   </div>
@@ -534,11 +491,11 @@
 
     <div class="maintenance-actions">
 
-      <button id="maintenance-on-btn">
+      <button id="maintenance-on">
         Enable Maintenance
       </button>
 
-      <button id="maintenance-off-btn">
+      <button id="maintenance-off">
         Disable Maintenance
       </button>
 
@@ -547,6 +504,9 @@
   </div>
 
 </section>
+
+<!-- LOAD CHART.JS BEFORE admin.js -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
     </main>
   </div>
