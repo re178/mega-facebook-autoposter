@@ -22,10 +22,11 @@ app.use(
         secret: process.env.SESSION_SECRET || 'supersecret123',
         resave: false,
         saveUninitialized: false,
+        rolling: true,
         cookie: {
             httpOnly: true,
             secure: false, // Render uses proxy HTTPS
-            maxAge: 24 * 60 * 60 * 1000
+            maxAge: 2 * 60 * 1000
         }
     })
 );
