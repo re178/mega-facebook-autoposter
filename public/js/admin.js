@@ -17,21 +17,9 @@ const isAdmin = role === 'admin';
 
         // SHOW ADMIN NAV
         if (isAdmin) {
-
-    const adminNav =
-        document.getElementById('admin-nav-link');
-
-    const adminSection =
-        document.getElementById('admin-section');
-
-    if (adminNav) {
-        adminNav.style.display = 'block';
+    const adminNav = document.getElementById('admin-nav-link');
+    if (adminNav) adminNav.style.display = 'block';
     }
-
-    if (adminSection) {
-        adminSection.style.display = 'block';
-    }
-        }
 
         // LOAD EVERYTHING
         await loadDashboardStats();
