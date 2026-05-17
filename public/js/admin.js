@@ -473,7 +473,52 @@ async function loadPages() {
         console.error(err);
     }
 }
-
+// Handle edit page modal
+document.addEventListener('click', async (e) => {
+  if (e.target.classList.contains('edit-page-btn')) {
+    const btn = e.target;
+    const id = btn.dataset.id;
+    const name = btn.dataset.name;
+    const pageId = btn.dataset.pageid;
+    const token = btn.dataset.token;
+    
+    let modal = document.getElementById('editPageModal');
+    if (!modal) {
+      modal = document.createElement('div');
+      modal.id = 'editPageModal';
+      modal.style.cssText = 'position:fixed;top:20%;left:30%;background:white;padding:20px;border:1px solid #ccc;z-index:9999;width:400px;';
+      modal.innerHTML = `
+        <h3>Edit Page</h3>
+        <label>Name: <input id="edit-page-name" style="width:100%"></label><br>
+        <label>Page ID: <input id="edit-page-id" style="width:100%"></label><br>
+        <label>Token: <textarea id="edit-page-token" rows="2" style="width:100%"></textarea></label><br>
+        <button id="save-page-edit">Save</button>
+        <button id="close-page-modal">Cancel</button>
+      `;
+      document.body.appendChild(modal);
+    }
+    document.getElementById('edit-page-name').value = name;
+    document.getElementById('edit-page-id').value = pageId;
+    document.getElementById('edit-page-token').value = token;
+    modal.style.display = 'block';
+    
+    document.getElementById('save-page-edit').onclick = async () => {
+      const updated = {
+        name: document.getElementById('edit-page-name').value,
+        pageId: document.getElementById('edit-page-id').value,
+        pageToken: document.getElementById('edit-page-token').value
+      };
+      await fetch(`/api/admin/pages/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updated)
+      });
+      modal.style.display = 'none';
+      await reloadAdmin();
+    };
+    document.getElementById('close-page-modal').onclick = () => modal.style.display = 'none';
+  }
+});
 /* ====================================================
    SYSTEM LOGS
 ==================================================== */
