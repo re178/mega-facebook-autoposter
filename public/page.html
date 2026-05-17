@@ -471,17 +471,21 @@
     </div>
 
   </div>
+  </div>
+
+  <!-- ================= BROADCAST LIST WITH EDIT/DELETE ================= -->
+  <div class="admin-card">
+    <h3>Manage Broadcasts</h3>
+    <div id="broadcast-list"></div>
+  </div>
 
   <!-- ================= LOGS ================= -->
-  <div class="admin-card">
-
+    <div class="admin-card">
     <h3>System Logs</h3>
-
-    <div
-      class="logs-container"
-      id="admin-logs"
-    ></div>
-
+    <div class="logs-container" id="admin-logs"></div>
+    <div class="actions" style="margin-top: 10px;">
+      <button onclick="clearAllLogs()" style="background:#c00; color:white;">🗑️ Clear All Logs</button>
+    </div>
   </div>
 
   <!-- ================= MAINTENANCE ================= -->
@@ -503,20 +507,25 @@
 
   </div>
 
-<!-- ================= NEW: ADD PAGE TO USER ================= -->
+<!-- ================= ADD PAGE TO USER (SEARCH MODAL) ================= -->
 <div class="admin-card">
   <h3>Add Facebook Page to User</h3>
-  <button id="add-page-btn">➕ Add Page</button>
+  <button onclick="showAddPageModal()">➕ Add Page to User (Search)</button>
 </div>
 
-<!-- ================= NEW: SEND PRIVATE MESSAGE ================= -->
+<!-- ================= PRIVATE MESSAGES WITH SEARCH & EDIT/DELETE ================= -->
 <div class="admin-card">
   <h3>Send Private Message to a User</h3>
   <div class="form-grid">
-    <input type="text" id="private-message-user-id" placeholder="User ID (from Users table)">
+    <label>Search User (email):</label>
+    <input type="text" id="private-message-user-email" list="user-datalist-pm" autocomplete="off" placeholder="Type user email...">
+    <datalist id="user-datalist-pm"></datalist>
     <textarea id="private-message-text" rows="3" placeholder="Message content..."></textarea>
   </div>
   <button id="send-private-msg-btn">📨 Send Message</button>
+  
+  <h4 style="margin-top: 20px;">Sent Messages</h4>
+  <div id="private-messages-list"></div>
 </div>
 
 <!-- ================= NEW: MANAGE POSTS (force publish / delete) ================= -->
