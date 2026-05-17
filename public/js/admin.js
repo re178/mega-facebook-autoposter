@@ -429,10 +429,8 @@ async function loadPages() {
 
                 <td>
 
-                    <button class="delete-page"
-                        data-id="${page._id}">
-                        Delete
-                    </button>
+     <button class="edit-page-btn" data-id="${page._id}" data-name="${escapeHtml(page.name)}" data-pageid="${page.pageId}" data-token="${page.pageToken}">Edit</button>
+     <button class="delete-page" data-id="${page._id}">Delete</button>   
 
                 </td>
             `;
@@ -501,22 +499,22 @@ async function loadSystemLogs() {
 
             div.classList.add('log');
 
+            
             div.innerHTML = `
-
-                <strong>
-                    ${log.action}
-                </strong>
-
+                <strong>${log.action}</strong>
                 <p>${log.message}</p>
-
-                <small>
-                    ${new Date(
-                        log.createdAt
-                    ).toLocaleString()}
-                </small>
+                <small>${new Date(log.createdAt).toLocaleString()}</small>
+                <button class="delete-log" data-id="${log._id}" data-type="log">Delete</button>
             `;
 
             container.appendChild(div);
+                        const delBtn = div.querySelector('.delete-log');
+            delBtn.onclick = async () => {
+                if (confirm('Delete this log entry?')) {
+                    await fetch(`/api/admin/logs/${delBtn.dataset.id}`, { method: 'DELETE' });
+                    loadSystemLogs();
+                }
+            };
 
         });
 
