@@ -753,216 +753,202 @@ window.reloadAdmin = async function() {
 }
 
 // ============================================
-// NEW ADMIN FEATURES (paste at end of admin.js)
+// NEW ADMIN FEATURES (FULL REPLACEMENT)
 // ============================================
 
-// ---------- 1. ADD PAGE TO USER (prompt-based) ----------
-async function showAddPageModal() {
-  const users = await fetch('/api/admin/users').then(r => r.json());
-  const userList = users.map(u => `${u.email} (${u._id})`).join('\n');
-  const userId = prompt('Enter User ID (see list below):\n' + userList);
-  if (!userId) return;
-  const name = prompt('Page Name');
-  if (!name) return;
-  const pageId = prompt('Facebook Page ID');
-  if (!pageId) return;
-  const pageToken = prompt('Facebook Page Access Token');
-  if (!pageToken) return;
-
-  await fetch('/api/admin/pages', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ userId, name, pageId, pageToken })
+// ---------- USER SEARCH DATALIST HELPER ----------
+async function populateUserDatalist(inputId, datalistId) {
+  const res = await fetch('/api/admin/users');
+  const users = await res.json();
+  const datalist = document.getElementById(datalistId);
+  if (!datalist) return;
+  datalist.innerHTML = '';
+  users.forEach(user => {
+    const option = document.createElement('option');
+    option.value = user.email;
+    option.dataset.id = user._id;
+    datalist.appendChild(option);
   });
-  alert('Page added');
-  location.reload(); // or call loadPages() if available
+  const input = document.getElementById(inputId);
+  if (input) {
+    input.dataset.userId = '';
+    input.addEventListener('change', (e) => {
+      const selectedEmail = e.target.value;
+      const match = users.find(u => u.email === selectedEmail);
+      input.dataset.userId = match ? match._id : '';
+    });
+  }
 }
 
-// ---------- 2. EDIT PAGE (already in previous code, but attach to new button if needed) ----------
-// (the editPage function is already defined in previous JS)
+// ---------- LOAD BROADCASTS WITH EDIT/DELETE ----------
+async function loadBroadcasts() {
+  const res = await fetch('/api/admin/broadcast');
+  const broadcasts = await res.json();
+  const container = document.getElementById('broadcast-list');
+  if (!container) return;
+  container.innerHTML = '';
+  broadcasts.forEach(b => {
+    const div = document.createElement('div');
+    div.style.border = '1px solid #ccc';
+    div.style.margin = '5px';
+    div.style.padding = '5px';
+    div.innerHTML = `
+      <strong>${escapeHtml(b.message)}</strong><br>
+      <small>${new Date(b.createdAt).toLocaleString()}</small><br>
+      <button class="edit-broadcast" data-id="${b._id}" data-msg="${escapeHtml(b.message)}">Edit</button>
+      <button class="delete-broadcast" data-id="${b._id}">Delete</button>
+    `;
+    container.appendChild(div);
+  });
+  // Edit broadcast
+  document.querySelectorAll('.edit-broadcast').forEach(btn => {
+    btn.onclick = () => {
+      const newMsg = prompt('Edit broadcast message', btn.dataset.msg);
+      if (newMsg) {
+        fetch(`/api/admin/broadcast/${btn.dataset.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: newMsg })
+        }).then(() => loadBroadcasts());
+      }
+    };
+  });
+  // Delete broadcast
+  document.querySelectorAll('.delete-broadcast').forEach(btn => {
+    btn.onclick = async () => {
+      if (confirm('Delete this broadcast?')) {
+        await fetch(`/api/admin/broadcast/${btn.dataset.id}`, { method: 'DELETE' });
+        loadBroadcasts();
+      }
+    };
+  });
+}
 
-// ---------- 3. SEND PRIVATE MESSAGE (from HTML inputs) ----------
-async function sendPrivateMessageFromUI() {
-  const userId = document.getElementById('private-message-user-id').value;
-  const message = document.getElementById('private-message-text').value;
-  if (!userId || !message) {
-    alert('User ID and message are required');
-    return;
+// ---------- LOAD PRIVATE MESSAGES WITH EDIT/DELETE ----------
+async function loadPrivateMessages(userId) {
+  const url = userId ? `/api/admin/messages?userId=${userId}` : '/api/admin/messages';
+  const res = await fetch(url);
+  const messages = await res.json();
+  const container = document.getElementById('private-messages-list');
+  if (!container) return;
+  container.innerHTML = '';
+  for (const msg of messages) {
+    const div = document.createElement('div');
+    div.style.border = '1px solid #ccc';
+    div.style.margin = '5px';
+    div.style.padding = '5px';
+    const userEmail = msg.userId?.email || 'Unknown user';
+    div.innerHTML = `
+      <strong>To: ${userEmail}</strong><br>
+      ${escapeHtml(msg.message)}<br>
+      <small>${new Date(msg.createdAt).toLocaleString()}</small><br>
+      <button class="edit-pm" data-id="${msg._id}" data-text="${escapeHtml(msg.message)}">Edit</button>
+      <button class="delete-pm" data-id="${msg._id}">Delete</button>
+    `;
+    container.appendChild(div);
   }
-  await fetch(`/api/admin/message/${userId}`, {
+  // Edit PM
+  document.querySelectorAll('.edit-pm').forEach(btn => {
+    btn.onclick = () => {
+      const newText = prompt('Edit message', btn.dataset.text);
+      if (newText) {
+        fetch(`/api/admin/message/${btn.dataset.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: newText })
+        }).then(() => loadPrivateMessages(userId));
+      }
+    };
+  });
+  // Delete PM
+  document.querySelectorAll('.delete-pm').forEach(btn => {
+    btn.onclick = async () => {
+      if (confirm('Delete this message?')) {
+        await fetch(`/api/admin/message/${btn.dataset.id}`, { method: 'DELETE' });
+        loadPrivateMessages(userId);
+      }
+    };
+  });
+}
+
+// ---------- SEND PRIVATE MESSAGE WITH SEARCH ----------
+async function sendPrivateMessageFromUI() {  // keep same name to avoid breaking existing calls
+  const input = document.getElementById('private-message-user-email');
+  if (!input) return;
+  const userEmail = input.value;
+  const message = document.getElementById('private-message-text').value;
+  if (!userEmail || !message) return alert('User email and message required');
+  const users = await fetch('/api/admin/users').then(r => r.json());
+  const user = users.find(u => u.email === userEmail);
+  if (!user) return alert('User not found');
+  await fetch(`/api/admin/message/${user._id}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ message })
   });
-  alert('Private message sent');
+  alert('Message sent');
   document.getElementById('private-message-text').value = '';
+  loadPrivateMessages(user._id);
 }
 
-// ---------- 4. FETCH ALL POSTS (requires backend endpoint) ----------
-// NOTE: This assumes you have a GET /api/admin/posts endpoint.
-// If not, you need to create it or adjust. For now, it will show an error.
-async function fetchAllPosts() {
-  try {
-    const res = await fetch('/api/admin/posts');
-    if (!res.ok) throw new Error('Posts endpoint not available');
-    return await res.json();
-  } catch (err) {
-    console.error(err);
-    alert('Cannot fetch posts. Backend endpoint GET /api/admin/posts is missing.');
-    return [];
+// ---------- CLEAR ALL LOGS ----------
+async function clearAllLogs() {
+  if (!confirm('Delete ALL logs? Cannot undo.')) return;
+  await fetch('/api/admin/logs/clear-all', { method: 'DELETE' });
+  loadSystemLogs(); // this will refresh
+}
+
+// ---------- ADD PAGE TO USER (SEARCH MODAL) ----------
+async function showAddPageModal() {
+  let modal = document.getElementById('addPageModal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'addPageModal';
+    modal.style.cssText = 'position:fixed;top:20%;left:30%;background:white;padding:20px;border:1px solid #ccc;z-index:9999;width:400px;';
+    modal.innerHTML = `
+      <h3>Add Facebook Page to User</h3>
+      <label>Search User (email): <input id="page-user-email" list="user-datalist-addpage" autocomplete="off"></label>
+      <datalist id="user-datalist-addpage"></datalist><br><br>
+      <label>Page Name: <input id="page-name" style="width:100%"></label><br>
+      <label>Page ID: <input id="page-id" style="width:100%"></label><br>
+      <label>Page Token: <textarea id="page-token" rows="2" style="width:100%"></textarea></label><br><br>
+      <button id="confirm-add-page">Add Page</button>
+      <button id="close-addpage-modal">Cancel</button>
+    `;
+    document.body.appendChild(modal);
+    await populateUserDatalist('page-user-email', 'user-datalist-addpage');
   }
-}
-
-async function loadPostsTable() {
-  const tbody = document.getElementById('admin-posts-table-body');
-  if (!tbody) return;
-  tbody.innerHTML = '<tr><td colspan="4">Loading...</td></tr>';
-  const posts = await fetchAllPosts();
-  if (!posts.length) {
-    tbody.innerHTML = '<tr><td colspan="4">No posts found</td></tr>';
-    return;
-  }
-  tbody.innerHTML = '';
-  posts.forEach(post => {
-    const row = tbody.insertRow();
-    row.insertCell(0).textContent = post._id;
-    row.insertCell(1).textContent = post.content?.substring(0, 80) || '(no text)';
-    row.insertCell(2).textContent = post.status || 'pending';
-    const actionsCell = row.insertCell(3);
-    const forceBtn = document.createElement('button');
-    forceBtn.textContent = 'Force Publish';
-    forceBtn.onclick = () => forcePublishPost(post._id);
-    const deleteBtn = document.createElement('button');
-    deleteBtn.textContent = 'Delete';
-    deleteBtn.onclick = () => deleteAnyPost(post._id);
-    actionsCell.appendChild(forceBtn);
-    actionsCell.appendChild(deleteBtn);
-  });
-}
-
-async function forcePublishPost(postId) {
-  if (!confirm('Force-publish this post immediately?')) return;
-  await fetch(`/api/admin/posts/${postId}/force-publish`, { method: 'PATCH' });
-  alert('Post forced to publish');
-  await loadPostsTable();
-}
-
-async function deleteAnyPost(postId) {
-  if (!confirm('Permanently delete this post?')) return;
-  await fetch(`/api/admin/posts/${postId}`, { method: 'DELETE' });
-  alert('Post deleted');
-  await loadPostsTable();
-}
-
-// ---------- 5. CREATE USER WITH PAGES (from HTML dynamic form) ----------
-function addPageEntry() {
-  const container = document.getElementById('pages-list-container');
-  const entryDiv = document.createElement('div');
-  entryDiv.className = 'page-entry';
-  entryDiv.innerHTML = `
-    <input type="text" placeholder="Page Name" class="page-name">
-    <input type="text" placeholder="Facebook Page ID" class="page-id">
-    <input type="text" placeholder="Page Token" class="page-token">
-    <button type="button" class="remove-page-btn">Remove</button>
-  `;
-  container.appendChild(entryDiv);
-  entryDiv.querySelector('.remove-page-btn').onclick = () => entryDiv.remove();
-}
-
-async function createUserWithPagesFromUI() {
-  const email = document.getElementById('advanced-user-email').value;
-  const password = document.getElementById('advanced-user-password').value;
-  const role = document.getElementById('advanced-user-role').value;
-  const phone = document.getElementById('advanced-user-phone').value;
-
-  if (!email || !password) {
-    alert('Email and password are required');
-    return;
-  }
-
-  const pages = [];
-  document.querySelectorAll('#pages-list-container .page-entry').forEach(entry => {
-    const name = entry.querySelector('.page-name').value;
-    const pageId = entry.querySelector('.page-id').value;
-    const pageToken = entry.querySelector('.page-token').value;
-    if (name && pageId && pageToken) {
-      pages.push({ name, pageId, pageToken });
-    }
-  });
-
-  const res = await fetch('/api/admin/users', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, password, role, phone, pages })
-  });
-  const data = await res.json();
-  if (data.error) alert(data.error);
-  else {
-    alert('User created with pages');
-    location.reload();
-  }
-}
-
-// ---------- 6. EXTEND EXISTING USER TABLE (add "Message" button) ----------
-// This runs after the original loadUsers() to inject a "Message" button in each row.
-function addMessageButtonsToUsers() {
-  const rows = document.querySelectorAll('#admin-users-table tr');
-  rows.forEach(row => {
-    const actionsCell = row.querySelector('td:last-child');
-    if (!actionsCell) return;
-    // find user ID from any existing button
-    const editBtn = actionsCell.querySelector('.edit-user');
-    if (!editBtn) return;
-    const userId = editBtn.dataset.id;
-    // avoid duplicate
-    if (actionsCell.querySelector('.user-message-btn')) return;
-    const msgBtn = document.createElement('button');
-    msgBtn.textContent = 'Message';
-    msgBtn.className = 'user-message-btn';
-    msgBtn.onclick = () => {
-      const msg = prompt('Enter private message for this user:');
-      if (msg) {
-        fetch(`/api/admin/message/${userId}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message: msg })
-        }).then(() => alert('Message sent'));
-      }
+  modal.style.display = 'block';
+  document.getElementById('confirm-add-page').onclick = async () => {
+    const userEmail = document.getElementById('page-user-email').value;
+    const users = await fetch('/api/admin/users').then(r => r.json());
+    const user = users.find(u => u.email === userEmail);
+    if (!user) return alert('User not found');
+    const payload = {
+      userId: user._id,
+      name: document.getElementById('page-name').value,
+      pageId: document.getElementById('page-id').value,
+      pageToken: document.getElementById('page-token').value
     };
-    actionsCell.appendChild(msgBtn);
-  });
+    if (!payload.name || !payload.pageId || !payload.pageToken) return alert('All fields required');
+    await fetch('/api/admin/pages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    modal.style.display = 'none';
+    await reloadAdmin();
+  };
+  document.getElementById('close-addpage-modal').onclick = () => modal.style.display = 'none';
 }
 
-// ---------- 7. HOOK EVERYTHING AFTER PAGE LOAD ----------
-// Wait for DOM and for original admin.js to finish, then attach new listeners.
-document.addEventListener('DOMContentLoaded', () => {
-  // Wait a bit for original loadUsers() to run, then add message buttons
-  setTimeout(() => {
-    addMessageButtonsToUsers();
-  }, 1000);
-
-  // New buttons
-  const addPageBtn = document.getElementById('add-page-btn');
-  if (addPageBtn) addPageBtn.onclick = showAddPageModal;
-
-  const sendPrivateBtn = document.getElementById('send-private-msg-btn');
-  if (sendPrivateBtn) sendPrivateBtn.onclick = sendPrivateMessageFromUI;
-
-  const refreshPostsBtn = document.getElementById('refresh-posts-btn');
-  if (refreshPostsBtn) refreshPostsBtn.onclick = loadPostsTable;
-
-  const addPageEntryBtn = document.getElementById('add-page-entry-btn');
-  if (addPageEntryBtn) addPageEntryBtn.onclick = addPageEntry;
-
-  const advancedCreateBtn = document.getElementById('advanced-create-user-btn');
-  if (advancedCreateBtn) advancedCreateBtn.onclick = createUserWithPagesFromUI;
-
-  // Also re-run message button injection after any user table refresh (if you have reloadAdmin)
-  const originalReloadAdmin = window.reloadAdmin;
-  if (originalReloadAdmin) {
-    window.reloadAdmin = async function() {
-      await originalReloadAdmin();
-      addMessageButtonsToUsers();
-    };
-  }
-});
+// ---------- ESCAPE HTML HELPER ----------
+function escapeHtml(str) {
+  if (!str) return '';
+  return str.replace(/[&<>]/g, function(m) {
+    if (m === '&') return '&amp;';
+    if (m === '<') return '&lt;';
+    if (m === '>') return '&gt;';
+    return m;
+  });
+}
