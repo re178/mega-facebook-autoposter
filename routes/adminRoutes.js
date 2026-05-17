@@ -591,4 +591,106 @@ router.patch('/maintenance/off', async (req, res) => {
     }
 });
 
+/* =====================================================
+   NEW ADMIN FEATURES (BROADCAST CRUD, LOGS DELETE, MESSAGES CRUD)
+===================================================== */
+
+// ---------- BROADCAST GET, PUT, DELETE ----------
+router.get('/broadcast', async (req, res) => {
+  try {
+    const broadcasts = await BroadcastMessage.find().sort({ createdAt: -1 });
+    res.json(broadcasts);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.put('/broadcast/:id', async (req, res) => {
+  try {
+    const { message } = req.body;
+    const updated = await BroadcastMessage.findByIdAndUpdate(
+      req.params.id,
+      { message, updatedAt: new Date() },
+      { new: true }
+    );
+    res.json(updated);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.delete('/broadcast/:id', async (req, res) => {
+  try {
+    await BroadcastMessage.findByIdAndDelete(req.params.id);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ---------- PRIVATE MESSAGES GET, PUT, DELETE ----------
+router.get('/messages', async (req, res) => {
+  try {
+    const { userId } = req.query;
+    const filter = userId ? { userId } : {};
+    const messages = await AdminMessage.find(filter)
+      .populate('userId', 'email')
+      .sort({ createdAt: -1 });
+    res.json(messages);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.put('/message/:id', async (req, res) => {
+  try {
+    const { message } = req.body;
+    const updated = await AdminMessage.findByIdAndUpdate(
+      req.params.id,
+      { message, updatedAt: new Date() },
+      { new: true }
+    );
+    res.json(updated);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.delete('/message/:id', async (req, res) => {
+  try {
+    await AdminMessage.findByIdAndDelete(req.params.id);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ---------- LOGS DELETE ----------
+router.delete('/logs/:logId', async (req, res) => {
+  try {
+    await Log.findByIdAndDelete(req.params.logId);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.delete('/ai-logs/:logId', async (req, res) => {
+  try {
+    await AiLog.findByIdAndDelete(req.params.logId);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.delete('/logs/clear-all', async (req, res) => {
+  try {
+    await Log.deleteMany({});
+    await AiLog.deleteMany({});
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 module.exports = router;
