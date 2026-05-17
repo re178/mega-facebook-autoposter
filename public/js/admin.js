@@ -29,7 +29,10 @@ console.log("IS ADMIN:", isAdmin);
         await loadUsers();
         await loadPages();
         await loadSystemLogs();
-
+                // NEW: load broadcasts and private messages (if containers exist)
+        await loadBroadcasts();
+        await populateUserDatalist('private-message-user-email', 'user-datalist-pm');
+        await loadPrivateMessages(''); 
         // CHARTS
         await loadCharts();
 
@@ -37,7 +40,9 @@ console.log("IS ADMIN:", isAdmin);
         bindCreateUser();
         bindBroadcastMessage();
         bindMaintenanceButtons();
-
+               // Bind new send message button (if exists)
+        const sendMsgBtn = document.getElementById('send-private-msg-btn');
+        if (sendMsgBtn) sendMsgBtn.onclick = sendPrivateMessageFromUI; 
         // AUTO REFRESH
         setInterval(async () => {
 
