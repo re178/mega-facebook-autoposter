@@ -189,20 +189,13 @@ async function loadUsers() {
 /* ====================================================
    USER BUTTONS
 ==================================================== */
-
 function bindUserButtons() {
 
     // SUSPEND
     document.querySelectorAll('.suspend-user')
         .forEach(btn => {
-
             btn.onclick = async () => {
-
-                await fetch(
-                    `/api/admin/users/${btn.dataset.id}/suspend`,
-                    { method: 'PATCH' }
-                );
-
+                await fetch(`/api/admin/users/${btn.dataset.id}/suspend`, { method: 'PATCH' });
                 await reloadAdmin();
             };
         });
@@ -210,14 +203,8 @@ function bindUserButtons() {
     // ACTIVATE
     document.querySelectorAll('.reactivate-user')
         .forEach(btn => {
-
             btn.onclick = async () => {
-
-                await fetch(
-                    `/api/admin/users/${btn.dataset.id}/reactivate`,
-                    { method: 'PATCH' }
-                );
-
+                await fetch(`/api/admin/users/${btn.dataset.id}/reactivate`, { method: 'PATCH' });
                 await reloadAdmin();
             };
         });
@@ -225,14 +212,8 @@ function bindUserButtons() {
     // LOCK AI
     document.querySelectorAll('.lock-ai')
         .forEach(btn => {
-
             btn.onclick = async () => {
-
-                await fetch(
-                    `/api/admin/users/${btn.dataset.id}/lock-ai`,
-                    { method: 'PATCH' }
-                );
-
+                await fetch(`/api/admin/users/${btn.dataset.id}/lock-ai`, { method: 'PATCH' });
                 await reloadAdmin();
             };
         });
@@ -240,14 +221,8 @@ function bindUserButtons() {
     // UNLOCK AI
     document.querySelectorAll('.unlock-ai')
         .forEach(btn => {
-
             btn.onclick = async () => {
-
-                await fetch(
-                    `/api/admin/users/${btn.dataset.id}/unlock-ai`,
-                    { method: 'PATCH' }
-                );
-
+                await fetch(`/api/admin/users/${btn.dataset.id}/unlock-ai`, { method: 'PATCH' });
                 await reloadAdmin();
             };
         });
@@ -255,21 +230,9 @@ function bindUserButtons() {
     // DELETE USER
     document.querySelectorAll('.delete-user')
         .forEach(btn => {
-
             btn.onclick = async () => {
-
-                const ok =
-                    confirm(
-                        'Delete user permanently?'
-                    );
-
-                if (!ok) return;
-
-                await fetch(
-                    `/api/admin/users/${btn.dataset.id}`,
-                    { method: 'DELETE' }
-                );
-
+                if (!confirm('Delete user permanently?')) return;
+                await fetch(`/api/admin/users/${btn.dataset.id}`, { method: 'DELETE' });
                 await reloadAdmin();
             };
         });
@@ -277,71 +240,73 @@ function bindUserButtons() {
     // RESET PASSWORD
     document.querySelectorAll('.reset-password')
         .forEach(btn => {
-
             btn.onclick = async () => {
-
-                const newPassword =
-                    prompt('Enter new password');
-
+                const newPassword = prompt('Enter new password');
                 if (!newPassword) return;
-
-                await fetch(
-                    `/api/admin/users/${btn.dataset.id}/reset-password`,
-                    {
-                        method: 'PATCH',
-
-                        headers: {
-                            'Content-Type':
-                                'application/json'
-                        },
-
-                        body: JSON.stringify({
-                            newPassword
-                        })
-                    }
-                );
-
+                await fetch(`/api/admin/users/${btn.dataset.id}/reset-password`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ newPassword })
+                });
                 alert('Password reset successful');
             };
         });
 
-    // EDIT USER
-    document.querySelectorAll('.edit-user')
-        .forEach(btn => {
-
-            btn.onclick = async () => {
-
-                const email =
-                    prompt('New Email');
-
-                const role =
-                    prompt('Role');
-
-                const phone =
-                    prompt('Phone');
-
-                await fetch(
-                    `/api/admin/users/${btn.dataset.id}`,
-                    {
-                        method: 'PUT',
-
-                        headers: {
-                            'Content-Type':
-                                'application/json'
-                        },
-
-                        body: JSON.stringify({
-                            email,
-                            role,
-                            phone
-                        })
-                    }
-                );
-
+    // EDIT USER (MODAL WITH DROPDOWNS)
+    document.querySelectorAll('.edit-user').forEach(btn => {
+        btn.onclick = async () => {
+            const userId = btn.dataset.id;
+            const user = await fetch(`/api/admin/users/${userId}`).then(r => r.json());
+            if (!user) return;
+            
+            let modal = document.getElementById('editUserModal');
+            if (!modal) {
+                modal = document.createElement('div');
+                modal.id = 'editUserModal';
+                modal.style.cssText = 'position:fixed;top:20%;left:30%;background:white;padding:20px;border:1px solid #ccc;z-index:9999;box-shadow:0 0 10px rgba(0,0,0,0.5);';
+                modal.innerHTML = `
+                    <h3>Edit User</h3>
+                    <label>Email: <input id="edit-email" type="email"></label><br>
+                    <label>Role: <select id="edit-role"><option>user</option><option>admin</option></select></label><br>
+                    <label>Phone: <input id="edit-phone"></label><br>
+                    <label>Subscription: <select id="edit-subscription"><option>free</option><option>pro</option><option>enterprise</option></select></label><br>
+                    <label>Status: <select id="edit-active"><option value="true">Active</option><option value="false">Suspended</option></select></label><br>
+                    <label>AI Lock: <select id="edit-aiLock"><option value="false">Unlocked</option><option value="true">Locked</option></select></label><br><br>
+                    <button id="save-user-edit">Save</button>
+                    <button id="close-user-modal">Cancel</button>
+                `;
+                document.body.appendChild(modal);
+            }
+            document.getElementById('edit-email').value = user.email;
+            document.getElementById('edit-role').value = user.role;
+            document.getElementById('edit-phone').value = user.phone || '';
+            document.getElementById('edit-subscription').value = user.subscription?.plan || 'free';
+            document.getElementById('edit-active').value = user.isActive ? 'true' : 'false';
+            document.getElementById('edit-aiLock').value = user.aiLocked ? 'true' : 'false';
+            modal.style.display = 'block';
+            
+            document.getElementById('save-user-edit').onclick = async () => {
+                const payload = {
+                    email: document.getElementById('edit-email').value,
+                    role: document.getElementById('edit-role').value,
+                    phone: document.getElementById('edit-phone').value,
+                    subscription: { plan: document.getElementById('edit-subscription').value },
+                    isActive: document.getElementById('edit-active').value === 'true',
+                    aiLocked: document.getElementById('edit-aiLock').value === 'true'
+                };
+                await fetch(`/api/admin/users/${userId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                modal.style.display = 'none';
                 await reloadAdmin();
             };
-        });
+            document.getElementById('close-user-modal').onclick = () => modal.style.display = 'none';
+        };
+    });
 }
+
 
 /* ====================================================
    CREATE USER
