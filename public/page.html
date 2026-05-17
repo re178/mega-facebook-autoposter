@@ -293,115 +293,75 @@
     <button id="profile-delete">🗑 Delete Profile</button>
   </div>
 </section>   
-      <!-- ================= ADMIN SECTION ================= -->
-      <section class="card" id="admin-section" style="display:none;">
+     <!-- ================= ADMIN SECTION ================= -->
+<section class="card" id="admin-section" style="display:none;">
 
   <h2>Admin Control Center</h2>
 
   <!-- ================= STATS ================= -->
   <div class="stats-grid">
-
     <div class="stat-box">
       <h3>Total Users</h3>
       <p id="stat-total-users">0</p>
     </div>
-
     <div class="stat-box">
       <h3>Active Users</h3>
       <p id="stat-active-users">0</p>
     </div>
-
     <div class="stat-box">
       <h3>Suspended Users</h3>
       <p id="stat-suspended-users">0</p>
     </div>
-
     <div class="stat-box">
       <h3>Total Pages</h3>
       <p id="stat-total-pages">0</p>
     </div>
-
     <div class="stat-box">
       <h3>Total Posts</h3>
       <p id="stat-total-posts">0</p>
     </div>
-
     <div class="stat-box">
       <h3>AI Posts</h3>
       <p id="stat-total-ai-posts">0</p>
     </div>
-
   </div>
 
   <!-- ================= CHARTS ================= -->
   <div class="chart-grid">
-
     <div class="chart-box">
       <h3>User Status</h3>
       <canvas id="usersChart"></canvas>
     </div>
-
     <div class="chart-box">
       <h3>Posts Per User</h3>
       <canvas id="postsChart"></canvas>
     </div>
-
   </div>
 
   <!-- ================= CREATE USER ================= -->
   <div class="admin-card">
-
     <h3>Create User</h3>
-
     <div class="form-grid">
-
-      <input
-        type="email"
-        id="admin-user-email"
-        placeholder="Email"
-      >
-
-      <input
-        type="password"
-        id="admin-user-password"
-        placeholder="Password"
-      >
-
+      <input type="email" id="admin-user-email" placeholder="Email">
+      <input type="password" id="admin-user-password" placeholder="Password">
       <select id="admin-user-role">
         <option value="user">User</option>
         <option value="moderator">Moderator</option>
         <option value="admin">Admin</option>
       </select>
-
-      <input
-        type="text"
-        id="admin-user-phone"
-        placeholder="Phone"
-      >
-
+      <input type="text" id="admin-user-phone" placeholder="Phone">
     </div>
-
     <div class="actions">
-
-      <button id="admin-create-user-btn">
-        Create User
-      </button>
-
+      <button id="admin-create-user-btn">Create User</button>
     </div>
-
   </div>
 
   <!-- ================= USERS TABLE ================= -->
   <div class="admin-card">
-
     <h3>Users</h3>
-
     <div class="table-wrapper">
-
       <table class="admin-table">
-
         <thead>
-
           <tr>
             <th>Email</th>
             <th>Role</th>
@@ -411,28 +371,18 @@
             <th>AI</th>
             <th>Actions</th>
           </tr>
-
         </thead>
-
         <tbody id="admin-users-table"></tbody>
-
       </table>
-
     </div>
-
   </div>
 
   <!-- ================= PAGES TABLE ================= -->
   <div class="admin-card">
-
     <h3>All Pages</h3>
-
     <div class="table-wrapper">
-
       <table class="admin-table">
-
         <thead>
-
           <tr>
             <th>Page Name</th>
             <th>Facebook ID</th>
@@ -440,137 +390,73 @@
             <th>Auto Generation</th>
             <th>Actions</th>
           </tr>
-
         </thead>
-
         <tbody id="admin-pages-table"></tbody>
-
       </table>
-
     </div>
-
   </div>
 
   <!-- ================= BROADCAST ================= -->
   <div class="admin-card">
-
     <h3>Broadcast Message</h3>
-
-    <textarea
-      id="broadcast-message"
-      rows="5"
-      placeholder="Write message to all users..."
-    ></textarea>
-
+    <textarea id="broadcast-message" rows="5" placeholder="Write message to all users..."></textarea>
     <div class="actions">
-
-      <button id="broadcast-btn">
-        Send Broadcast
-      </button>
-
+      <button id="broadcast-btn">Send Broadcast</button>
     </div>
-
   </div>
 
-  <!-- ================= LOGS ================= -->
+  <!-- ================= EXISTING BROADCASTS ================= -->
   <div class="admin-card">
+    <h3>Existing Broadcasts</h3>
+    <div id="broadcast-list"></div>
+  </div>
 
+  <!-- ================= PRIVATE MESSAGES ================= -->
+  <div class="admin-card">
+    <h3>Send Private Message to User</h3>
+    <div class="form-grid">
+      <input type="text" id="private-message-user-email" placeholder="User Email" list="user-datalist-pm">
+      <textarea id="private-message-text" rows="3" placeholder="Message content..."></textarea>
+    </div>
+    <button id="send-private-msg-btn">📨 Send Message</button>
+  </div>
+
+  <!-- ================= PRIVATE MESSAGES LIST ================= -->
+  <div class="admin-card">
+    <h3>Private Messages History</h3>
+    <div id="private-messages-list"></div>
+  </div>
+
+  <!-- ================= SYSTEM LOGS ================= -->
+  <div class="admin-card">
     <h3>System Logs</h3>
-
-    <div
-      class="logs-container"
-      id="admin-logs"
-    ></div>
-
+    <button id="clear-all-logs" onclick="clearAllLogs()" style="margin-bottom: 10px; background-color: #dc3545; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer;">🗑️ Clear All Logs</button>
+    <div class="logs-container" id="admin-logs"></div>
   </div>
 
   <!-- ================= MAINTENANCE ================= -->
   <div class="admin-card">
-
     <h3>Maintenance Mode</h3>
-
     <div class="maintenance-actions">
-
-      <button id="maintenance-on">
-        Enable Maintenance
-      </button>
-
-      <button id="maintenance-off">
-        Disable Maintenance
-      </button>
-
-    </div>
-
-  </div>
-
-<!-- ================= NEW: ADD PAGE TO USER ================= -->
-<div class="admin-card">
-  <h3>Add Facebook Page to User</h3>
-  <button id="add-page-btn">➕ Add Page</button>
-</div>
-
-<!-- ================= NEW: SEND PRIVATE MESSAGE ================= -->
-<div class="admin-card">
-  <h3>Send Private Message to a User</h3>
-  <div class="form-grid">
-    <input type="text" id="private-message-user-id" placeholder="User ID (from Users table)">
-    <textarea id="private-message-text" rows="3" placeholder="Message content..."></textarea>
-  </div>
-  <button id="send-private-msg-btn">📨 Send Message</button>
-</div>
-
-<!-- ================= NEW: MANAGE POSTS (force publish / delete) ================= -->
-<div class="admin-card">
-  <h3>Manage All Posts</h3>
-  <button id="refresh-posts-btn">Refresh Posts</button>
-  <div class="table-wrapper">
-    <table class="admin-table">
-      <thead>
-        <tr><th>Post ID</th><th>Content</th><th>Status</th><th>Actions</th></tr>
-      </thead>
-      <tbody id="admin-posts-table-body">
-        <tr><td colspan="4">Click "Refresh Posts" to load</td></tr>
-      </tbody>
-    </table>
-  </div>
-</div>
-
-<!-- ================= NEW: CREATE USER WITH PAGES (extended) ================= -->
-<div class="admin-card">
-  <h3>Create User + Facebook Pages</h3>
-  <div class="form-grid">
-    <input type="email" id="advanced-user-email" placeholder="Email">
-    <input type="password" id="advanced-user-password" placeholder="Password">
-    <select id="advanced-user-role">
-      <option value="user">User</option>
-      <option value="admin">Admin</option>
-    </select>
-    <input type="text" id="advanced-user-phone" placeholder="Phone">
-  </div>
-
-  <h4>Pages to attach (optional)</h4>
-  <div id="pages-list-container">
-    <div class="page-entry">
-      <input type="text" placeholder="Page Name" class="page-name">
-      <input type="text" placeholder="Facebook Page ID" class="page-id">
-      <input type="text" placeholder="Page Token" class="page-token">
-      <button type="button" class="remove-page-btn" disabled>Remove</button>
+      <button id="maintenance-on">Enable Maintenance</button>
+      <button id="maintenance-off">Disable Maintenance</button>
     </div>
   </div>
-  <button type="button" id="add-page-entry-btn">+ Add another page</button>
-  <div class="actions">
-    <button id="advanced-create-user-btn">🚀 Create User with Pages</button>
+
+  <!-- ================= ADD PAGE TO USER ================= -->
+  <div class="admin-card">
+    <h3>Add Facebook Page to User</h3>
+    <button id="add-page-btn" onclick="showAddPageModal()">➕ Add Page</button>
   </div>
-</div>
-        
+
+  <!-- ================= DATALISTS FOR SEARCH ================= -->
+  <datalist id="user-datalist-pm"></datalist>
+  <datalist id="user-datalist-addpage"></datalist>
+
 </section>
 
 <!-- LOAD CHART.JS BEFORE admin.js -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-
-    </main>
-  </div>
-
   <script src="js/api.js"></script>
   <script src="js/page.js"></script>
   <script src="js/page-features.js"></script>
