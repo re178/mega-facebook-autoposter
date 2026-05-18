@@ -1,7 +1,7 @@
 const mongoose = require('mongoose');
 
 const MessageSchema = new mongoose.Schema({
-  pageId: { type: mongoose.Schema.Types.ObjectId, ref: 'Page' },
+  pageId: { type: String, required: true, index: true },
 
   senderId: String,      // keep (legacy / display)
   senderName: String,
