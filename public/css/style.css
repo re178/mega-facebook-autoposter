@@ -401,7 +401,84 @@ input[type="datetime-local"] {
   to { opacity: 1; transform: translateX(0); }
   }
 
+/* Loading spinner */
+.loading-state {
+  text-align: center;
+  padding: 40px;
+  color: #666;
+}
+.spinner {
+  border: 3px solid #f3f3f3;
+  border-top: 3px solid #3498db;
+  border-radius: 50%;
+  width: 40px;
+  height: 40px;
+  animation: spin 1s linear infinite;
+  margin: 0 auto 15px;
+}
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
 
+/* Friendly message boxes */
+.friendly-message {
+  text-align: center;
+  padding: 40px 20px;
+  margin: 20px auto;
+  max-width: 500px;
+  border-radius: 12px;
+  background: #f9f9f9;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+}
+.friendly-message .icon {
+  font-size: 48px;
+  margin-bottom: 15px;
+}
+.friendly-message h3 {
+  margin: 0 0 10px;
+  font-size: 20px;
+}
+.friendly-message p {
+  margin: 0 0 20px;
+  color: #555;
+}
+.friendly-message.info {
+  background: #e7f3ff;
+  border-left: 4px solid #2196f3;
+}
+.friendly-message.warning {
+  background: #fff3e0;
+  border-left: 4px solid #ff9800;
+}
+.friendly-message.error {
+  background: #ffebee;
+  border-left: 4px solid #f44336;
+}
+.retry-btn {
+  background: #333;
+  color: white;
+  border: none;
+  padding: 8px 20px;
+  border-radius: 25px;
+  cursor: pointer;
+  font-size: 14px;
+}
+.retry-btn:hover {
+  background: #555;
+}
+.analytics-stats {
+  display: flex;
+  gap: 20px;
+  justify-content: center;
+  padding: 20px;
+}
+.stat {
+  background: #f0f0f0;
+  padding: 15px 25px;
+  border-radius: 8px;
+  font-size: 18px;
+}
 
 
 
