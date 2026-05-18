@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const requireLogin = require('../middleware/requireLogin');
-const User = require('./models/User');
+const User = require('../models/User');
 const AdminMessage = require('../models/AdminMessage');
 const BroadcastMessage = require('../models/BroadcastMessage');
 
