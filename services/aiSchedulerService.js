@@ -7,6 +7,13 @@ const AiTopic = require('../models/AiTopic');
 const AiLog = require('../models/AiLog');
 const Page = require('../models/Page');
 const PageProfile = require('../models/PageProfile');
+
+// New lightweight model to track auto-created topics (no changes to existing schemas)
+const AutoTopicMeta = mongoose.model('AutoTopicMeta', new mongoose.Schema({
+  topicId: { type: mongoose.Schema.Types.ObjectId, ref: 'AiTopic', required: true, unique: true },
+  createdAt: { type: Date, default: Date.now }
+}));
+
 // ===================== AI PROVIDERS =====================
 const {
   CloudflareText,
@@ -16,7 +23,6 @@ const {
   ClaudeText,
   AIHordeText,
   AI21Text,
-  // DeepSeekText // ← ADD API KEY & UNCOMMENT WHEN READY
 } = require('../services/textProviders');
 
 const {
@@ -36,7 +42,6 @@ const TextProviders = [
   ClaudeText,
   AIHordeText,
   AI21Text
-  // DeepSeekText
 ];
 
 const ImageProviders = [
@@ -49,8 +54,21 @@ const ImageProviders = [
 
 // ===================== GLOBAL SETTINGS =====================
 const TIMEZONE = 'Africa/Nairobi';
-const MAX_POSTS_PER_TOPIC = 4;
+const MAX_POSTS_PER_TOPIC = 5;        // Changed from 4 to 5 (Option 1)
 const MAX_SCHEDULED_POSTS = 10;
+
+// ===================== AUTO TOPIC CREATION SETTINGS =====================
+const MIN_ACTIVE_TOPICS = 3;           // per page
+const MAX_ACTIVE_TOPICS = 6;           // per page
+const TOPIC_LIFETIME_DAYS = 5;         // startDate + (TOPIC_LIFETIME_DAYS - 1) days = endDate
+const POSTS_PER_DAY_AUTO = 1;           // 1 post per day
+const INCLUDE_MEDIA_AUTO = false;       // no images by default
+const AVOID_SIMILAR_DAYS = 7;           // don't repeat similar topics within this many days
+const MAX_START_DATE_DAYS = 21;         // topic must start within 21 days of creation
+const MAX_SAME_START_DAY = 2;           // no more than 2 topics start on same day per page
+
+// Global master switch (in-memory, can be toggled via API)
+let GLOBAL_AUTO_TOPIC_CREATION_ENABLED = true;
 
 // ===================== PROVIDER STATE =====================
 const providerState = {};
@@ -80,15 +98,14 @@ async function monitor(topicId, pageId, postId, action, message) {
 // ===================== LOG CLEANUP =====================
 async function cleanupLogs() {
   const cutoff = new Date(Date.now() - 30 * 60 * 1000);
-  // Only delete MANUAL logs (non-auto)
   await AiLog.deleteMany({
     createdAt: { $lt: cutoff },
-    action: { $not: /^AUTO_/ } // preserve AUTO logs
+    action: { $not: /^AUTO_/ }
   });
 }
 setInterval(cleanupLogs, 15 * 60 * 1000);
 
-// ===================== ANGLES =====================
+// ===================== ANGLES (only for posts) =====================
 const ANGLES = ['memory','observation','curiosity','experience','reflection','surprise','casual'];
 
 // ===================== UTILS =====================
@@ -100,13 +117,8 @@ function shuffleTimes(times) {
   return [...times].sort(() => Math.random() - 0.5);
 }
 
-function shiftTime(base, minutes) {
-  return moment(base).add(minutes, 'minutes').toDate();
-}
-
-// ===================== PROMPT BUILDER =====================
+// ===================== PROMPT BUILDER (unchanged) =====================
 async function buildPrompt({ topic, angle, pageId, textSeed }) {
-  // fetch page profile
   const profile = await PageProfile.findOne({ pageId });
 
   const tone = profile?.tone || 'friendly';
@@ -116,7 +128,6 @@ async function buildPrompt({ topic, angle, pageId, textSeed }) {
   const audienceInterest = profile?.audienceInterest.join(', ') || 'general audience';
   const extraNotes = profile?.extraNotes || '';
 
-  // textSeed ensures uniqueness for images later
   const seedText = textSeed ? ` Reference previous text: "${textSeed}"` : '';
 
   return `
@@ -140,7 +151,6 @@ Rules:
 `;
 }
 
-
 // ===================== PROVIDER SELECT =====================
 function selectProvider(providers) {
   const now = Date.now();
@@ -150,7 +160,7 @@ function selectProvider(providers) {
   }) || null;
 }
 
-// ===================== TEXT GENERATION =====================
+// ===================== TEXT GENERATION (unchanged) =====================
 async function generateText(topic, angle, pageId, textSeed = null) {
   for (const provider of TextProviders) {
     try {
@@ -168,7 +178,7 @@ async function generateText(topic, angle, pageId, textSeed = null) {
   return null;
 }
 
-// ===================== IMAGE GENERATION =====================
+// ===================== IMAGE GENERATION (unchanged) =====================
 async function generateImage(topic, pageId, textSeed = null) {
   const seedText = textSeed ? ` with context: "${textSeed}"` : '';
   for (const provider of ImageProviders) {
@@ -181,7 +191,7 @@ async function generateImage(topic, pageId, textSeed = null) {
   return null;
 }
 
-// ===================== MANUAL GENERATOR =====================
+// ===================== MANUAL GENERATOR (unchanged) =====================
 async function generatePostsForTopic(topicId) {
   const topic = await AiTopic.findById(topicId);
   if (!topic) return [];
@@ -201,7 +211,6 @@ async function generatePostsForTopic(topicId) {
         TIMEZONE
       ).toDate();
 
-      // --- Check if post already exists (scheduled or logged) ---
       const existsScheduled = await AiScheduledPost.findOne({ topicId, scheduledTime: scheduled });
       const existsLogged = await AiLog.findOne({ topicId, action: /POST_CREATED|AUTO_POST_CREATED/, message: new RegExp(time) });
       if (existsScheduled || existsLogged) continue;
@@ -227,17 +236,264 @@ async function generatePostsForTopic(topicId) {
   }
   return created;
 }
-//===================== AUTO GENERATION CORE (HARDENED SAFE VERSION) =====================//
 
+// ===================== AUTO TOPIC CREATION (NEW) =====================
+
+/**
+ * Fetch trending headline from APIs with fallback: GNews -> NewsAPI -> null
+ */
+async function fetchTrendingHeadline(keyword) {
+  // Try GNews (requires API key from env)
+  const gnewsKey = process.env.GNEWS_API_KEY;
+  if (gnewsKey) {
+    try {
+      const url = `https://gnews.io/api/v4/search?q=${encodeURIComponent(keyword)}&lang=en&country=ke&max=1&token=${gnewsKey}`;
+      const response = await fetch(url);
+      const data = await response.json();
+      if (data.articles && data.articles.length > 0) {
+        return data.articles[0].title;
+      }
+    } catch (err) {
+      console.error('GNews fetch failed:', err.message);
+    }
+  }
+
+  // Fallback to NewsAPI
+  const newsApiKey = process.env.NEWS_API_KEY;
+  if (newsApiKey) {
+    try {
+      const url = `https://newsapi.org/v2/everything?q=${encodeURIComponent(keyword)}&sortBy=popularity&pageSize=1&apiKey=${newsApiKey}`;
+      const response = await fetch(url);
+      const data = await response.json();
+      if (data.articles && data.articles.length > 0) {
+        return data.articles[0].title;
+      }
+    } catch (err) {
+      console.error('NewsAPI fetch failed:', err.message);
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Use AI to refine headline into a longer topic sentence, or create from scratch.
+ */
+async function refineTopicName(rawHeadline, pageId, audienceInterest) {
+  const prompt = rawHeadline
+    ? `Convert this news headline into a longer, specific Facebook post topic sentence (2-5 sentences) about ${audienceInterest}. Keep it natural and engaging. Headline: "${rawHeadline}"`
+    : `Create a specific, longer sentence (2-5 sentences) Facebook post topic about ${audienceInterest}. The topic should be timely and interesting.`;
+
+  for (const provider of TextProviders) {
+    try {
+      const topicName = await provider.generate(prompt);
+      if (topicName) return cleanText(topicName);
+    } catch (err) {
+      console.error(`Topic generation failed for ${provider.name}:`, err.message);
+    }
+  }
+  return null;
+}
+
+/**
+ * Avoid similar topics (by word overlap) within AVOID_SIMILAR_DAYS.
+ */
+async function isTopicTooSimilar(newTopicName, pageId) {
+  const cutoff = moment().subtract(AVOID_SIMILAR_DAYS, 'days').toDate();
+  const existingTopics = await AiTopic.find({
+    pageId,
+    $or: [
+      { endDate: { $gte: new Date() } },
+      { endDate: { $gte: cutoff } }
+    ]
+  }).lean();
+
+  const newWords = new Set(newTopicName.toLowerCase().split(/\s+/));
+  for (const topic of existingTopics) {
+    const oldWords = new Set(topic.topicName.toLowerCase().split(/\s+/));
+    const intersection = [...newWords].filter(w => oldWords.has(w)).length;
+    const similarity = intersection / Math.min(newWords.size, oldWords.size);
+    if (similarity > 0.5) return true;
+  }
+  return false;
+}
+
+/**
+ * Pick a start date that is within 21 days, in future, and no more than MAX_SAME_START_DAY topics start on same day.
+ */
+async function getIntelligentStartDate(pageId) {
+  const today = moment().tz(TIMEZONE).startOf('day');
+  const maxDate = moment().tz(TIMEZONE).add(MAX_START_DATE_DAYS, 'days').startOf('day');
+
+  const existingTopics = await AiTopic.find({ pageId }).lean();
+  const startCounts = {};
+  for (const topic of existingTopics) {
+    const dayKey = moment(topic.startDate).tz(TIMEZONE).format('YYYY-MM-DD');
+    startCounts[dayKey] = (startCounts[dayKey] || 0) + 1;
+  }
+
+  // First try to find a day with count < MAX_SAME_START_DAY, starting from tomorrow
+  for (let d = today.clone().add(1, 'day'); d.isSameOrBefore(maxDate); d.add(1, 'day')) {
+    const dayKey = d.format('YYYY-MM-DD');
+    if ((startCounts[dayKey] || 0) < MAX_SAME_START_DAY) {
+      return d.toDate();
+    }
+  }
+  // If all days are full, pick the least crowded day
+  let minCount = Infinity;
+  let bestDate = null;
+  for (let d = today.clone().add(1, 'day'); d.isSameOrBefore(maxDate); d.add(1, 'day')) {
+    const dayKey = d.format('YYYY-MM-DD');
+    const count = startCounts[dayKey] || 0;
+    if (count < minCount) {
+      minCount = count;
+      bestDate = d.toDate();
+    }
+  }
+  return bestDate;
+}
+
+/**
+ * Generate a random time between 6:00 and 23:00 (page timezone) that is:
+ * - Not colliding with existing scheduled posts on same page, same day
+ * - Later than current moment when scheduled
+ */
+async function getNonCollidingTime(pageId, targetDate) {
+  const targetMoment = moment.tz(targetDate, TIMEZONE).startOf('day');
+  const maxAttempts = 20;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const hour = Math.floor(Math.random() * (23 - 6 + 1)) + 6; // 6 to 23
+    const minute = Math.floor(Math.random() * 60);
+    const slot = targetMoment.clone().set({ hour, minute, second: 0 });
+    if (slot.isBefore(moment().tz(TIMEZONE))) continue;
+    const existing = await AiScheduledPost.findOne({
+      pageId,
+      scheduledTime: slot.toDate()
+    });
+    if (!existing) return slot.format('HH:mm');
+  }
+  return '12:00'; // fallback
+}
+
+/**
+ * Create one auto topic for a given page.
+ * Returns the created topic or null.
+ */
+async function createAutoTopicForPage(pageId) {
+  // Global master switch
+  if (!GLOBAL_AUTO_TOPIC_CREATION_ENABLED) return null;
+
+  // Check page has autoGenerationEnabled (existing field)
+  const page = await Page.findOne({ pageId }).lean();
+  if (!page || !page.autoGenerationEnabled) return null;
+
+  // Verify PageProfile exists and has audienceInterest
+  const profile = await PageProfile.findOne({ pageId });
+  if (!profile || !profile.audienceInterest || profile.audienceInterest.length === 0) {
+    await monitor(null, pageId, null, 'AUTO_TOPIC_FAILED', 'PageProfile missing or no audienceInterest');
+    return null;
+  }
+
+  // Pick a random audience interest
+  const interest = profile.audienceInterest[Math.floor(Math.random() * profile.audienceInterest.length)];
+
+  // Fetch headline and refine to topic name
+  let rawHeadline = await fetchTrendingHeadline(interest);
+  let topicName = await refineTopicName(rawHeadline, pageId, interest);
+  if (!topicName) {
+    await monitor(null, pageId, null, 'AUTO_TOPIC_FAILED', `Could not generate topic name for interest: ${interest}`);
+    return null;
+  }
+
+  // Avoid duplicates / similar topics
+  if (await isTopicTooSimilar(topicName, pageId)) {
+    await monitor(null, pageId, null, 'AUTO_TOPIC_SKIPPED', `Similar topic exists: ${topicName}`);
+    return null;
+  }
+
+  // Determine start date
+  const startDate = await getIntelligentStartDate(pageId);
+  if (!startDate) {
+    await monitor(null, pageId, null, 'AUTO_TOPIC_FAILED', 'No suitable start date found within 21 days');
+    return null;
+  }
+
+  // End date = startDate + (TOPIC_LIFETIME_DAYS - 1) days
+  const endDate = moment(startDate).tz(TIMEZONE).add(TOPIC_LIFETIME_DAYS - 1, 'days').toDate();
+
+  // Generate times array (one per day, random non-colliding)
+  const times = [];
+  const dayIterator = moment(startDate).tz(TIMEZONE);
+  while (dayIterator.isSameOrBefore(endDate)) {
+    const timeStr = await getNonCollidingTime(pageId, dayIterator.toDate());
+    times.push(timeStr);
+    dayIterator.add(1, 'day');
+  }
+  if (times.length === 0) {
+    await monitor(null, pageId, null, 'AUTO_TOPIC_FAILED', 'Could not generate any posting times');
+    return null;
+  }
+
+  // Create the topic (no extra fields on AiTopic)
+  const newTopic = await AiTopic.create({
+    topicName,
+    pageId,
+    startDate,
+    endDate,
+    times,
+    postsPerDay: POSTS_PER_DAY_AUTO,
+    includeMedia: INCLUDE_MEDIA_AUTO,
+  });
+
+  // Remember that this topic was auto-created (using separate collection)
+  await AutoTopicMeta.create({ topicId: newTopic._id });
+
+  console.log(`Auto-created topic "${topicName}" for page ${pageId}`);
+  // No log for success (as per Q28)
+  return newTopic;
+}
+
+/**
+ * Maintain minimum active topics per page.
+ * Call this after topic deletions/expirations.
+ */
+async function maintainAutoTopics() {
+  if (!GLOBAL_AUTO_TOPIC_CREATION_ENABLED) return;
+  if (process.memoryUsage().heapUsed > 900 * 1024 * 1024) {
+    console.log('High memory usage, skipping auto topic creation');
+    return;
+  }
+
+  // Get all pages with autoGenerationEnabled = true
+  const pages = await Page.find({ autoGenerationEnabled: true }).lean();
+  for (const page of pages) {
+    const activeCount = await AiTopic.countDocuments({
+      pageId: page.pageId,
+      endDate: { $gt: new Date() }
+    });
+    if (activeCount < MIN_ACTIVE_TOPICS) {
+      const needed = MIN_ACTIVE_TOPICS - activeCount;
+      for (let i = 0; i < needed; i++) {
+        const currentActive = await AiTopic.countDocuments({
+          pageId: page.pageId,
+          endDate: { $gt: new Date() }
+        });
+        if (currentActive >= MAX_ACTIVE_TOPICS) break;
+        await createAutoTopicForPage(page.pageId);
+      }
+    }
+  }
+}
+
+// Run maintainAutoTopics every 30 minutes
+setInterval(maintainAutoTopics, 30 * 60 * 1000);
+
+// ===================== AUTO POST GENERATION (unchanged except MAX_POSTS_PER_TOPIC) =====================
 async function autoGenerate() {
-
-  // 🛑 Prevent overlapping executions inside same process
   if (global.__AUTO_GEN_RUNNING__) return;
   global.__AUTO_GEN_RUNNING__ = true;
 
   try {
-
-    /* ---------------- SYSTEM SAFETY CHECK ---------------- */
     if (process.memoryUsage().heapUsed > 900 * 1024 * 1024) {
       console.error("AUTO GEN SKIPPED: High memory usage");
       return;
@@ -252,7 +508,6 @@ async function autoGenerate() {
       return;
     }
 
-    /* ---------------- FETCH ACTIVE PAGES ---------------- */
     let activePages;
     try {
       activePages = await Page.find({ autoGenerationEnabled: true }).select("pageId").lean();
@@ -262,10 +517,8 @@ async function autoGenerate() {
     }
 
     if (!activePages.length) return;
-
     const activePageIds = activePages.map(p => p.pageId);
 
-    /* ---------------- FETCH TOPICS ---------------- */
     let topics;
     try {
       topics = await AiTopic.find({ pageId: { $in: activePageIds } }).lean();
@@ -276,12 +529,8 @@ async function autoGenerate() {
 
     if (!topics || topics.length === 0) return;
 
-    /* ================= LOOP THROUGH TOPICS ================= */
     for (const topic of topics) {
-
       try {
-
-        /* -------- 1. AUTO DELETE IF EXPIRED -------- */
         const endMoment = moment(topic.endDate).tz(TIMEZONE);
         if (!endMoment.isValid()) {
           await monitor(topic._id, topic.pageId, null, "AUTO_INVALID_ENDDATE", "Invalid endDate");
@@ -292,10 +541,11 @@ async function autoGenerate() {
           await AiLog.deleteMany({ topicId: topic._id });
           await AiTopic.deleteOne({ _id: topic._id });
           await monitor(topic._id, topic.pageId, null, "TOPIC_EXPIRED", "Topic expired and deleted");
+          // Trigger auto topic maintenance after deletion
+          maintainAutoTopics().catch(err => console.error(err));
           continue;
         }
 
-        /* -------- 2. MAX POSTS CHECK -------- */
         const [logCount, scheduledCount] = await Promise.all([
           AiLog.countDocuments({
             topicId: topic._id,
@@ -311,10 +561,10 @@ async function autoGenerate() {
           await AiLog.deleteMany({ topicId: topic._id });
           await AiTopic.deleteOne({ _id: topic._id });
           await monitor(topic._id, topic.pageId, null, "TOPIC_MAX_POSTS", "Topic max posts reached");
+          maintainAutoTopics().catch(err => console.error(err));
           continue;
         }
 
-        /* -------- 3. ONE PENDING ONLY -------- */
         const pending = await AiScheduledPost.findOne({
           topicId: topic._id,
           status: "PENDING"
@@ -322,7 +572,6 @@ async function autoGenerate() {
 
         if (pending) continue;
 
-        /* -------- 4. ANGLE SELECTION -------- */
         const usedAngles = await AiLog.distinct("message", {
           topicId: topic._id,
           action: "AUTO_POST_CREATED"
@@ -334,10 +583,10 @@ async function autoGenerate() {
           await AiLog.deleteMany({ topicId: topic._id });
           await AiTopic.deleteOne({ _id: topic._id });
           await monitor(topic._id, topic.pageId, null, "TOPIC_ANGLES_EXHAUSTED", "All angles used");
+          maintainAutoTopics().catch(err => console.error(err));
           continue;
         }
 
-        /* -------- 5. SLOT DISCOVERY -------- */
         if (!Array.isArray(topic.times) || topic.times.length === 0) {
           await monitor(topic._id, topic.pageId, null, "TOPIC_NO_TIMES", "No time slots defined");
           continue;
@@ -348,18 +597,13 @@ async function autoGenerate() {
 
         let scheduledTime = null;
         let day = moment.max(now.clone().startOf("day"), startDate.clone().startOf("day"));
-
         let safetyCounter = 0;
 
         while (day.isSameOrBefore(endDate) && safetyCounter < 365) {
           safetyCounter++;
-
           const times = shuffleTimes(topic.times);
-
           for (const t of times) {
-
             const slot = moment.tz(`${day.format("YYYY-MM-DD")} ${t}`, TIMEZONE);
-
             if (!slot.isValid()) continue;
             if (slot.isSameOrBefore(now)) continue;
             if (slot.isBefore(startDate) || slot.isAfter(endDate)) continue;
@@ -374,14 +618,12 @@ async function autoGenerate() {
               break;
             }
           }
-
           if (scheduledTime) break;
           day.add(1, "day");
         }
 
         if (!scheduledTime) continue;
 
-        /* -------- 6. GENERATE CONTENT (SAFE WRAP) -------- */
         let text;
         try {
           text = await generateText(topic.topicName, angle, topic.pageId);
@@ -394,7 +636,6 @@ async function autoGenerate() {
         if (!text) continue;
 
         let mediaUrl = null;
-
         if (topic.includeMedia) {
           try {
             mediaUrl = await generateImage(topic.topicName, topic.pageId, text);
@@ -404,7 +645,6 @@ async function autoGenerate() {
           }
         }
 
-        /* -------- 7. CREATE POST -------- */
         const post = await AiScheduledPost.create({
           topicId: topic._id,
           pageId: topic.pageId,
@@ -417,7 +657,7 @@ async function autoGenerate() {
 
         await monitor(topic._id, topic.pageId, post._id, "AUTO_POST_CREATED", angle);
 
-        break; // original behavior preserved
+        break; // original break preserved
 
       } catch (topicErr) {
         console.error(`AUTO TOPIC ERROR ${topic._id}:`, topicErr.message);
@@ -425,26 +665,24 @@ async function autoGenerate() {
         continue;
       }
     }
-
   } catch (fatalError) {
     console.error("FATAL AUTO GENERATION ERROR:", fatalError);
   } finally {
     global.__AUTO_GEN_RUNNING__ = false;
   }
-                                     }
+}
 
-// ===================== AUTO GENERATION CRON =====================
 setInterval(autoGenerate, 60 * 1000);
-
-// ===================== ENABLE / DISABLE =====================
-function enableAutoGeneration() { AUTO_GENERATION_ENABLED = true; }
-function disableAutoGeneration() { AUTO_GENERATION_ENABLED = false; }
 
 // ===================== EXPORTS =====================
 module.exports = {
   generatePostsForTopic,
-  enableAutoGeneration,
-  disableAutoGeneration,
-  createAiLog: monitor
+  enableAutoGeneration: () => {}, // kept for compatibility
+  disableAutoGeneration: () => {},
+  createAiLog: monitor,
+  // Auto topic controls
+  enableAutoTopicCreation: () => { GLOBAL_AUTO_TOPIC_CREATION_ENABLED = true; },
+  disableAutoTopicCreation: () => { GLOBAL_AUTO_TOPIC_CREATION_ENABLED = false; },
+  maintainAutoTopics,
+  createAutoTopicForPage
 };
- 
