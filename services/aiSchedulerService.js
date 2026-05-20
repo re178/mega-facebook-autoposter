@@ -126,7 +126,19 @@ async function buildPrompt({ topic, angle, pageId, textSeed }) {
   const voice = profile?.voice || 'first-person plural';
   const audienceTone = profile?.audienceTone || 'casual';
   const audienceInterest = profile?.audienceInterest.join(', ') || 'general audience';
-  const extraNotes = profile?.extraNotes || '';
+  let extraNotes = profile?.extraNotes || '';
+
+  // If extraNotes is empty, provide a sensible default
+  if (!extraNotes.trim()) {
+    extraNotes = `CRITICAL RULES:
+- Maximum 3 sentences total.
+- Never start with a question ("Have you ever...", "Are you ready...").
+- Never use "we'll", "let's", "I'll explain", "in this post".
+- No advice, no teaching, no "how to" language.
+- First sentence must be a bold fact, alert, or strong opinion.
+- Keep language punchy and conversational, like a tech enthusiast sharing a quick thought.
+- Do not explain concepts in detail – just state the idea and move on.`;
+  }
 
   const seedText = textSeed ? ` Reference previous text: "${textSeed}"` : '';
 
@@ -137,19 +149,15 @@ Tone: ${tone}
 Style: ${writingStyle}
 Voice: ${voice}
 Audience: ${audienceTone}, interests: ${audienceInterest}
+
 ${extraNotes}
+
 ${seedText}
 
-Rules:
-- Human tone
-- 2–5 sentences
-- No advice
-- No teaching
-- No emojis
-- No hashtags
-- No lists
+The rules in the "CRITICAL RULES" section are MANDATORY and override any other instructions. Follow them exactly.
 `;
 }
+
 
 // ===================== PROVIDER SELECT =====================
 function selectProvider(providers) {
