@@ -9,6 +9,7 @@ const AiTopicSchema = new mongoose.Schema({
   endDate: Date,
   repeatType: String, // daily, weekly, monthly
   includeMedia: Boolean,
+  customAngles: { type: [String], default: null }, // <-- NEW FIELD
   createdAt: { type: Date, default: Date.now }
 });
 
