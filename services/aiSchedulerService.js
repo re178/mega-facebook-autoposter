@@ -7,6 +7,7 @@ const AiTopic = require('../models/AiTopic');
 const AiLog = require('../models/AiLog');
 const Page = require('../models/Page');
 const PageProfile = require('../models/PageProfile');
+const { renderPost } = require('../services/renderPost');
 
 // New lightweight model to track auto-created topics (no changes to existing schemas)
 const AutoTopicMeta = mongoose.model('AutoTopicMeta', new mongoose.Schema({
