@@ -7,7 +7,7 @@ const AiTopic = require('../models/AiTopic');
 const AiLog = require('../models/AiLog');
 const Page = require('../models/Page');
 const PageProfile = require('../models/PageProfile');
-const { renderPost } = require('../services/renderPost');
+const { renderPost } = require('../services/renderPost'); // ✅ Now used
 
 // New lightweight model to track auto-created topics (no changes to existing schemas)
 const AutoTopicMeta = mongoose.model('AutoTopicMeta', new mongoose.Schema({
@@ -444,6 +444,32 @@ async function createAutoTopicForPage(pageId) {
   return newTopic;
 }
 
+// ===================== HELPER: Create branded image using renderPost =====================
+async function createBrandedImage(topicId, pageId, rawImageUrl, postText) {
+  try {
+    const [topic, pageProfile, page] = await Promise.all([
+      AiTopic.findById(topicId).lean(),
+      PageProfile.findOne({ pageId }).lean(),
+      Page.findOne({ pageId }).select('name').lean()
+    ]);
+    if (!topic) return rawImageUrl; // fallback
+
+    const finalImage = await renderPost({
+      title: topic.topicName,
+      text: postText,
+      rawImage: rawImageUrl,
+      pageProfile: pageProfile || {},
+      pageName: page?.name || 'Page',
+      logoUrl: null
+    });
+    return finalImage || rawImageUrl; // fallback to raw if renderPost fails
+  } catch (err) {
+    console.error('renderPost failed:', err.message);
+    await monitor(topicId, pageId, null, 'RENDER_POST_FAILED', err.message);
+    return rawImageUrl; // fallback
+  }
+}
+
 // ===================== MANUAL POST GENERATOR (with custom angles) =====================
 async function generatePostsForTopic(topicId) {
   const topic = await AiTopic.findById(topicId);
@@ -478,20 +504,22 @@ async function generatePostsForTopic(topicId) {
       const text = await generateText(topic.topicName, angle, topic.pageId);
       if (!text) continue;
 
-      const mediaUrl = topic.includeMedia ? await generateImage(topic.topicName, topic.pageId, text) : null;
+      let rawMediaUrl = topic.includeMedia ? await generateImage(topic.topicName, topic.pageId, text) : null;
+
+      // Create branded image using renderPost
+      const finalMediaUrl = await createBrandedImage(topicId, topic.pageId, rawMediaUrl, text);
 
       const post = await AiScheduledPost.create({
         topicId,
         pageId: topic.pageId,
         text,
-        mediaUrl,
+        mediaUrl: finalMediaUrl,
         scheduledTime: scheduled,
         status: 'PENDING',
         meta: { angle }
       });
 
       created.push(post);
-      // Do NOT log the angle for manual posts (Option 1)
       await monitor(topicId, topic.pageId, post._id, 'POST_CREATED', 'Manual post created');
       angleIndex++;
     }
@@ -585,23 +613,20 @@ async function autoGenerate() {
         // Determine next angle to use
         let angle;
         if (topic.customAngles && topic.customAngles.length === MAX_POSTS_PER_TOPIC) {
-          // Use custom angles: find which ones have already been used via AUTO_POST_CREATED logs
           const usedAngles = await AiLog.distinct("message", {
             topicId: topic._id,
             action: "AUTO_POST_CREATED"
           });
           const available = topic.customAngles.filter(a => !usedAngles.includes(a));
           if (available.length === 0) {
-            // All custom angles used -> topic should have reached max posts, but just in case
             await AiLog.deleteMany({ topicId: topic._id });
             await AiTopic.deleteOne({ _id: topic._id });
             await monitor(topic._id, topic.pageId, null, "TOPIC_ANGLES_EXHAUSTED", "All custom angles used");
             maintainAutoTopics().catch(err => console.error(err));
             continue;
           }
-          angle = available[0]; // pick first unused
+          angle = available[0];
         } else {
-          // Fallback to global angles
           const usedAngles = await AiLog.distinct("message", {
             topicId: topic._id,
             action: "AUTO_POST_CREATED"
@@ -664,21 +689,24 @@ async function autoGenerate() {
 
         if (!text) continue;
 
-        let mediaUrl = null;
+        let rawMediaUrl = null;
         if (topic.includeMedia) {
           try {
-            mediaUrl = await generateImage(topic.topicName, topic.pageId, text);
+            rawMediaUrl = await generateImage(topic.topicName, topic.pageId, text);
           } catch (err) {
             console.error("IMAGE GENERATION ERROR:", err.message);
             await monitor(topic._id, topic.pageId, null, "IMAGE_GEN_ERROR", err.message);
           }
         }
 
+        // Create branded image using renderPost
+        const finalMediaUrl = await createBrandedImage(topic._id, topic.pageId, rawMediaUrl, text);
+
         const post = await AiScheduledPost.create({
           topicId: topic._id,
           pageId: topic.pageId,
           text,
-          mediaUrl,
+          mediaUrl: finalMediaUrl,
           scheduledTime,
           status: "PENDING",
           meta: { angle, auto: true }
@@ -743,7 +771,6 @@ module.exports = {
   disableAutoTopicCreation: () => { GLOBAL_AUTO_TOPIC_CREATION_ENABLED = false; },
   maintainAutoTopics,
   createAutoTopicForPage,
-  // Expose helper for manual topic creation (if needed)
   generateCustomAngles,
   generateShortTopicName,
 };
