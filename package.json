@@ -10,21 +10,21 @@
     "node": "20.x"
   },
   "dependencies": {
-    "axios": "^1.6.7",
-    "bcrypt": "^5.1.0",
-    "canvas": "^2.11.2",
-    "cloudinary": "^1.41.0",
-    "cohere-ai": "^3.0.0",
-    "connect-mongo": "^5.1.0",
-    "cors": "^2.8.5",
-    "dotenv": "^16.4.5",
-    "express": "^4.19.2",
-    "express-session": "^1.17.3",
-    "moment-timezone": "^0.5.45",
-    "mongoose": "^7.6.3",
-    "openai": "^4.10.0",
-    "p-retry": "^5.1.0",
-    "stability-client": "^1.0.0",
-    "bottleneck": "^2.19.5"
-  }
+  "axios": "^1.6.7",
+  "bcrypt": "^5.1.0",
+  "canvas": "^2.11.2",
+  "cloudinary": "^1.41.0",
+  "cohere-ai": "^3.0.0",
+  "connect-mongo": "^5.1.0",
+  "cors": "^2.8.5",
+  "dotenv": "^16.4.5",
+  "express": "^4.19.2",
+  "express-session": "^1.17.3",
+  "moment-timezone": "^0.5.45",
+  "mongoose": "^7.6.3",
+  "openai": "^4.10.0",
+  "p-retry": "^5.1.0",
+  "stability-client": "^1.0.0",
+  "bottleneck": "^2.19.5",
+  "node-vibrant": "^latest"
 }
