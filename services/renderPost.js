@@ -472,12 +472,12 @@ async function renderPost({
      // ctx.fillStyle = 'rgba(0,0,0,0.45)';
 
      // ctx.fillRect(
-        50,
-        220,
-        WIDTH - 100,
-        620
-      );
-    }
+      //  50,
+      //  220,
+      //  WIDTH - 100,
+       // 620
+     // );
+   // }
 
     const bodyBox = {
       x: 90,
