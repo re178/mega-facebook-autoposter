@@ -3,7 +3,7 @@ const cloudinary = require('cloudinary').v2;
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
-const Vibrant = require('node-vibrant'); // Added for real color extraction
+const Vibrant = require("node-vibrant/node"); // Added for real color extraction
 
 // Optional mongoose for persistent layout memory
 let mongoose = null;
