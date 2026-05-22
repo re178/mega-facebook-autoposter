@@ -459,25 +459,13 @@ async function renderPost({
     let bodyHeight;
 
     if (hasImage) {
-
       bodyY = 700;
       bodyHeight = 240;
-
     } else {
-
       bodyY = 260;
       bodyHeight = 560;
-
-      // dark overlay for text-only mode
-     // ctx.fillStyle = 'rgba(0,0,0,0.45)';
-
-     // ctx.fillRect(
-      //  50,
-      //  220,
-      //  WIDTH - 100,
-       // 620
-     // );
-   // }
+      // No dark rectangle – template is not bright
+    }
 
     const bodyBox = {
       x: 90,
