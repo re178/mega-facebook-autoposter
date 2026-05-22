@@ -26,6 +26,6 @@
     "p-retry": "^5.1.0",
     "stability-client": "^1.0.0",
     "bottleneck": "^2.19.5",
-    "node-vibrant": "^3.2.1"
+    "node-vibrant": "*"
   }
 }
