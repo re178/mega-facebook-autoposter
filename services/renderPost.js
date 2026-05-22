@@ -469,9 +469,9 @@ async function renderPost({
       bodyHeight = 560;
 
       // dark overlay for text-only mode
-      ctx.fillStyle = 'rgba(0,0,0,0.45)';
+     // ctx.fillStyle = 'rgba(0,0,0,0.45)';
 
-      ctx.fillRect(
+     // ctx.fillRect(
         50,
         220,
         WIDTH - 100,
