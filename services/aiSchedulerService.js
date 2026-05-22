@@ -138,26 +138,40 @@ function ensureFiveAngles(angles) {
 }
 
 // ===================== PROMPT BUILDER =====================
+/**
+ * Extract the Critical rules section from extraNotes.
+ * Looks for "Critical rules:" (case-insensitive) and captures all text
+ * until an empty line or another section heading (e.g., "[DESIGN]" or "Note:").
+ */
+function extractCriticalRules(extraNotes) {
+  if (!extraNotes) return '';
+  
+  // Match "Critical rules:" followed by any lines until a blank line or another bracket/heading
+  const match = extraNotes.match(/Critical rules:\s*\n([\s\S]*?)(?=\n\s*\n|\n\[|$)/i);
+  if (!match) return '';
+  
+  let rules = match[1].trim();
+  // Remove any lines that start with [ (like [DESIGN] if it was inside by mistake)
+  rules = rules.replace(/^\[.*$/gm, '').trim();
+  return rules;
+}
+
 async function buildPrompt({ topic, angle, pageId, textSeed }) {
   const profile = await PageProfile.findOne({ pageId });
-
-  const tone = profile?.tone || 'friendly';
-  const writingStyle = profile?.writingStyle || 'conversational';
-  const voice = profile?.voice || 'first-person plural';
-  const audienceTone = profile?.audienceTone || 'casual';
-  const audienceInterest = profile?.audienceInterest?.join(', ') || 'general audience';
   let extraNotes = profile?.extraNotes || '';
 
-  // If extraNotes is empty, provide a sensible default
-  if (!extraNotes.trim()) {
-    extraNotes = `CRITICAL RULES:
+  // Extract only the Critical rules section
+  let criticalRules = extractCriticalRules(extraNotes);
+
+  // If no Critical rules section found, use a sensible default
+  if (!criticalRules) {
+    criticalRules = `CRITICAL RULES (DEFAULT):
 - Maximum 3 sentences total.
 - Never start with a question ("Have you ever...", "Are you ready...").
 - Never use "we'll", "let's", "I'll explain", "in this post".
 - No advice, no teaching, no "how to" language.
 - First sentence must be a bold fact, alert, or strong opinion.
-- Keep language punchy and conversational, like a tech enthusiast sharing a quick thought.
-- Do not explain concepts in detail – just state the idea and move on.`;
+- Keep language punchy and conversational.`;
   }
 
   const seedText = textSeed ? ` Reference previous text: "${textSeed}"` : '';
@@ -165,16 +179,16 @@ async function buildPrompt({ topic, angle, pageId, textSeed }) {
   return `
 Write a natural, relatable Facebook post about "${topic}".
 Angle: ${angle}
-Tone: ${tone}
-Style: ${writingStyle}
-Voice: ${voice}
-Audience: ${audienceTone}, interests: ${audienceInterest}
+Tone: ${profile?.tone || 'friendly'}
+Style: ${profile?.writingStyle || 'conversational'}
+Voice: ${profile?.voice || 'first-person plural'}
+Audience: ${profile?.audienceTone || 'casual'}, interests: ${profile?.audienceInterest?.join(', ') || 'general audience'}
 
-${extraNotes}
+${criticalRules}
 
 ${seedText}
 
-The rules in the "CRITICAL RULES" section are MANDATORY and override any other instructions. Follow them exactly.
+The rules above are MANDATORY and override any other instructions. Follow them exactly.
 `;
 }
 
