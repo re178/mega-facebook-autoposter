@@ -1,5 +1,25 @@
 // subtitleEngine.js
-function drawSubtitles(ctx, text, emphasis, x, y, maxWidth, fontFamily, fontSize, color, accentColor, progress) {
+const { callAIProviders } = require('./storyboardEngine');
+
+async function getEmphasisWord(sentence, context = '') {
+  if (!sentence) return sentence;
+  const prompt = `From the sentence below, return the single most important word or short phrase (2-3 words) to highlight. Return only that word/phrase.
+Sentence: "${sentence}"
+${context ? `Context: ${context}` : ''}`;
+  const aiResponse = await callAIProviders(prompt);
+  if (aiResponse && aiResponse.length > 0 && aiResponse.length < 20) {
+    if (sentence.toLowerCase().includes(aiResponse.toLowerCase())) return aiResponse;
+  }
+  // fallback: first uppercase or long word
+  const words = sentence.split(/\s+/);
+  return words.find(w => w[0] === w[0].toUpperCase() && w.length > 3) || words[0] || sentence;
+}
+
+async function drawSubtitles(ctx, text, emphasis, x, y, maxWidth, fontFamily, fontSize, color, accentColor, progress, sceneContext = '') {
+  let finalEmphasis = emphasis;
+  if (!finalEmphasis || finalEmphasis.length === 0) {
+    finalEmphasis = await getEmphasisWord(text, sceneContext);
+  }
   ctx.font = `bold ${fontSize}px ${fontFamily}`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'bottom';
@@ -20,18 +40,17 @@ function drawSubtitles(ctx, text, emphasis, x, y, maxWidth, fontFamily, fontSize
     }
   }
   if (line) {
-    if (line.includes(emphasis)) {
-      const parts = line.split(emphasis);
+    if (line.includes(finalEmphasis)) {
+      const parts = line.split(finalEmphasis);
       let xOffset = ctx.measureText(parts[0]).width;
       ctx.fillStyle = color;
       ctx.fillText(parts[0], x - ctx.measureText(line).width/2, currentY);
       ctx.fillStyle = accentColor;
-      // Bounce effect on emphasis word
       const bounce = Math.sin(progress * Math.PI * 8) * 5;
-      ctx.fillText(emphasis, x - ctx.measureText(line).width/2 + xOffset, currentY + bounce);
+      ctx.fillText(finalEmphasis, x - ctx.measureText(line).width/2 + xOffset, currentY + bounce);
       if (parts[1]) {
         ctx.fillStyle = color;
-        ctx.fillText(parts[1], x - ctx.measureText(line).width/2 + xOffset + ctx.measureText(emphasis).width, currentY);
+        ctx.fillText(parts[1], x - ctx.measureText(line).width/2 + xOffset + ctx.measureText(finalEmphasis).width, currentY);
       }
     } else {
       ctx.fillStyle = color;
@@ -39,4 +58,5 @@ function drawSubtitles(ctx, text, emphasis, x, y, maxWidth, fontFamily, fontSize
     }
   }
 }
+
 module.exports = { drawSubtitles };
