@@ -7,7 +7,8 @@ const AiTopic = require('../models/AiTopic');
 const AiLog = require('../models/AiLog');
 const Page = require('../models/Page');
 const PageProfile = require('../models/PageProfile');
-const { renderPost } = require('../services/renderPost'); // ✅ Now used
+const { renderPost } = require('../services/renderPost');// ✅ Now used
+const { generateCinematicReel } = require('../services/media/cinematicEngine');
 
 // New lightweight model to track auto-created topics (no changes to existing schemas)
 const AutoTopicMeta = mongoose.model('AutoTopicMeta', new mongoose.Schema({
@@ -450,6 +451,7 @@ async function createAutoTopicForPage(pageId) {
     times,
     postsPerDay: POSTS_PER_DAY_AUTO,
     includeMedia: INCLUDE_MEDIA_AUTO,
+    includeVideo: false,   
     customAngles,          // new field
   });
 
@@ -459,28 +461,53 @@ async function createAutoTopicForPage(pageId) {
 }
 
 // ===================== HELPER: Create branded image using renderPost =====================
-async function createBrandedImage(topicId, pageId, rawImageUrl, postText) {
+async function createBrandedImage(topicId, pageId, rawMediaUrl, postText) {
   try {
     const [topic, pageProfile, page] = await Promise.all([
       AiTopic.findById(topicId).lean(),
       PageProfile.findOne({ pageId }).lean(),
       Page.findOne({ pageId }).select('name').lean()
     ]);
-    if (!topic) return rawImageUrl; // fallback
+    if (!topic) return rawMediaUrl;
 
-    const finalImage = await renderPost({
-      title: topic.topicName,
-      text: postText,
-      rawImage: rawImageUrl,
-      pageProfile: pageProfile || {},
-      pageName: page?.name || 'Page',
-      logoUrl: null
-    });
-    return finalImage || rawImageUrl; // fallback to raw if renderPost fails
+    // Priority: Video overrides image
+    if (topic.includeVideo === true) {
+      // Build pageProfile for cinematic engine
+      const cinematicProfile = {
+        pageName: page?.name || 'Page',
+        brand: pageProfile?.extraNotes?.match(/brand=(\w+)/)?.[1] || 'modern',
+        mood: pageProfile?.extraNotes?.match(/mood=(\w+)/)?.[1] || 'neutral',
+        audienceInterest: pageProfile?.audienceInterest || [],
+      };
+      const videoUrl = await generateCinematicReel({
+        title: topic.topicName,
+        text: postText,
+        pageProfile: cinematicProfile,
+        pageName: page?.name || 'Page',
+        format: 'short'
+      });
+      return videoUrl || null;
+    }
+
+    // Otherwise, handle image if includeMedia is true
+    if (topic.includeMedia === true) {
+      const finalImage = await renderPost({
+        title: topic.topicName,
+        text: postText,
+        rawImage: rawMediaUrl,
+        pageProfile: pageProfile || {},
+        pageName: page?.name || 'Page',
+        logoUrl: null
+      });
+      return finalImage || rawMediaUrl;
+    }
+
+    // No media requested
+    return null;
   } catch (err) {
-    console.error('renderPost failed:', err.message);
-    await monitor(topicId, pageId, null, 'RENDER_POST_FAILED', err.message);
-    return rawImageUrl; // fallback
+    console.error('createBrandedImage failed:', err.message);
+    await monitor(topicId, pageId, null, 'BRANDED_MEDIA_FAILED', err.message);
+    return null;
   }
 }
 
