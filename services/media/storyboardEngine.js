@@ -7,7 +7,7 @@ const {
   ClaudeText,
   AIHordeText,
   AI21Text
-} = requirerequire('../textProviders')
+} = require('../textProviders')
 
 // ---------------------- AI PROVIDER LIST ----------------------
 const TEXT_PROVIDERS = [
