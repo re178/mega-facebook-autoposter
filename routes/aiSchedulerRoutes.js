@@ -49,10 +49,18 @@ router.get('/page/:pageId/topics', async (req, res) => {
 });
 
 // Create topic
+// Create topic
 router.post('/page/:pageId/topic', async (req, res) => {
   try {
-    const { topicName, postsPerDay, times, startDate, endDate, repeatType, includeMedia } = req.body;
+    let { topicName, postsPerDay, times, startDate, endDate, repeatType, includeMedia, includeVideo } = req.body;
     if (!topicName?.trim()) return handleError(res, new Error('Topic name is required'), 400);
+
+    // Mutual exclusivity: if includeVideo is true, force includeMedia false
+    if (includeVideo === true) {
+      includeMedia = false;
+    } else if (includeMedia === true) {
+      includeVideo = false;
+    }
 
     const topic = await AiTopic.create({
       pageId: req.params.pageId,
@@ -62,7 +70,8 @@ router.post('/page/:pageId/topic', async (req, res) => {
       startDate,
       endDate,
       repeatType,
-      includeMedia
+      includeMedia: includeMedia || false,
+      includeVideo: includeVideo || false
     });
 
     await logAction({ pageId: req.params.pageId, topicId: topic._id, action: 'TOPIC_CREATED', message: `Topic "${topic.topicName}" created` });
@@ -73,13 +82,24 @@ router.post('/page/:pageId/topic', async (req, res) => {
 // Update topic
 router.put('/topic/:topicId', async (req, res) => {
   try {
-    const topic = await AiTopic.findByIdAndUpdate(req.params.topicId, req.body, { new: true });
+    let { includeMedia, includeVideo, ...otherFields } = req.body;
+
+    // Mutual exclusivity
+    if (includeVideo === true) {
+      includeMedia = false;
+    } else if (includeMedia === true) {
+      includeVideo = false;
+    }
+
+    const updateData = { ...otherFields, includeMedia, includeVideo };
+    const topic = await AiTopic.findByIdAndUpdate(req.params.topicId, updateData, { new: true });
     if (!topic) return handleError(res, new Error('Topic not found'), 404);
 
     await logAction({ pageId: topic.pageId, topicId: topic._id, action: 'TOPIC_UPDATED', message: `Topic "${topic.topicName}" updated` });
     res.json(topic);
   } catch (err) { handleError(res, err); }
 });
+
 
 // Delete topic + posts
 router.delete('/topic/:topicId', async (req, res) => {
