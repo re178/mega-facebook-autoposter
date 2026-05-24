@@ -1,15 +1,15 @@
 // sceneBuilder.js
 const { createCanvas } = require('canvas');
 const { getStyle, getFontFamily } = require('./colorEngine');
-const { drawCharacter } = require('./characterEngine');
+const { getOrGenerateCharacter, getCharacterEmotion, drawCharacter } = require('./characterEngine');
 const { applyMotion } = require('./animationEngine');
 const { drawSubtitles } = require('./subtitleEngine');
 
-async function renderSceneFrame(scene, frameIdx, totalFrames, width, height, pageDNA) {
+async function renderSceneFrame(scene, frameIdx, totalFrames, width, height, pageDNA, globalPlan) {
   const canvas = createCanvas(width, height);
   const ctx = canvas.getContext('2d');
   const progress = frameIdx / totalFrames;
-  const style = getStyle(pageDNA.brand);
+  const style = getStyle(pageDNA.brand || 'modern');
   
   // Background
   const grad = ctx.createLinearGradient(0, 0, width, height);
@@ -18,21 +18,21 @@ async function renderSceneFrame(scene, frameIdx, totalFrames, width, height, pag
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, width, height);
   
-  // Camera / motion
+  // Camera motion
   ctx.save();
-  applyMotion(ctx, scene.camera?.movement, progress, width, height);
+  applyMotion(ctx, scene.camera, progress, width, height);
   
-  // Character (if any)
-  if (pageDNA.characterStyle !== 'none') {
-    const mouthOpen = Math.sin(progress * Math.PI * 8) * 0.5 + 0.5;
-    drawCharacter(ctx, { id: 'professor' }, width/2, height - 80, 120, 160, mouthOpen);
-  }
+  // Character (dynamic)
+  const characterSpec = await getOrGenerateCharacter(pageDNA, globalPlan.fullText);
+  const charEmotion = await getCharacterEmotion(scene.subtitle_text, scene.emotion, characterSpec);
+  const mouthOpen = Math.sin(progress * Math.PI * 8) * 0.5 + 0.5;
+  drawCharacter(ctx, characterSpec, width/2, height - 80, 120, 160, mouthOpen, charEmotion);
   
-  // Subtitles (kinetic)
+  // Subtitles
   const fontSize = 48;
   const fontFamily = getFontFamily(style, 'title');
-  drawSubtitles(ctx, scene.text, scene.text.split(' ')[0], width/2, height - 120,
-                width - 100, fontFamily, fontSize, style.primary, style.accent, progress);
+  await drawSubtitles(ctx, scene.subtitle_text, scene.emphasis_word || '', width/2, height - 120,
+                      width - 100, fontFamily, fontSize, style.primary, style.accent, progress, scene.emotion);
   
   ctx.restore();
   
