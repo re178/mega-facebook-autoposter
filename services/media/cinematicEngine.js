@@ -19,33 +19,33 @@ async function generateCinematicReel({ title, text, pageProfile = {}, pageName =
     const dims = VIDEO_FORMATS[format] || VIDEO_FORMATS.reel;
     const WIDTH = dims.width, HEIGHT = dims.height, FPS = dims.fps;
     
-    // 1. AI Director creates storyboard
-    const plan = generateScenePlan({ title: cleanText(title), text: cleanText(text) }, { ...pageProfile, pageName });
-    const scenes = plan.scenes;
+    // AI scene plan
+    const plan = await generateScenePlan({ title: cleanText(title), text: cleanText(text) }, { ...pageProfile, pageName });
+    if (!plan || !plan.scenes) throw new Error('AI scene plan failed');
     
-    // 2. Temp dir
+    const scenes = plan.scenes;
     const tempDir = createTempDir();
     let globalFrame = 0;
     
-    // 3. Render each scene frame by frame
+    // Render each scene frame by frame
     for (const scene of scenes) {
       const totalFrames = Math.floor(scene.duration * FPS);
       for (let f = 0; f < totalFrames; f++) {
-        const buffer = await renderSceneFrame(scene, f, totalFrames, WIDTH, HEIGHT, plan.pageDNA);
+        const buffer = await renderSceneFrame(scene, f, totalFrames, WIDTH, HEIGHT, plan.pageDNA, plan);
         const framePath = path.join(tempDir, `frame_${String(globalFrame).padStart(4, '0')}.png`);
         fs.writeFileSync(framePath, buffer);
         globalFrame++;
       }
     }
     
-    // 4. Compose video
+    // Compose video
     const videoPath = path.join(tempDir, 'output.mp4');
     await framesToVideo(tempDir, videoPath, FPS);
     
-    // 5. Upload
+    // Upload
     const finalUrl = await uploadVideo(videoPath);
     
-    // 6. Cleanup
+    // Cleanup
     cleanupTempDir(tempDir);
     return finalUrl;
   } catch (err) {
