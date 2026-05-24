@@ -1,72 +1,120 @@
 // storyboardEngine.js
-function parseBlocks(extraNotes = '') {
-  const blocks = {};
-  const regex = /\[(.*?)\]([\s\S]*?)(?=\n\[|$)/g;
-  let match;
-  while ((match = regex.exec(extraNotes))) {
-    const blockName = match[1].trim().toUpperCase();
-    const content = match[2].trim();
-    const lines = content.split('\n');
-    const parsed = {};
-    for (const line of lines) {
-      if (!line.includes('=')) continue;
-      const [key, value] = line.split('=');
-      parsed[key.trim()] = value.trim();
+const {
+  CloudflareText,
+  GrokText,
+  OpenAIText,
+  CohereText,
+  ClaudeText,
+  AIHordeText,
+  AI21Text
+} = require('../../textProviders'); // ⚠️ adjust path if needed
+
+// ---------------------- AI PROVIDER LIST ----------------------
+const TEXT_PROVIDERS = [
+  OpenAIText,
+  CloudflareText,
+  GrokText,
+  CohereText,
+  ClaudeText,
+  AIHordeText,
+  AI21Text
+];
+
+async function callAIProviders(prompt) {
+  for (const Provider of TEXT_PROVIDERS) {
+    try {
+      const response = await Provider.generate(prompt);
+      if (response && response.trim()) return response.trim();
+    } catch (err) {
+      console.warn(`${Provider.name} failed:`, err.message);
     }
-    blocks[blockName] = parsed;
   }
-  return blocks;
+  return null;
 }
 
+// ---------------------- PAGE DNA (simplified) ----------------------
 function buildPageDNA(pageProfile = {}) {
-  const directives = parseBlocks(pageProfile.extraNotes || '');
-  const design = directives.DESIGN || {};
-  const cartoon = directives.CARTOON || {};
   return {
     pageName: pageProfile.pageName || 'My Page',
-    brand: design.brand || 'modern',
-    mood: design.mood || 'neutral',
-    characterStyle: cartoon.style || 'teacher',
-    voiceTone: cartoon.voice || 'professional',
-    humorLevel: parseFloat(cartoon.humor) || 0.2,
-    simulation: cartoon.simulation === 'true'
+    brand: pageProfile.brand || 'modern',
+    mood: pageProfile.mood || 'neutral',
+    characterStyle: pageProfile.characterStyle || 'auto',
+    voiceTone: pageProfile.voiceTone || 'professional',
+    audienceInterest: pageProfile.audienceInterest || []
   };
 }
 
-function analyzePost(title, text) {
-  const combined = `${title} ${text}`.toLowerCase();
-  const urgency = combined.includes('breaking') || combined.includes('urgent') ? 9 :
-                  combined.includes('update') ? 5 : 3;
-  let mood = 'neutral';
-  if (combined.includes('inspiring')) mood = 'inspirational';
-  else if (combined.includes('cinematic')) mood = 'cinematic';
-  else if (combined.includes('funny')) mood = 'humorous';
-  else if (urgency > 7) mood = 'urgent';
-  const emotion = combined.includes('crypto') ? 'futuristic' :
-                  combined.includes('politics') ? 'serious' :
-                  combined.includes('sports') ? 'energetic' : 'neutral';
-  return { urgency, mood, emotion };
-}
-
-function generateScenePlan(post, pageProfile) {
+// ---------------------- AI SCENE PLAN (complete cinematic direction) ----------------------
+async function generateScenePlan(post, pageProfile) {
   const pageDNA = buildPageDNA(pageProfile);
-  const analysis = analyzePost(post.title, post.text);
-  const sentences = `${post.title}. ${post.text}`.split(/(?<=[.!?])\s+/).filter(s => s.trim());
-  const emotionalCurve = analysis.urgency > 7 ? ['high','high','climax'] : ['neutral','build','climax','explain'];
-  const scenes = [];
-  let sentenceIdx = 0;
-  for (let i = 0; i < emotionalCurve.length && sentenceIdx < sentences.length; i++) {
-    const emotion = emotionalCurve[i];
-    let sceneText = sentences[sentenceIdx++];
-    if (emotion === 'climax' && sentenceIdx < sentences.length) sceneText += ' ' + sentences[sentenceIdx++];
-    scenes.push({
-      id: i, emotion, duration: emotion === 'climax' ? 4 : 2.5,
-      text: sceneText,
-      camera: emotion === 'high' ? { movement: 'shake', intensity: 0.3 } : { movement: 'static' },
-      characterAction: emotion === 'climax' ? 'excited' : 'explain'
-    });
-  }
-  return { scenes, analysis, pageDNA, visualStyle: { colorPalette: pageDNA.brand } };
+  const fullText = `${post.title}. ${post.text}`;
+  const prompt = `You are a world‑class film director for short social media reels (15‑30 seconds). Analyze the text below and create a full cinematic scene plan.
+
+Title: "${post.title}"
+Text: "${post.text}"
+Brand style: ${pageDNA.brand}
+Desired mood: ${pageDNA.mood}
+Page audience: ${(pageDNA.audienceInterest || []).join(', ') || 'general'}
+
+Return ONLY valid JSON in this exact structure (no extra text):
+{
+  "scenes": [
+    {
+      "emotion": "hook|explain|climax|outro|twist|example",
+      "duration_seconds": 2.5,
+      "camera": {
+        "movement": "static|shake|zoom_in|zoom_out|pan_left|pan_right|dolly|orbit",
+        "intensity": 0.0,
+        "zoom_level": 1.0
+      },
+      "character_action": "neutral|excited|worried|surprised|celebrating|thinking|pointing",
+      "subtitle_text": "The exact phrase for this scene (from original text)",
+      "transition_next": "cut|fade|crossfade|zoom_burst|slide_left|slide_right|wipe"
+    }
+  ],
+  "global_pacing": "slow|medium|fast",
+  "music_mood": "epic|tense|calm|upbeat|dramatic",
+  "color_emphasis": "warm|cool|neon|dark|vibrant"
 }
 
-module.exports = { generateScenePlan, buildPageDNA, analyzePost };
+Rules:
+- Exactly 3 to 6 scenes.
+- Each scene's subtitle_text must be a direct quote or close paraphrase from the original title/text.
+- Duration between 2 and 5 seconds.
+- Choose camera movements and character actions that match the emotion.
+- Output JSON only.`;
+
+  const aiResponse = await callAIProviders(prompt);
+  if (!aiResponse) return null;
+
+  const jsonMatch = aiResponse.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) return null;
+
+  try {
+    const parsed = JSON.parse(jsonMatch[0]);
+    if (parsed.scenes && Array.isArray(parsed.scenes) && parsed.scenes.length >= 2) {
+      for (let i = 0; i < parsed.scenes.length; i++) {
+        const s = parsed.scenes[i];
+        s.id = i;
+        s.duration = s.duration_seconds || 2.5;
+        if (!s.camera) s.camera = { movement: 'static', intensity: 0, zoom_level: 1 };
+        if (!s.character_action) s.character_action = 'neutral';
+        if (!s.transition_next) s.transition_next = i === parsed.scenes.length-1 ? 'fade' : 'cut';
+        if (!s.subtitle_text) s.subtitle_text = i === 0 ? post.title : post.text.split('.')[i] || post.text;
+      }
+      return {
+        scenes: parsed.scenes,
+        global_pacing: parsed.global_pacing || 'medium',
+        music_mood: parsed.music_mood || 'upbeat',
+        color_emphasis: parsed.color_emphasis || 'vibrant',
+        pageDNA,
+        fullText
+      };
+    }
+  } catch (err) {
+    console.warn('AI scene plan JSON parse error:', err.message);
+  }
+  return null;
+}
+
+module.exports = { generateScenePlan, buildPageDNA, callAIProviders };
