@@ -6,7 +6,18 @@ const STYLE_LIBRARY = {
   luxury_elegant: { primary: '#d4af37', secondary: '#2c2c2c', accent: '#ffffff', background: '#1a1a1a' }
 };
 
-function getStyle(brand) { return STYLE_LIBRARY[brand] || STYLE_LIBRARY.modern; }
+function isValidHex(color) {
+  return /^#([0-9A-F]{3}){1,2}$/i.test(color);
+}
+
+function getStyle(brand) {
+  const style = STYLE_LIBRARY[brand] || STYLE_LIBRARY.modern;
+  // ensure all colors are valid hex, fallback if not
+  for (const key of ['primary', 'secondary', 'accent', 'background']) {
+    if (!isValidHex(style[key])) style[key] = STYLE_LIBRARY.modern[key];
+  }
+  return style;
+}
 
 function getFontFamily(style, role = 'title') {
   const fonts = { title: 'Poppins', body: 'Inter', subtitle: 'Poppins' };
