@@ -7,7 +7,7 @@ const {
   ClaudeText,
   AIHordeText,
   AI21Text
-} = require('../../textProviders'); // adjust path
+} = require('../textProviders')
 
 const TEXT_PROVIDERS = [
   OpenAIText,
