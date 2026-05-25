@@ -1,4 +1,3 @@
-
 // uploadVideo.js
 const cloudinary = require('cloudinary').v2;
 const fs = require('fs');
@@ -12,7 +11,7 @@ cloudinary.config({
 async function uploadVideo(filePath) {
   return new Promise((resolve, reject) => {
     cloudinary.uploader.upload(filePath,
-      { resource_type: 'video', folder: 'cinematic-reels' },
+      { resource_type: 'auto', folder: 'cinematic-reels' },
       (err, result) => err ? reject(err) : resolve(result.secure_url)
     );
   });
