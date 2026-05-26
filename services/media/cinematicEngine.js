@@ -1,129 +1,154 @@
-// cinematicEngine.js
+// services/media/cinematicEngine.js
 const fs = require('fs');
 const path = require('path');
-const os = require('os');
 const { generateScenePlan } = require('./storyboardEngine');
+const { precomputeAllScenes } = require('./precomputeEngine');
 const { renderSceneFrame } = require('./sceneBuilder');
 const { framesToVideo } = require('./ffmpegHelpers');
 const { createTempDir, cleanupTempDir } = require('./tempManager');
 const { uploadVideo } = require('./uploadVideo');
-const { cleanText } = require('./mediaHelpers');
+const { updateJobStatus, getJob, enqueueJob, setJobProcessor } = require('../../queue');
+const config = require('./config/mediaConfig');
 
-const VIDEO_FORMATS = {
-  reel: { width: 1080, height: 1920, fps: 30 },
-  explainer: { width: 1280, height: 720, fps: 30 },
-  short: { width: 1080, height: 1920, fps: 30 }
-};
-
-const SESSION_TIMEOUT = 5 * 60 * 1000; // 5 minutes max per job
-const MAX_SCENES = 6;
-const MAX_FRAMES = 1800; // e.g., 60 seconds at 30fps
-
-/**
- * Generate a cinematic reel using a session-based approach.
- * @param {Object} session - The render session (created internally if not provided)
- * @returns {Promise<string>} URL of the generated video
- */
-async function generateCinematicReel({ title, text, pageProfile, pageName, format = 'reel', session = null }) {
-  const startTime = Date.now();
-  let currentSession = session;
-
+async function processJob(job) {
+  let session = job.session;
+  const jobId = session.jobId;
+  console.log(`[${jobId}] Starting job`);
   try {
-    // Create session if not provided
-    if (!currentSession) {
-      currentSession = {
-        jobId: `${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
-        title: cleanText(title),
-        text: cleanText(text),
-        pageProfile,
-        pageName,
-        format,
-        status: 'planning',
-        createdAt: new Date(),
-        tempDir: null,
-        scenes: null,
-        characterSpec: null,
-        globalPlan: null
-      };
+    // Phase 1: Planning (if not already done)
+    if (job.status === 'planning' || !session.globalPlan) {
+      console.log(`[${jobId}] Phase 1: AI planning`);
+      const plan = await generateScenePlan({ title: session.title, text: session.text }, session.pageProfile);
+      if (!plan) throw new Error('Scene plan generation failed');
+      session.globalPlan = plan;
+      session.scenes = plan.scenes;
+      session.characterSpec = plan.characterSpec;
+      session.status = 'planning_complete';
+      await updateJobStatus(jobId, 'precomputing', session);
+    } else {
+      console.log(`[${jobId}] Skipping planning (already done)`);
     }
 
-    // Check timeout
-    if (Date.now() - startTime > SESSION_TIMEOUT) {
-      throw new Error('Session timeout exceeded');
+    // Phase 2: Precomputation
+    if (job.status === 'precomputing' || !session.precomputedScenes) {
+      console.log(`[${jobId}] Phase 2: Precomputation`);
+      const dims = config.VIDEO_FORMATS[session.format] || config.VIDEO_FORMATS.reel;
+      const style = { brand: session.pageProfile.brand || 'modern' }; // simplified
+      session.precomputedScenes = precomputeAllScenes(session.scenes, dims.width, style);
+      session.dims = dims;
+      session.status = 'precomputed';
+      await updateJobStatus(jobId, 'rendering', session);
+    } else {
+      console.log(`[${jobId}] Skipping precomputation (already done)`);
     }
 
-    // 1. AI planning (ONCE)
-    if (!currentSession.globalPlan) {
-      console.log(`[${currentSession.jobId}] Phase 1: AI planning...`);
-      const plan = await generateScenePlan(
-        { title: currentSession.title, text: currentSession.text },
-        currentSession.pageProfile
-      );
-      if (!plan || !plan.scenes || plan.scenes.length === 0) {
-        throw new Error('AI scene plan generation failed');
+    // Phase 3: Rendering frames (with batching)
+    if (job.status === 'rendering' || !session.frameCount) {
+      console.log(`[${jobId}] Phase 3: Rendering frames`);
+      const { width, height, fps } = session.dims;
+      if (!session.tempDir) session.tempDir = createTempDir();
+      let globalFrame = 0;
+      for (const scene of session.precomputedScenes) {
+        const totalFrames = Math.floor(scene.duration * fps);
+        if (globalFrame + totalFrames > config.MAX_FRAMES_PER_JOB) throw new Error('Frame limit exceeded');
+        for (let batchStart = 0; batchStart < totalFrames; batchStart += config.FRAME_BATCH_SIZE) {
+          const batchEnd = Math.min(batchStart + config.FRAME_BATCH_SIZE, totalFrames);
+          for (let f = batchStart; f < batchEnd; f++) {
+            const buffer = await renderSceneFrame({
+              scene,
+              frameIdx: f,
+              totalFrames,
+              width,
+              height,
+              characterSpec: session.characterSpec,
+              globalPlan: session.globalPlan,
+              pageProfile: session.pageProfile
+            });
+            const framePath = path.join(session.tempDir, `frame_${String(globalFrame).padStart(4, '0')}.png`);
+            fs.writeFileSync(framePath, buffer);
+            globalFrame++;
+          }
+          // Small delay to let event loop breathe
+          await new Promise(r => setImmediate(r));
+          // Memory check
+          const mem = process.memoryUsage().heapUsed / 1024 / 1024;
+          if (mem > config.MAX_MEMORY_MB) throw new Error(`Memory limit exceeded: ${mem.toFixed(1)}MB`);
+        }
       }
-      // Validate scene count
-      if (plan.scenes.length > MAX_SCENES) {
-        throw new Error(`Too many scenes: ${plan.scenes.length} > ${MAX_SCENES}`);
-      }
-      currentSession.globalPlan = plan;
-      currentSession.scenes = plan.scenes;
-      currentSession.characterSpec = plan.characterSpec; // from AI plan
+      session.frameCount = globalFrame;
+      session.status = 'rendered';
+      await updateJobStatus(jobId, 'composing', session);
+    } else {
+      console.log(`[${jobId}] Skipping rendering (already done)`);
     }
 
-    // 2. Precompute all rendering data (no AI)
-    const dims = VIDEO_FORMATS[currentSession.format] || VIDEO_FORMATS.reel;
-    const WIDTH = dims.width, HEIGHT = dims.height, FPS = dims.fps;
-
-    // 3. Create temp directory
-    if (!currentSession.tempDir) {
-      currentSession.tempDir = createTempDir();
+    // Phase 4: Compose video
+    if (job.status === 'composing' || !session.videoPath) {
+      console.log(`[${jobId}] Phase 4: Composing video`);
+      const { fps } = session.dims;
+      const videoPath = path.join(session.tempDir, 'output.mp4');
+      await framesToVideo(session.tempDir, videoPath, fps, null);
+      session.videoPath = videoPath;
+      session.status = 'composed';
+      await updateJobStatus(jobId, 'uploading', session);
+    } else {
+      console.log(`[${jobId}] Skipping composition (already done)`);
     }
 
-    // 4. Render frames (deterministic, no AI)
-    console.log(`[${currentSession.jobId}] Phase 2: Rendering frames...`);
-    let globalFrame = 0;
-    for (const scene of currentSession.scenes) {
-      const totalFrames = Math.floor(scene.duration * FPS);
-      if (globalFrame + totalFrames > MAX_FRAMES) {
-        throw new Error(`Frame limit exceeded: ${MAX_FRAMES}`);
-      }
-      for (let f = 0; f < totalFrames; f++) {
-        // Render frame using precomputed data
-        const buffer = await renderSceneFrame({
-          scene,
-          frameIdx: f,
-          totalFrames,
-          width: WIDTH,
-          height: HEIGHT,
-          characterSpec: currentSession.characterSpec,
-          globalPlan: currentSession.globalPlan,
-          pageProfile: currentSession.pageProfile
-        });
-        const framePath = path.join(currentSession.tempDir, `frame_${String(globalFrame).padStart(4, '0')}.png`);
-        fs.writeFileSync(framePath, buffer);
-        globalFrame++;
-      }
+    // Phase 5: Upload
+    if (job.status === 'uploading' || !session.mediaUrl) {
+      console.log(`[${jobId}] Phase 5: Uploading`);
+      const url = await uploadVideo(session.videoPath);
+      session.mediaUrl = url;
+      session.status = 'uploaded';
+      await updateJobStatus(jobId, 'completed', session);
+    } else {
+      console.log(`[${jobId}] Skipping upload (already done)`);
     }
 
-    // 5. Compose video (FFmpeg or GIF fallback)
-    console.log(`[${currentSession.jobId}] Phase 3: Compose video...`);
-    const videoPath = path.join(currentSession.tempDir, 'output.mp4');
-    await framesToVideo(currentSession.tempDir, videoPath, FPS, null);
-
-    // 6. Upload
-    console.log(`[${currentSession.jobId}] Phase 4: Upload...`);
-    const finalUrl = await uploadVideo(videoPath);
-
-    // 7. Cleanup
-    cleanupTempDir(currentSession.tempDir);
-    console.log(`[${currentSession.jobId}] ✅ Done. URL: ${finalUrl}`);
-    return finalUrl;
+    console.log(`[${jobId}] Job completed successfully: ${session.mediaUrl}`);
+    cleanupTempDir(session.tempDir);
   } catch (err) {
-    console.error(`[${currentSession?.jobId}] Fatal error:`, err);
-    if (currentSession?.tempDir) cleanupTempDir(currentSession.tempDir);
+    console.error(`[${jobId}] Job failed:`, err.message);
+    await updateJobStatus(jobId, 'failed', session, err.message);
+    if (session.tempDir) cleanupTempDir(session.tempDir);
     throw err;
   }
+}
+
+// Register the job processor with the queue
+setJobProcessor(processJob);
+
+async function generateCinematicReel({ title, text, pageProfile, pageName, format = 'reel' }) {
+  const session = {
+    jobId: `${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
+    title,
+    text,
+    pageProfile,
+    pageName,
+    format,
+    status: 'queued',
+    createdAt: new Date(),
+    tempDir: null,
+    scenes: null,
+    characterSpec: null,
+    globalPlan: null,
+    precomputedScenes: null,
+    dims: null,
+    frameCount: 0,
+    videoPath: null,
+    mediaUrl: null
+  };
+  await enqueueJob(session);
+  // Wait for completion (polling) – in a real API you'd return jobId immediately and poll later.
+  // For simplicity, we'll wait here (not ideal but works for testing).
+  let job = await getJob(session.jobId);
+  while (job.status !== 'completed' && job.status !== 'failed') {
+    await new Promise(r => setTimeout(r, 1000));
+    job = await getJob(session.jobId);
+  }
+  if (job.status === 'failed') throw new Error(job.error);
+  return job.session.mediaUrl;
 }
 
 module.exports = { generateCinematicReel };
