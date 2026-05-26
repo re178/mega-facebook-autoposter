@@ -4,7 +4,7 @@ const path = require('path');
 const os = require('os');
 const { randomId } = require('./mediaHelpers');
 
-const TEMP_CLEANUP_MINUTES = 10;
+const CLEANUP_MINUTES = 10;
 
 function createTempDir() {
   const base = os.tmpdir();
@@ -19,7 +19,6 @@ function cleanupTempDir(dir) {
   }
 }
 
-// Periodic cleanup of old temp folders (older than 10 minutes)
 function cleanOldTempFolders() {
   const base = os.tmpdir();
   const files = fs.readdirSync(base);
@@ -29,16 +28,14 @@ function cleanOldTempFolders() {
       const fullPath = path.join(base, file);
       try {
         const stats = fs.statSync(fullPath);
-        if (now - stats.mtimeMs > TEMP_CLEANUP_MINUTES * 60 * 1000) {
+        if (now - stats.mtimeMs > CLEANUP_MINUTES * 60 * 1000) {
           fs.rmSync(fullPath, { recursive: true, force: true });
-          console.log(`Cleaned up old temp folder: ${fullPath}`);
+          console.log(`Cleaned old temp: ${fullPath}`);
         }
-      } catch (err) {
-        console.warn(`Failed to clean ${fullPath}:`, err.message);
-      }
+      } catch(e) {}
     }
   }
 }
-setInterval(cleanOldTempFolders, 60000); // run every minute
+setInterval(cleanOldTempFolders, 60000);
 
 module.exports = { createTempDir, cleanupTempDir };
