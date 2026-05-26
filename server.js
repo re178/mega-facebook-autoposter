@@ -183,6 +183,7 @@ mongoose
     .connect(MONGO_URI)
     .then(async () => {
         console.log('✅ MongoDB connected');
+        require('./services/queue');
 
         // Start schedulers safely
         try {
