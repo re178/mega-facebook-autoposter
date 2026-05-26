@@ -1,8 +1,7 @@
 // services/media/storyboardEngine.js
 const config = require('./config/mediaConfig');
-const { callAIProvidersWithScoring } = require('../aiProviderScoring'); // We'll create this stub
 
-// For now, we'll reuse your existing AI providers with a simple scoring wrapper
+// Your existing AI providers (adjust path if needed)
 const {
   CloudflareText,
   GrokText,
@@ -11,7 +10,7 @@ const {
   ClaudeText,
   AIHordeText,
   AI21Text
-} = require('../../textProviders'); // adjust path
+} = require('../../textProviders');
 
 const TEXT_PROVIDERS = [
   OpenAIText,
@@ -23,12 +22,13 @@ const TEXT_PROVIDERS = [
   AI21Text
 ];
 
-// Provider scoring state (in memory, could be persisted)
+// Provider scoring state (in‑memory)
 const providerStats = {};
 for (const p of TEXT_PROVIDERS) {
   providerStats[p.name] = { success: 0, fail: 0, lastSuccess: 0, lastFail: 0 };
 }
 
+// SINGLE definition – no duplicate
 async function callAIProvidersWithScoring(prompt) {
   // Sort providers by success rate (descending)
   const sorted = [...TEXT_PROVIDERS].sort((a,b) => {
@@ -96,11 +96,13 @@ function generateFallbackPlan(post, pageDNA) {
   return { scenes, global_pacing: 'medium', music_mood: 'upbeat', characterSpec, pageDNA, fullText };
 }
 
+// ---------- Main scene plan generator ----------
 async function generateScenePlan(post, pageProfile) {
   const pageDNA = { pageName: pageProfile.pageName || 'Page', brand: pageProfile.brand || 'modern', mood: pageProfile.mood || 'neutral' };
   console.log(`[storyboard] Generating plan for "${post.title}"`);
-  // Try AI with timeout
+
   const prompt = `Create a JSON scene plan for a short reel. Title: "${post.title}", Text: "${post.text}". Return only JSON: { "scenes": [ { "emotion": "hook|explain|climax|outro", "duration_seconds": 2.5, "camera": { "movement": "static|shake|zoom_in", "intensity": 0.3, "zoom_level": 1 }, "character_action": "neutral|excited|worried", "subtitle_text": "phrase" } ], "global_pacing": "medium", "music_mood": "upbeat", "characterSpec": { "name": "...", "primaryColor": "#hex", "secondaryColor": "#hex" } }`;
+
   const aiResponse = await callAIProvidersWithScoring(prompt);
   if (aiResponse) {
     try {
@@ -108,7 +110,6 @@ async function generateScenePlan(post, pageProfile) {
       if (jsonMatch) {
         const parsed = JSON.parse(jsonMatch[0]);
         if (parsed.scenes && parsed.scenes.length >= 2) {
-          // add missing fields
           for (let i=0;i<parsed.scenes.length;i++) {
             parsed.scenes[i].id = i;
             parsed.scenes[i].duration = parsed.scenes[i].duration_seconds || 2.5;
@@ -124,6 +125,7 @@ async function generateScenePlan(post, pageProfile) {
       }
     } catch(e) { console.warn('AI JSON parse error', e.message); }
   }
+
   console.warn('[storyboard] AI failed, using fallback plan');
   return generateFallbackPlan(post, pageDNA);
 }
