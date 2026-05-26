@@ -357,6 +357,7 @@ Generate the storyboard now.
   if (aiResponse) {
 
     try {
+      console.log('RAW AI RESPONSE:', aiResponse);
 
       const parsed = safeJsonParse(aiResponse);
 
