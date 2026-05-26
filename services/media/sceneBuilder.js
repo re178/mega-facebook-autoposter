@@ -1,4 +1,4 @@
-// sceneBuilder.js
+// services/media/sceneBuilder.js
 const { createCanvas } = require('canvas');
 const { getStyle, getFontFamily } = require('./colorEngine');
 const { drawCharacter } = require('./characterEngine');
@@ -22,17 +22,18 @@ async function renderSceneFrame({ scene, frameIdx, totalFrames, width, height, c
   ctx.save();
   applyMotion(ctx, scene.camera, progress, width, height);
 
-  // Character (precomputed spec, no AI)
+  // Character (precomputed spec)
   const mouthOpen = Math.sin(progress * Math.PI * 8) * 0.5 + 0.5;
-  drawCharacter(ctx, characterSpec, width / 2, height - 80, 120, 160, mouthOpen, scene.character_action);
+  drawCharacter(ctx, characterSpec, width/2, height - 80, 120, 160, mouthOpen, scene.character_action);
 
-  // Subtitles (precomputed emphasis and layout)
-  const fontSize = 48;
-  const fontFamily = getFontFamily(style, 'title');
+  // Subtitles (using precomputed layout)
+  const fontSize = scene.subtitleLayout.fontSize;
+  const fontFamily = scene.subtitleLayout.fontFamily;
   drawSubtitlesPrecomputed(ctx, {
-    text: scene.subtitle_text,
-    emphasisWord: scene.emphasisWord || scene.subtitle_text.split(' ')[0],
-    x: width / 2,
+    lines: scene.subtitleLayout.lines,
+    emphasisIndex: scene.subtitleLayout.emphasisIndex,
+    emphasisWord: scene.emphasisWord,
+    x: width/2,
     y: height - 120,
     maxWidth: width - 100,
     fontFamily,
@@ -45,7 +46,7 @@ async function renderSceneFrame({ scene, frameIdx, totalFrames, width, height, c
   ctx.restore();
 
   // Vignette
-  const vignette = ctx.createRadialGradient(width / 2, height / 2, 0, width / 2, height / 2, width / 0.8);
+  const vignette = ctx.createRadialGradient(width/2, height/2, 0, width/2, height/2, width/0.8);
   vignette.addColorStop(0, 'rgba(0,0,0,0)');
   vignette.addColorStop(1, 'rgba(0,0,0,0.5)');
   ctx.fillStyle = vignette;
