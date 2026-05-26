@@ -10,7 +10,7 @@ const {
   ClaudeText,
   AIHordeText,
   AI21Text
-} = require('../../textProviders');
+} = require('../textProviders');
 
 const TEXT_PROVIDERS = [
   OpenAIText,
