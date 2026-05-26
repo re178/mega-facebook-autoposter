@@ -1,4 +1,8 @@
-// storyboardEngine.js
+// services/media/storyboardEngine.js
+const config = require('./config/mediaConfig');
+const { callAIProvidersWithScoring } = require('../aiProviderScoring'); // We'll create this stub
+
+// For now, we'll reuse your existing AI providers with a simple scoring wrapper
 const {
   CloudflareText,
   GrokText,
@@ -7,7 +11,7 @@ const {
   ClaudeText,
   AIHordeText,
   AI21Text
-} = require('../textProviders')
+} = require('../../textProviders'); // adjust path
 
 const TEXT_PROVIDERS = [
   OpenAIText,
@@ -19,123 +23,109 @@ const TEXT_PROVIDERS = [
   AI21Text
 ];
 
-const AI_TIMEOUT = 15000;
-const MAX_RETRIES = 2;
-const MIN_SCENES = 3;
-const MAX_SCENES = 6;
+// Provider scoring state (in memory, could be persisted)
+const providerStats = {};
+for (const p of TEXT_PROVIDERS) {
+  providerStats[p.name] = { success: 0, fail: 0, lastSuccess: 0, lastFail: 0 };
+}
 
-async function callAIProviders(prompt, retries = 0) {
-  for (const Provider of TEXT_PROVIDERS) {
+async function callAIProvidersWithScoring(prompt) {
+  // Sort providers by success rate (descending)
+  const sorted = [...TEXT_PROVIDERS].sort((a,b) => {
+    const rateA = (providerStats[a.name].success / (providerStats[a.name].success + providerStats[a.name].fail + 1));
+    const rateB = (providerStats[b.name].success / (providerStats[b.name].success + providerStats[b.name].fail + 1));
+    return rateB - rateA;
+  });
+  for (const Provider of sorted) {
     try {
+      const start = Date.now();
       const response = await Provider.generate(prompt);
-      if (response && response.trim()) return response.trim();
+      const latency = Date.now() - start;
+      if (response && response.trim()) {
+        providerStats[Provider.name].success++;
+        providerStats[Provider.name].lastSuccess = Date.now();
+        console.log(`[AI] ${Provider.name} succeeded in ${latency}ms`);
+        return response.trim();
+      } else {
+        throw new Error('Empty response');
+      }
     } catch (err) {
-      console.warn(`${Provider.name} failed:`, err.message);
+      providerStats[Provider.name].fail++;
+      providerStats[Provider.name].lastFail = Date.now();
+      console.warn(`[AI] ${Provider.name} failed:`, err.message);
     }
-  }
-  if (retries < MAX_RETRIES) {
-    await new Promise(r => setTimeout(r, 1000));
-    return callAIProviders(prompt, retries + 1);
   }
   return null;
 }
 
-function buildPageDNA(pageProfile = {}) {
-  // simplified – can be extended
-  return {
-    pageName: pageProfile.pageName || 'My Page',
-    brand: pageProfile.brand || 'modern',
-    mood: pageProfile.mood || 'neutral',
-    characterStyle: pageProfile.characterStyle || 'teacher',
-    voiceTone: pageProfile.voiceTone || 'professional',
-    audienceInterest: pageProfile.audienceInterest || []
-  };
-}
-
-function validateScenePlan(plan) {
-  if (!plan || typeof plan !== 'object') return false;
-  if (!Array.isArray(plan.scenes)) return false;
-  if (plan.scenes.length < MIN_SCENES || plan.scenes.length > MAX_SCENES) return false;
-  for (const scene of plan.scenes) {
-    if (!scene.emotion || !scene.duration || !scene.camera || !scene.character_action || !scene.subtitle_text) return false;
-    if (typeof scene.duration !== 'number' || scene.duration < 1 || scene.duration > 8) return false;
+// ---------- Fallback deterministic plan ----------
+function generateFallbackPlan(post, pageDNA) {
+  const fullText = `${post.title}. ${post.text}`;
+  const sentences = fullText.split(/(?<=[.!?])\s+/).filter(s => s.trim().length > 0);
+  const scenes = [];
+  const maxScenes = Math.min(5, Math.max(2, sentences.length));
+  for (let i = 0; i < maxScenes; i++) {
+    let text = sentences[i] || (i === 0 ? post.title : post.text);
+    let emotion = 'explain';
+    if (i === 0) emotion = 'hook';
+    if (i === maxScenes-1) emotion = 'outro';
+    const camera = emotion === 'climax' ? { movement: 'zoom_in', intensity: 0.3, zoom_level: 1.2 } : { movement: 'static', intensity: 0, zoom_level: 1 };
+    const characterAction = emotion === 'climax' ? 'excited' : (emotion === 'hook' ? 'surprised' : 'neutral');
+    scenes.push({
+      id: i,
+      emotion,
+      duration: emotion === 'climax' ? 3 : 2.5,
+      camera,
+      character_action: characterAction,
+      subtitle_text: text,
+      transition_next: i === maxScenes-1 ? 'fade' : 'cut',
+      emphasisWord: text.split(' ').find(w => w.length > 5 && w[0] === w[0].toUpperCase()) || text.split(' ')[0]
+    });
   }
-  return true;
+  const characterSpec = {
+    name: 'Default Host',
+    visualStyle: 'human_cartoon',
+    primaryColor: '#3a6ea5',
+    secondaryColor: '#ffccaa',
+    eyeStyle: 'circle',
+    headShape: 'round',
+    accessories: [],
+    personality: 'neutral',
+    voiceTone: 'neutral'
+  };
+  return { scenes, global_pacing: 'medium', music_mood: 'upbeat', characterSpec, pageDNA, fullText };
 }
 
 async function generateScenePlan(post, pageProfile) {
-  const pageDNA = buildPageDNA(pageProfile);
-  const fullText = `${post.title}. ${post.text}`;
-  const prompt = `You are a film director. Create a scene plan for a short reel.
-
-Title: "${post.title}"
-Text: "${post.text}"
-Brand: ${pageDNA.brand}
-Mood: ${pageDNA.mood}
-Character style: ${pageDNA.characterStyle}
-
-Return a JSON object exactly like:
-{
-  "scenes": [
-    {
-      "emotion": "hook|explain|climax|outro|twist|example",
-      "duration_seconds": 2.5,
-      "camera": { "movement": "static|shake|zoom_in|zoom_out|pan_left|pan_right", "intensity": 0.3, "zoom_level": 1.0 },
-      "character_action": "neutral|excited|worried|surprised|celebrating|thinking|pointing",
-      "subtitle_text": "a short phrase from the text"
-    }
-  ],
-  "global_pacing": "slow|medium|fast",
-  "music_mood": "epic|tense|calm|upbeat",
-  "characterSpec": { "name": "...", "visualStyle": "...", "primaryColor": "#hex", "secondaryColor": "#hex" }
-}
-Rules:
-- 3 to 6 scenes.
-- Each subtitle_text must be from original text.
-- Output only JSON, no extra text.`;
-
-  const aiResponse = await callAIProviders(prompt);
-  if (!aiResponse) return null;
-
-  let parsed;
-  try {
-    // Extract JSON (in case AI adds markdown)
-    const jsonMatch = aiResponse.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) throw new Error('No JSON found');
-    parsed = JSON.parse(jsonMatch[0]);
-  } catch (err) {
-    console.warn('AI response JSON parse error:', err.message);
-    return null;
+  const pageDNA = { pageName: pageProfile.pageName || 'Page', brand: pageProfile.brand || 'modern', mood: pageProfile.mood || 'neutral' };
+  console.log(`[storyboard] Generating plan for "${post.title}"`);
+  // Try AI with timeout
+  const prompt = `Create a JSON scene plan for a short reel. Title: "${post.title}", Text: "${post.text}". Return only JSON: { "scenes": [ { "emotion": "hook|explain|climax|outro", "duration_seconds": 2.5, "camera": { "movement": "static|shake|zoom_in", "intensity": 0.3, "zoom_level": 1 }, "character_action": "neutral|excited|worried", "subtitle_text": "phrase" } ], "global_pacing": "medium", "music_mood": "upbeat", "characterSpec": { "name": "...", "primaryColor": "#hex", "secondaryColor": "#hex" } }`;
+  const aiResponse = await callAIProvidersWithScoring(prompt);
+  if (aiResponse) {
+    try {
+      const jsonMatch = aiResponse.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        const parsed = JSON.parse(jsonMatch[0]);
+        if (parsed.scenes && parsed.scenes.length >= 2) {
+          // add missing fields
+          for (let i=0;i<parsed.scenes.length;i++) {
+            parsed.scenes[i].id = i;
+            parsed.scenes[i].duration = parsed.scenes[i].duration_seconds || 2.5;
+            if (!parsed.scenes[i].camera) parsed.scenes[i].camera = { movement: 'static', intensity: 0, zoom_level: 1 };
+            if (!parsed.scenes[i].character_action) parsed.scenes[i].character_action = 'neutral';
+            if (!parsed.scenes[i].transition_next) parsed.scenes[i].transition_next = i===parsed.scenes.length-1 ? 'fade' : 'cut';
+            parsed.scenes[i].emphasisWord = parsed.scenes[i].subtitle_text.split(' ')[0];
+          }
+          if (!parsed.characterSpec) parsed.characterSpec = { name: 'AI Host', primaryColor: '#3a6ea5', secondaryColor: '#ffccaa' };
+          console.log(`[storyboard] AI plan generated with ${parsed.scenes.length} scenes`);
+          return { scenes: parsed.scenes, global_pacing: parsed.global_pacing, music_mood: parsed.music_mood, characterSpec: parsed.characterSpec, pageDNA, fullText: `${post.title}. ${post.text}` };
+        }
+      }
+    } catch(e) { console.warn('AI JSON parse error', e.message); }
   }
-
-  if (!validateScenePlan(parsed)) {
-    console.warn('AI scene plan validation failed');
-    return null;
-  }
-
-  // Add missing defaults
-  for (let i = 0; i < parsed.scenes.length; i++) {
-    const s = parsed.scenes[i];
-    s.id = i;
-    s.duration = s.duration_seconds || 2.5;
-    if (!s.camera) s.camera = { movement: 'static', intensity: 0, zoom_level: 1 };
-    if (!s.character_action) s.character_action = 'neutral';
-    if (!s.transition_next) s.transition_next = 'cut';
-  }
-
-  return {
-    scenes: parsed.scenes,
-    global_pacing: parsed.global_pacing || 'medium',
-    music_mood: parsed.music_mood || 'upbeat',
-    characterSpec: parsed.characterSpec || {
-      name: 'Host',
-      visualStyle: 'human_cartoon',
-      primaryColor: '#3a6ea5',
-      secondaryColor: '#ffccaa'
-    },
-    pageDNA,
-    fullText
-  };
+  console.warn('[storyboard] AI failed, using fallback plan');
+  return generateFallbackPlan(post, pageDNA);
 }
 
-module.exports = { generateScenePlan, buildPageDNA };
+module.exports = { generateScenePlan };
