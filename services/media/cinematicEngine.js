@@ -7,7 +7,7 @@ const { renderSceneFrame } = require('./sceneBuilder');
 const { framesToVideo } = require('./ffmpegHelpers');
 const { createTempDir, cleanupTempDir } = require('./tempManager');
 const { uploadVideo } = require('./uploadVideo');
-const { updateJobStatus, getJob, enqueueJob, setJobProcessor } = require('../../queue');
+const { updateJobStatus, getJob, enqueueJob, setJobProcessor } = require('../queue');
 const config = require('./config/mediaConfig');
 
 async function processJob(job) {
