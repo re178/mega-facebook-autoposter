@@ -1,26 +1,20 @@
-// services/media/config/mediaConfig.js
 module.exports = {
-  // Concurrency & resources
-  MAX_CONCURRENT_RENDERS: 1,        // Only one reel at a time
-  MAX_MEMORY_MB: 768,               // Safe limit for Render free tier (512MB + buffer)
-  MAX_FRAMES_PER_JOB: 1800,         // e.g., 60 seconds at 30fps
-  FRAME_BATCH_SIZE: 30,             // Render 30 frames then flush memory
+  MAX_CONCURRENT_RENDERS: 1,
+  MAX_MEMORY_MB: 600,               // Lower than Render's 512MB? Actually 600 triggers abort before 512? No – we abort at 600MB to leave headroom. But Render limit is 512MB, so abort at 480MB.
+  MAX_MEMORY_MB: 480,               // Abort at 480MB to stay under 512MB limit
+  MAX_FRAMES_PER_JOB: 900,          // 30 seconds at 30fps
+  FRAME_BATCH_SIZE: 15,             // Smaller batches
   
-  // Timeouts (ms)
-  FFMPEG_TIMEOUT_MS: 120000,        // 2 minutes
-  AI_PROVIDER_TIMEOUT_MS: 15000,    // 15 seconds per AI call
-  SESSION_TIMEOUT_MS: 5 * 60 * 1000, // 5 minutes total per job
+  FFMPEG_TIMEOUT_MS: 120000,
+  AI_PROVIDER_TIMEOUT_MS: 15000,
+  SESSION_TIMEOUT_MS: 5 * 60 * 1000,
   
-  // Video defaults
   VIDEO_FORMATS: {
-    reel: { width: 1080, height: 1920, fps: 30 },
-    explainer: { width: 1280, height: 720, fps: 30 },
-    short: { width: 1080, height: 1920, fps: 30 }
+    reel: { width: 720, height: 1280, fps: 24 },      // Lower res for free tier
+    explainer: { width: 854, height: 480, fps: 24 },
+    short: { width: 720, height: 1280, fps: 24 }
   },
   
-  // Quality tier (draft = faster, lower quality; cinematic = slower)
-  QUALITY_MODE: process.env.QUALITY_MODE || 'draft',
-  
-  // AI provider scoring
-  AI_PROVIDER_SCORING: true,        // Track success rates
+  QUALITY_MODE: 'draft',   // ensures lower resolution
+  AI_PROVIDER_SCORING: true
 };
