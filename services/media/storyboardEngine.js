@@ -6,7 +6,7 @@ const config = require('./config/mediaConfig');
 let Providers = {};
 
 try {
-  Providers = require('../../textProviders');
+  Providers = require('../textProviders');
 } catch (err) {
   console.warn('[AI] textProviders not found, AI will fallback to heuristics');
 }
