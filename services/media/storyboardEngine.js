@@ -1,182 +1,94 @@
 // services/media/storyboardEngine.js
-
 const config = require('./config/mediaConfig');
 
-// Your existing AI providers
-const {
-  CloudflareText,
-  GrokText,
-  OpenAIText,
-  CohereText,
-  ClaudeText,
-  AIHordeText,
-  AI21Text
-} = require('../textProviders');
+// Dynamically require providers – handle if file missing
+let Providers = {};
+try {
+  Providers = require('../../textProviders');
+} catch (err) {
+  console.warn('textProviders not found, AI will fallback to heuristics');
+}
 
-// -----------------------------
-// Provider List
-// -----------------------------
 const TEXT_PROVIDERS = [
-  OpenAIText,
-  CloudflareText,
-  GrokText,
-  CohereText,
-  ClaudeText,
-  AIHordeText,
-  AI21Text
-];
+  Providers.OpenAIText,
+  Providers.CloudflareText,
+  Providers.GrokText,
+  Providers.CohereText,
+  Providers.ClaudeText,
+  Providers.AIHordeText,
+  Providers.AI21Text
+].filter(p => p && typeof p.generate === 'function'); // filter out missing
 
-// -----------------------------
-// Provider Scoring State
-// -----------------------------
 const providerStats = {};
-
 for (const p of TEXT_PROVIDERS) {
-  providerStats[p.name] = {
-    success: 0,
-    fail: 0,
-    lastSuccess: 0,
-    lastFail: 0
-  };
+  providerStats[p.name] = { success: 0, fail: 0 };
 }
 
-// -----------------------------
-// Safe JSON Parser
-// -----------------------------
-function safeJsonParse(text) {
-  try {
-    return JSON.parse(text);
-  } catch (err) {
-    try {
-      const match = text.match(/\{[\s\S]*\}/);
-
-      if (!match) return null;
-
-      return JSON.parse(match[0]);
-    } catch {
-      return null;
-    }
-  }
-}
-
-// -----------------------------
-// AI Provider Scoring Engine
-// -----------------------------
 async function callAIProvidersWithScoring(prompt) {
-
-  // Sort providers by success rate
-  const sorted = [...TEXT_PROVIDERS].sort((a, b) => {
-
-    const rateA =
-      providerStats[a.name].success /
-      (
-        providerStats[a.name].success +
-        providerStats[a.name].fail +
-        1
-      );
-
-    const rateB =
-      providerStats[b.name].success /
-      (
-        providerStats[b.name].success +
-        providerStats[b.name].fail +
-        1
-      );
-
+  if (TEXT_PROVIDERS.length === 0) return null;
+  const sorted = [...TEXT_PROVIDERS].sort((a,b) => {
+    const rateA = (providerStats[a.name].success / (providerStats[a.name].success + providerStats[a.name].fail + 1));
+    const rateB = (providerStats[b.name].success / (providerStats[b.name].success + providerStats[b.name].fail + 1));
     return rateB - rateA;
   });
-
   for (const Provider of sorted) {
-
     try {
-
-      const start = Date.now();
-
       const response = await Provider.generate(prompt);
-
-      const latency = Date.now() - start;
-
       if (response && response.trim()) {
-
         providerStats[Provider.name].success++;
-        providerStats[Provider.name].lastSuccess = Date.now();
-
-        console.log(
-          `[AI] ${Provider.name} succeeded in ${latency}ms`
-        );
-
         return response.trim();
-
-      } else {
-
-        throw new Error('Empty response');
       }
-
     } catch (err) {
-
       providerStats[Provider.name].fail++;
-      providerStats[Provider.name].lastFail = Date.now();
-
-      console.warn(
-        `[AI] ${Provider.name} failed:`,
-        err.message
-      );
     }
   }
-
   return null;
 }
 
-// -----------------------------
-// Fallback Deterministic Plan
-// -----------------------------
+// ---------- JSON REPAIR (enhanced) ----------
+function repairJSON(str) {
+  str = str.replace(/```json\s*|\s*```/g, '');
+  const match = str.match(/\{[\s\S]*\}/);
+  if (match) str = match[0];
+  str = str.replace(/\}\s*\{/g, '},{');
+  str = str.replace(/"\s+"/g, '", "');
+  str = str.replace(/,\s*}/g, '}');
+  str = str.replace(/,\s*]/g, ']');
+  str = str.replace(/([{,]\s*)(\w+)(\s*:)/g, '$1"$2"$3');
+  // Handle incomplete JSON (truncated)
+  let braceCount = 0;
+  let lastValidIndex = 0;
+  for (let i = 0; i < str.length; i++) {
+    if (str[i] === '{') braceCount++;
+    if (str[i] === '}') braceCount--;
+    if (braceCount === 0 && (str[i] === '}' || str[i] === ']')) {
+      lastValidIndex = i + 1;
+    }
+  }
+  if (lastValidIndex > 0 && lastValidIndex < str.length) {
+    str = str.substring(0, lastValidIndex);
+  }
+  const openBraces = (str.match(/{/g) || []).length;
+  const closeBraces = (str.match(/}/g) || []).length;
+  if (openBraces > closeBraces) {
+    str += '}'.repeat(openBraces - closeBraces);
+  }
+  return str;
+}
+
+// ---------- FALLBACK PLAN ----------
 function generateFallbackPlan(post, pageDNA) {
-
   const fullText = `${post.title}. ${post.text}`;
-
-  const sentences = fullText
-    .split(/(?<=[.!?])\s+/)
-    .filter(s => s.trim().length > 0);
-
+  const sentences = fullText.split(/(?<=[.!?])\s+/).filter(s => s.trim().length > 0);
   const scenes = [];
-
-  const maxScenes = Math.min(
-    5,
-    Math.max(3, sentences.length)
-  );
-
+  const maxScenes = Math.min(5, Math.max(2, sentences.length));
   for (let i = 0; i < maxScenes; i++) {
-
-    let text =
-      sentences[i] ||
-      (i === 0 ? post.title : post.text);
-
+    let text = sentences[i] || (i === 0 ? post.title : post.text);
     let emotion = 'explain';
-
     if (i === 0) emotion = 'hook';
-    if (i === maxScenes - 2) emotion = 'climax';
-    if (i === maxScenes - 1) emotion = 'outro';
-
-    const camera =
-      emotion === 'climax'
-        ? {
-            movement: 'zoom_in',
-            intensity: 0.3,
-            zoom_level: 1.2
-          }
-        : {
-            movement: 'static',
-            intensity: 0,
-            zoom_level: 1
-          };
-
-    const characterAction =
-      emotion === 'climax'
-        ? 'excited'
-        : emotion === 'hook'
-        ? 'surprised'
-        : 'neutral';
-
+    if (i === maxScenes-1) emotion = 'outro';
+    const camera = emotion === 'climax' ? { movement: 'zoom_in', intensity: 0.3, zoom_level: 1.2 } : { movement: 'static', intensity: 0, zoom_level: 1 };
+    const characterAction = emotion === 'climax' ? 'excited' : (emotion === 'hook' ? 'surprised' : 'neutral');
     scenes.push({
       id: i,
       emotion,
@@ -184,17 +96,10 @@ function generateFallbackPlan(post, pageDNA) {
       camera,
       character_action: characterAction,
       subtitle_text: text,
-      transition_next:
-        i === maxScenes - 1 ? 'fade' : 'cut',
-      emphasisWord:
-        text.split(' ').find(
-          w =>
-            w.length > 5 &&
-            w[0] === w[0].toUpperCase()
-        ) || text.split(' ')[0]
+      transition_next: i === maxScenes-1 ? 'fade' : 'cut',
+      emphasisWord: text.split(' ').find(w => w.length > 5 && w[0] === w[0].toUpperCase()) || text.split(' ')[0]
     });
   }
-
   const characterSpec = {
     name: 'Default Host',
     visualStyle: 'human_cartoon',
@@ -206,263 +111,60 @@ function generateFallbackPlan(post, pageDNA) {
     personality: 'neutral',
     voiceTone: 'neutral'
   };
-
-  return {
-    scenes,
-    global_pacing: 'medium',
-    music_mood: 'upbeat',
-    characterSpec,
-    pageDNA,
-    fullText
-  };
+  return { scenes, global_pacing: 'medium', music_mood: 'upbeat', characterSpec, pageDNA, fullText };
 }
 
-// -----------------------------
-// Main Scene Generator
-// -----------------------------
+// ---------- MAIN GENERATOR ----------
 async function generateScenePlan(post, pageProfile) {
+  const pageDNA = { pageName: pageProfile.pageName || 'Page', brand: pageProfile.brand || 'modern', mood: pageProfile.mood || 'neutral' };
+  console.log(`[storyboard] Generating plan for "${post.title}"`);
 
-  const pageDNA = {
-    pageName: pageProfile.pageName || 'Page',
-    brand: pageProfile.brand || 'modern',
-    mood: pageProfile.mood || 'neutral'
-  };
+  const prompt = `You are a JSON generator. Output ONLY valid JSON. No markdown, no extra text. Create a scene plan for a short reel.
 
-  console.log(
-    `[storyboard] Generating plan for "${post.title}"`
-  );
+Title: "${post.title}"
+Text: "${post.text}"
 
-  // -----------------------------
-  // STRICT PROMPT
-  // -----------------------------
-  const prompt = `
-You are a professional cinematic storyboard AI engine.
-
-TASK:
-Generate a highly engaging short-video storyboard.
-
-STRICT RULES:
-1. Return ONLY valid JSON.
-2. No markdown.
-3. No explanations.
-4. No comments.
-5. No extra text.
-6. Output must begin with { and end with }.
-7. All fields are required.
-8. Generate between 3 and 6 scenes.
-9. Scene subtitles must be emotional and concise.
-10. Each scene should feel visually different.
-11. JSON must be syntactically valid.
-12. Use double quotes only.
-13. No trailing commas.
-
-STRUCTURE RULES:
-- First scene emotion = "hook"
-- Last scene emotion = "outro"
-- At least one middle scene emotion = "climax"
-
-ALLOWED VALUES:
-
-emotion:
-["hook","explain","climax","outro"]
-
-camera.movement:
-[
-"static",
-"shake",
-"zoom_in",
-"zoom_out",
-"pan_left",
-"pan_right"
-]
-
-character_action:
-[
-"neutral",
-"excited",
-"worried",
-"surprised",
-"talking",
-"pointing"
-]
-
-global_pacing:
-[
-"slow",
-"medium",
-"fast"
-]
-
-music_mood:
-[
-"upbeat",
-"emotional",
-"dramatic",
-"inspirational",
-"suspense"
-]
-
-SCENE GUIDELINES:
-- HOOK scenes must grab attention instantly.
-- EXPLAIN scenes should clearly progress the story.
-- CLIMAX scenes should feel emotionally intense.
-- OUTRO scenes should feel resolved or memorable.
-
-REQUIRED JSON FORMAT:
-
+Return JSON in this exact format:
 {
   "scenes": [
     {
       "emotion": "hook",
       "duration_seconds": 2.5,
-      "camera": {
-        "movement": "zoom_in",
-        "intensity": 0.3,
-        "zoom_level": 1.2
-      },
-      "character_action": "surprised",
-      "subtitle_text": "Did you know this?"
+      "camera": {"movement": "static", "intensity": 0, "zoom_level": 1},
+      "character_action": "neutral",
+      "subtitle_text": "phrase from text"
     }
   ],
   "global_pacing": "medium",
   "music_mood": "upbeat",
-  "characterSpec": {
-    "name": "AI Host",
-    "visualStyle": "human_cartoon",
-    "primaryColor": "#3a6ea5",
-    "secondaryColor": "#ffccaa",
-    "eyeStyle": "circle",
-    "headShape": "round",
-    "accessories": [],
-    "personality": "friendly",
-    "voiceTone": "energetic"
-  }
+  "characterSpec": {"name": "Host", "primaryColor": "#3a6ea5", "secondaryColor": "#ffccaa"}
 }
 
-VIDEO TITLE:
-"${post.title}"
+Use 2-5 scenes. Output only the JSON object.`;
 
-VIDEO CONTENT:
-"${post.text}"
-
-Generate the storyboard now.
-`;
-
-  // -----------------------------
-  // AI Generation
-  // -----------------------------
-  const aiResponse =
-    await callAIProvidersWithScoring(prompt);
-
+  const aiResponse = await callAIProvidersWithScoring(prompt);
   if (aiResponse) {
-
     try {
-      console.log('RAW AI RESPONSE:', aiResponse);
-
-      const parsed = safeJsonParse(aiResponse);
-
-      if (
-        parsed &&
-        parsed.scenes &&
-        Array.isArray(parsed.scenes) &&
-        parsed.scenes.length >= 2
-      ) {
-
-        for (let i = 0; i < parsed.scenes.length; i++) {
-
-          const scene = parsed.scenes[i];
-
-          scene.id = i;
-
-          scene.duration =
-            scene.duration_seconds || 2.5;
-
-          if (!scene.camera) {
-            scene.camera = {
-              movement: 'static',
-              intensity: 0,
-              zoom_level: 1
-            };
-          }
-
-          if (!scene.character_action) {
-            scene.character_action = 'neutral';
-          }
-
-          if (!scene.transition_next) {
-            scene.transition_next =
-              i === parsed.scenes.length - 1
-                ? 'fade'
-                : 'cut';
-          }
-
-          if (!scene.subtitle_text) {
-            scene.subtitle_text = 'Continue...';
-          }
-
-          scene.emphasisWord =
-            scene.subtitle_text
-              .split(' ')
-              .find(w => w.length > 5) ||
-            scene.subtitle_text.split(' ')[0];
+      const repaired = repairJSON(aiResponse);
+      const parsed = JSON.parse(repaired);
+      if (parsed.scenes && parsed.scenes.length >= 2) {
+        for (let i=0;i<parsed.scenes.length;i++) {
+          parsed.scenes[i].id = i;
+          parsed.scenes[i].duration = parsed.scenes[i].duration_seconds || 2.5;
+          if (!parsed.scenes[i].camera) parsed.scenes[i].camera = { movement: 'static', intensity: 0, zoom_level: 1 };
+          if (!parsed.scenes[i].character_action) parsed.scenes[i].character_action = 'neutral';
+          if (!parsed.scenes[i].transition_next) parsed.scenes[i].transition_next = i===parsed.scenes.length-1 ? 'fade' : 'cut';
+          parsed.scenes[i].emphasisWord = parsed.scenes[i].subtitle_text.split(' ')[0];
         }
-
-        if (!parsed.characterSpec) {
-
-          parsed.characterSpec = {
-            name: 'AI Host',
-            visualStyle: 'human_cartoon',
-            primaryColor: '#3a6ea5',
-            secondaryColor: '#ffccaa',
-            eyeStyle: 'circle',
-            headShape: 'round',
-            accessories: [],
-            personality: 'friendly',
-            voiceTone: 'energetic'
-          };
-        }
-
-        console.log(
-          `[storyboard] AI plan generated with ${parsed.scenes.length} scenes`
-        );
-
-        return {
-          scenes: parsed.scenes,
-          global_pacing:
-            parsed.global_pacing || 'medium',
-          music_mood:
-            parsed.music_mood || 'upbeat',
-          characterSpec: parsed.characterSpec,
-          pageDNA,
-          fullText: `${post.title}. ${post.text}`
-        };
+        if (!parsed.characterSpec) parsed.characterSpec = { name: 'AI Host', primaryColor: '#3a6ea5', secondaryColor: '#ffccaa' };
+        console.log(`[storyboard] AI plan generated with ${parsed.scenes.length} scenes`);
+        return { scenes: parsed.scenes, global_pacing: parsed.global_pacing, music_mood: parsed.music_mood, characterSpec: parsed.characterSpec, pageDNA, fullText: `${post.title}. ${post.text}` };
       }
-
-    } catch (e) {
-
-      console.warn(
-        '[storyboard] AI JSON parse error:',
-        e.message
-      );
-    }
+    } catch(e) { console.warn('AI JSON parse error', e.message); }
   }
 
-  // -----------------------------
-  // Fallback
-  // -----------------------------
-  console.warn(
-    '[storyboard] AI failed, using fallback plan'
-  );
-
-  return generateFallbackPlan(
-    post,
-    pageDNA
-  );
+  console.warn('[storyboard] AI failed, using fallback plan');
+  return generateFallbackPlan(post, pageDNA);
 }
 
-// -----------------------------
-// Export
-// -----------------------------
-module.exports = {
-  generateScenePlan
-};
+module.exports = { generateScenePlan };
