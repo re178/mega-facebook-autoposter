@@ -4,12 +4,12 @@ const Page = require('../models/Page');
 const Post = require('../models/Post');
 const Log = require('../models/Log');
 
-// Helper: check if user can access page (by Facebook pageId)
-async function canAccessPage(facebookPageId, userId, userRole) {
+// Helper: check if user can access a page (by Facebook pageId)
+async function canAccessPage(facebookPageId, req) {
   const page = await Page.findOne({ pageId: facebookPageId });
   if (!page) return false;
-  if (userRole === 'admin') return true;
-  return page.userId.toString() === userId;
+  if (req.session.userRole === 'admin') return true;
+  return page.userId.toString() === req.session.userId;
 }
 
 // =======================
@@ -29,6 +29,7 @@ router.get('/master/summary', async (req, res) => {
 
     res.json({ totalPages, totalPosts, posted, failed, recentLogs });
   } catch (err) {
+    console.error(err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -51,15 +52,15 @@ router.get('/pages', async (req, res) => {
 });
 
 // =======================
-// PAGE DASHBOARD ROUTES (using Facebook pageId from frontend)
+// PAGE DASHBOARD ROUTES (using Facebook pageId)
 // =======================
 
 // Get page info
 router.get('/page/:fbId', async (req, res) => {
   try {
-    if (!(await canAccessPage(req.params.fbId, req.session.userId, req.session.userRole))) {
+    if (!(await canAccessPage(req.params.fbId, req)))
       return res.status(403).json({ error: 'Access denied' });
-    }
+
     const page = await Page.findOne({ pageId: req.params.fbId });
     if (!page) return res.status(404).json({ error: 'Page not found' });
     res.json(page);
@@ -71,9 +72,9 @@ router.get('/page/:fbId', async (req, res) => {
 // Get posts for page
 router.get('/page/:fbId/posts', async (req, res) => {
   try {
-    if (!(await canAccessPage(req.params.fbId, req.session.userId, req.session.userRole))) {
+    if (!(await canAccessPage(req.params.fbId, req)))
       return res.status(403).json({ error: 'Access denied' });
-    }
+
     const page = await Page.findOne({ pageId: req.params.fbId });
     if (!page) return res.status(404).json({ error: 'Page not found' });
 
@@ -89,13 +90,15 @@ router.get('/page/:fbId/posts', async (req, res) => {
 // Create a post for page
 router.post('/page/:fbId/post', async (req, res) => {
   try {
-    if (!(await canAccessPage(req.params.fbId, req.session.userId, req.session.userRole))) {
+    if (!(await canAccessPage(req.params.fbId, req)))
       return res.status(403).json({ error: 'Access denied' });
-    }
+
     const page = await Page.findOne({ pageId: req.params.fbId });
     if (!page) return res.status(404).json({ error: 'Page not found' });
 
     const { text, mediaUrl, scheduledTime } = req.body;
+    if (!text?.trim()) return res.status(400).json({ error: 'Post text is required' });
+
     const post = await Post.create({
       pageId: page._id,
       text,
@@ -104,28 +107,22 @@ router.post('/page/:fbId/post', async (req, res) => {
       status: 'PENDING'
     });
 
-    await Log.create({
-      pageId: page._id,
-      action: 'CREATE_POST',
-      message: 'Post created'
-    });
-
-    res.json(post);
+    await Log.create({ pageId: page._id, action: 'CREATE_POST', message: 'Post created' });
+    res.status(201).json(post);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// Edit post (need to verify ownership via page)
+// Edit post (by MongoDB _id)
 router.put('/post/:postId', async (req, res) => {
   try {
     const post = await Post.findById(req.params.postId);
     if (!post) return res.status(404).json({ error: 'Post not found' });
+
     const page = await Page.findById(post.pageId);
-    if (!page) return res.status(404).json({ error: 'Page not found' });
-    if (!(await canAccessPage(page.pageId, req.session.userId, req.session.userRole))) {
-      return res.status(403).json({ error: 'Access denied' });
-    }
+    const isOwner = (req.session.userRole === 'admin') || (page.userId.toString() === req.session.userId);
+    if (!isOwner) return res.status(403).json({ error: 'Not authorized' });
 
     const updated = await Post.findByIdAndUpdate(req.params.postId, req.body, { new: true });
     res.json(updated);
@@ -139,11 +136,10 @@ router.delete('/post/:postId', async (req, res) => {
   try {
     const post = await Post.findById(req.params.postId);
     if (!post) return res.status(404).json({ error: 'Post not found' });
+
     const page = await Page.findById(post.pageId);
-    if (!page) return res.status(404).json({ error: 'Page not found' });
-    if (!(await canAccessPage(page.pageId, req.session.userId, req.session.userRole))) {
-      return res.status(403).json({ error: 'Access denied' });
-    }
+    const isOwner = (req.session.userRole === 'admin') || (page.userId.toString() === req.session.userId);
+    if (!isOwner) return res.status(403).json({ error: 'Not authorized' });
 
     await Post.findByIdAndDelete(req.params.postId);
     res.json({ success: true });
@@ -155,9 +151,9 @@ router.delete('/post/:postId', async (req, res) => {
 // Get page logs
 router.get('/page/:fbId/logs', async (req, res) => {
   try {
-    if (!(await canAccessPage(req.params.fbId, req.session.userId, req.session.userRole))) {
+    if (!(await canAccessPage(req.params.fbId, req)))
       return res.status(403).json({ error: 'Access denied' });
-    }
+
     const page = await Page.findOne({ pageId: req.params.fbId });
     if (!page) return res.status(404).json({ error: 'Page not found' });
 
