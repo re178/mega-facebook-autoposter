@@ -1,7 +1,6 @@
 require('dotenv').config();
 
 const express = require('express');
-app.set('trust proxy', 1);
 const mongoose = require('mongoose');
 const cors = require('cors');
 const path = require('path');
@@ -20,6 +19,7 @@ const User = require('./models/User');
 
 // ---------------- APP INIT ----------------
 const app = express();
+app.set('trust proxy', 1);
 const PORT = process.env.PORT || 10000;
 const isProduction = process.env.NODE_ENV === 'production';
 
