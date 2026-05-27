@@ -1,14 +1,17 @@
 // ==========================
-// PAGE FEATURES JS
+// PAGE FEATURES JS (FIXED)
 // Handles Messaging, Analytics, Ads, Comments
 // with user‑friendly messages
 // ==========================
 
-document.addEventListener('DOMContentLoaded', async () => {
+(async () => {
   const urlParams = new URLSearchParams(window.location.search);
   const pageId = urlParams.get('pageId'); // expects ?pageId=xxx
 
-  if (!pageId) return;
+  if (!pageId) {
+    console.warn('No pageId provided');
+    return;
+  }
 
   // Helper to show friendly messages inside a container
   function showFriendlyMessage(container, type, title, message, retryCallback = null) {
@@ -17,11 +20,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     container.innerHTML = `
       <div class="friendly-message ${type}">
         <div class="icon">${icons[type] || 'ℹ️'}</div>
-        <h3>${title}</h3>
-        <p>${message}</p>
-        ${retryCallback ? `<button class="retry-btn" onclick="(${retryCallback.toString()})()">Try Again</button>` : ''}
+        <h3>${escapeHtml(title)}</h3>
+        <p>${escapeHtml(message)}</p>
+        ${retryCallback ? `<button class="retry-btn" data-retry="${retryCallback.name || 'retry'}">Try Again</button>` : ''}
       </div>
     `;
+    if (retryCallback) {
+      const btn = container.querySelector('.retry-btn');
+      if (btn) btn.addEventListener('click', () => retryCallback());
+    }
   }
 
   function showLoading(container, text = 'Loading...') {
@@ -29,7 +36,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     container.innerHTML = `
       <div class="loading-state">
         <div class="spinner"></div>
-        <p>${text}</p>
+        <p>${escapeHtml(text)}</p>
       </div>
     `;
   }
@@ -46,35 +53,52 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     try {
       const messages = await getPageMessages(pageId);
-
-      // Check if it's an array
       if (!Array.isArray(messages)) {
         console.warn('Messages is not array:', messages);
-        showFriendlyMessage(messagesTableBody, 'warning', 'Unexpected data', 'Could not load messages. Please refresh.', () => loadMessages());
+        showFriendlyMessage(messagesTableBody, 'warning', 'Unexpected data', 'Could not load messages. Please refresh.', loadMessages);
         return;
       }
 
       if (messages.length === 0) {
-        showFriendlyMessage(messagesTableBody, 'info', 'No new messages', 'Your inbox is empty. When someone sends a message, it will appear here.', () => loadMessages());
+        showFriendlyMessage(messagesTableBody, 'info', 'No new messages', 'Your inbox is empty. When someone sends a message, it will appear here.', loadMessages);
         return;
       }
 
-      // Render messages
       messagesTableBody.innerHTML = '';
       messages.forEach(m => {
         const tr = document.createElement('tr');
+        const msgId = m.id || m._id;
         tr.innerHTML = `
           <td>${escapeHtml(m.sender || m.senderName || 'Unknown')}</td>
           <td>${escapeHtml(m.message || m.content || '')}</td>
           <td>${new Date(m.receivedAt).toLocaleString()}</td>
-          <td>${m.status || 'UNREAD'}</td>
-          <td><button onclick="replyMessage('${m.id || m._id}')">Reply</button></td>
+          <td>${escapeHtml(m.status || 'UNREAD')}</td>
+          <td><button class="reply-msg-btn" data-msg-id="${msgId}">Reply</button></td>
         `;
         messagesTableBody.appendChild(tr);
       });
+      // Attach reply handlers via event delegation
+      messagesTableBody.querySelectorAll('.reply-msg-btn').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+          const msgId = btn.dataset.msgId;
+          await handleReplyMessage(msgId);
+        });
+      });
     } catch (error) {
       console.error('loadMessages error:', error);
-      showFriendlyMessage(messagesTableBody, 'error', 'Failed to load messages', error.message || 'Please check your connection.', () => loadMessages());
+      showFriendlyMessage(messagesTableBody, 'error', 'Failed to load messages', error.message || 'Please check your connection.', loadMessages);
+    }
+  }
+
+  async function handleReplyMessage(messageId) {
+    const replyText = prompt('Enter reply:');
+    if (!replyText) return;
+    try {
+      // ✅ FIXED: use sendMessage, NOT replyComment
+      await sendMessage(pageId, messageId, replyText);
+      await loadMessages(); // refresh list after reply
+    } catch (err) {
+      alert('Failed to send reply: ' + err.message);
     }
   }
 
@@ -94,20 +118,46 @@ document.addEventListener('DOMContentLoaded', async () => {
       templatesTableBody.innerHTML = '';
       templates.forEach(t => {
         const tr = document.createElement('tr');
+        const templateId = t.id || t._id;
         tr.innerHTML = `
           <td>${escapeHtml(t.name)}</td>
           <td>${escapeHtml(t.type)}</td>
-          <td>${(t.keywords || []).join(', ')}</td>
+          <td>${escapeHtml((t.keywords || []).join(', '))}</td>
           <td>${escapeHtml(t.reply)}</td>
           <td>
-            <button onclick="editTemplate('${t.id}')">Edit</button>
-            <button onclick="deleteTemplate('${t.id}')">Delete</button>
+            <button class="edit-template-btn" data-id="${templateId}">Edit</button>
+            <button class="delete-template-btn" data-id="${templateId}">Delete</button>
           </td>
         `;
         templatesTableBody.appendChild(tr);
       });
+      // Attach handlers
+      templatesTableBody.querySelectorAll('.edit-template-btn').forEach(btn => {
+        btn.addEventListener('click', () => handleEditTemplate(btn.dataset.id));
+      });
+      templatesTableBody.querySelectorAll('.delete-template-btn').forEach(btn => {
+        btn.addEventListener('click', () => handleDeleteTemplate(btn.dataset.id));
+      });
     } catch (error) {
-      showFriendlyMessage(templatesTableBody, 'error', 'Error loading templates', error.message, () => loadTemplates());
+      showFriendlyMessage(templatesTableBody, 'error', 'Error loading templates', error.message, loadTemplates);
+    }
+  }
+
+  async function handleEditTemplate(templateId) {
+    // Simple prompt-based edit; you can expand to modal
+    const newName = prompt('Enter new template name');
+    if (!newName) return;
+    // For full edit, you'd need more fields. This is a placeholder.
+    alert(`Edit template ${templateId} - implement full UI as needed`);
+  }
+
+  async function handleDeleteTemplate(templateId) {
+    if (!confirm('Delete this template?')) return;
+    try {
+      await deleteTemplate(templateId);
+      await loadTemplates();
+    } catch (err) {
+      alert('Delete failed: ' + err.message);
     }
   }
 
@@ -116,28 +166,6 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   await loadMessages();
   await loadTemplates();
-
-  window.replyMessage = async (id) => {
-    const replyText = prompt('Enter reply:');
-    if (!replyText) return;
-    try {
-      await replyComment(id, replyText);
-      loadMessages();
-    } catch (err) {
-      alert('Failed to send reply: ' + err.message);
-    }
-  };
-
-  window.editTemplate = (id) => alert('Edit template flow for ID: ' + id);
-  window.deleteTemplate = async (id) => {
-    if (!confirm('Delete this template?')) return;
-    try {
-      await deleteTemplate(id);
-      loadTemplates();
-    } catch (err) {
-      alert('Delete failed: ' + err.message);
-    }
-  };
 
   // ---- ANALYTICS ----
   const chartsContainer = document.getElementById('charts-container');
@@ -160,7 +188,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         </div>
       `;
     } catch (error) {
-      showFriendlyMessage(chartsContainer, 'error', 'Analytics unavailable', error.message, () => loadAnalytics());
+      showFriendlyMessage(chartsContainer, 'error', 'Analytics unavailable', error.message, loadAnalytics);
     }
   }
 
@@ -202,6 +230,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       adsTableBody.innerHTML = '';
       ads.forEach(ad => {
         const tr = document.createElement('tr');
+        const adId = ad.id || ad._id;
         tr.innerHTML = `
           <td>${escapeHtml(ad.campaign)}</td>
           <td>${escapeHtml(ad.status)}</td>
@@ -209,30 +238,48 @@ document.addEventListener('DOMContentLoaded', async () => {
           <td>${ad.reach || 0}</td>
           <td>${ad.ctr || 0}%</td>
           <td>
-            <button onclick="editAd('${ad.id}')">Edit</button>
-            <button onclick="deleteAd('${ad.id}')">Delete</button>
-          </td>
+            <button class="edit-ad-btn" data-id="${adId}">Edit</button>
+            <button class="delete-ad-btn" data-id="${adId}">Delete</button>
+           </td>
         `;
         adsTableBody.appendChild(tr);
       });
+      adsTableBody.querySelectorAll('.edit-ad-btn').forEach(btn => {
+        btn.addEventListener('click', () => handleEditAd(btn.dataset.id));
+      });
+      adsTableBody.querySelectorAll('.delete-ad-btn').forEach(btn => {
+        btn.addEventListener('click', () => handleDeleteAd(btn.dataset.id));
+      });
     } catch (error) {
-      showFriendlyMessage(adsTableBody, 'error', 'Failed to load ads', error.message, () => loadAds());
+      showFriendlyMessage(adsTableBody, 'error', 'Failed to load ads', error.message, loadAds);
+    }
+  }
+
+  async function handleEditAd(adId) {
+    // Placeholder – you can implement a modal form
+    const newBudget = prompt('Enter new budget (USD)');
+    if (newBudget === null) return;
+    try {
+      await editAd(adId, { budget: parseFloat(newBudget) });
+      await loadAds();
+      alert('Ad updated');
+    } catch (err) {
+      alert('Edit failed: ' + err.message);
+    }
+  }
+
+  async function handleDeleteAd(adId) {
+    if (!confirm('Delete this ad campaign?')) return;
+    try {
+      await deleteAd(adId);
+      await loadAds();
+    } catch (err) {
+      alert('Delete failed: ' + err.message);
     }
   }
 
   refreshAdsBtn?.addEventListener('click', loadAds);
   createAdBtn?.addEventListener('click', () => alert('Create ad flow here'));
-
-  window.editAd = (id) => alert('Edit ad flow for ID: ' + id);
-  window.deleteAd = async (id) => {
-    if (!confirm('Delete this ad?')) return;
-    try {
-      await deleteAd(id);
-      loadAds();
-    } catch (err) {
-      alert('Delete failed: ' + err.message);
-    }
-  };
 
   await loadAds();
 
@@ -255,78 +302,90 @@ document.addEventListener('DOMContentLoaded', async () => {
 
       commentsTableBody.innerHTML = '';
       comments.forEach(c => {
-        const tr = document.createElement('tr');
+        const commentId = c.id || c._id;
         tr.innerHTML = `
           <td>${escapeHtml(c.user || c.senderName || 'Unknown')}</td>
           <td>${escapeHtml(c.comment || c.message || '')}</td>
           <td>${escapeHtml(c.post || '')}</td>
           <td>${new Date(c.time || c.createdAt).toLocaleString()}</td>
           <td>
-            <button onclick="replyCommentUI('${c.id || c._id}')">Reply</button>
-            <button onclick="hideCommentUI('${c.id || c._id}')">Hide</button>
-            <button onclick="showCommentUI('${c.id || c._id}')">Show</button>
+            <button class="reply-comment-btn" data-id="${commentId}">Reply</button>
+            <button class="hide-comment-btn" data-id="${commentId}">Hide</button>
+            <button class="show-comment-btn" data-id="${commentId}">Show</button>
           </td>
         `;
         commentsTableBody.appendChild(tr);
       });
+      // Attach handlers
+      commentsTableBody.querySelectorAll('.reply-comment-btn').forEach(btn => {
+        btn.addEventListener('click', () => handleReplyComment(btn.dataset.id));
+      });
+      commentsTableBody.querySelectorAll('.hide-comment-btn').forEach(btn => {
+        btn.addEventListener('click', () => handleHideComment(btn.dataset.id));
+      });
+      commentsTableBody.querySelectorAll('.show-comment-btn').forEach(btn => {
+        btn.addEventListener('click', () => handleShowComment(btn.dataset.id));
+      });
     } catch (error) {
-      showFriendlyMessage(commentsTableBody, 'error', 'Failed to load comments', error.message, () => loadComments());
+      showFriendlyMessage(commentsTableBody, 'error', 'Failed to load comments', error.message, loadComments);
+    }
+  }
+
+  async function handleReplyComment(commentId) {
+    const text = prompt('Reply to comment:');
+    if (!text) return;
+    try {
+      await replyComment(commentId, text);
+      await loadComments();
+    } catch (err) {
+      alert('Reply failed: ' + err.message);
+    }
+  }
+
+  async function handleHideComment(commentId) {
+    try {
+      await hideComment(commentId);
+      await loadComments();
+    } catch (err) {
+      alert('Hide failed: ' + err.message);
+    }
+  }
+
+  async function handleShowComment(commentId) {
+    try {
+      await showComment(commentId);
+      await loadComments();
+    } catch (err) {
+      alert('Show failed: ' + err.message);
     }
   }
 
   refreshCommentsBtn?.addEventListener('click', loadComments);
 
-  window.replyCommentUI = async (id) => {
-    const text = prompt('Reply to comment:');
-    if (!text) return;
-    try {
-      await replyComment(id, text);
-      loadComments();
-    } catch (err) {
-      alert('Reply failed: ' + err.message);
-    }
-  };
-  window.hideCommentUI = async (id) => {
-    try {
-      await hideComment(id);
-      loadComments();
-    } catch (err) {
-      alert('Hide failed: ' + err.message);
-    }
-  };
-  window.showCommentUI = async (id) => {
-    try {
-      await showComment(id);
-      loadComments();
-    } catch (err) {
-      alert('Show failed: ' + err.message);
-    }
-  };
-
   await loadComments();
 
-  // ---- Sidebar navigation ----
+  // ---- Sidebar navigation (show/hide sections) ----
   const sections = ['create-post', 'posts-list', 'page-logs', 'messaging-section', 'analytics-section', 'ads-section', 'manage-section', 'ai-scheduler-section', 'page-profile-section', 'admin-section'];
   document.querySelectorAll('#page-nav a').forEach(link => {
     link.addEventListener('click', () => {
       const page = link.dataset.page;
       sections.forEach(sec => {
         const el = document.getElementById(sec);
-        if (el) el.style.display = (sec === page || sec + '-section' === page + '-section') ? 'block' : 'none';
+        if (el) {
+          el.style.display = (sec === page || sec + '-section' === page + '-section') ? 'block' : 'none';
+        }
       });
     });
   });
 
-  // Helper to escape HTML (prevent XSS)
+  // Helper to escape HTML (consistent with other files)
   function escapeHtml(str) {
     if (!str) return '';
-    return str.replace(/[&<>]/g, function(m) {
-      if (m === '&') return '&amp;';
-      if (m === '<') return '&lt;';
-      if (m === '>') return '&gt;';
-      return m;
-    }).replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]/g, function(c) {
-      return c;
-    });
+    return str
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
   }
-});
+})();
