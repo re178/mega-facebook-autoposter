@@ -32,7 +32,7 @@ router.patch('/private/:msgId/read', requireLogin, async (req, res) => {
   }
 });
 
-// Get all broadcast messages (no time limit, as frontend expects all)
+// Get all broadcast messages (no time limit, frontend handles last seen via localStorage)
 router.get('/broadcast', requireLogin, async (req, res) => {
   try {
     const broadcasts = await BroadcastMessage.find()
