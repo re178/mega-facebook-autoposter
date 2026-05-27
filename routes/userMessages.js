@@ -1,7 +1,6 @@
 const express = require('express');
 const router = express.Router();
 const requireLogin = require('../middleware/requireLogin');
-const User = require('../models/User');
 const AdminMessage = require('../models/AdminMessage');
 const BroadcastMessage = require('../models/BroadcastMessage');
 
@@ -17,24 +16,28 @@ router.get('/private', requireLogin, async (req, res) => {
   }
 });
 
-// Mark a private message as read
+// Mark a private message as read (with ownership check)
 router.patch('/private/:msgId/read', requireLogin, async (req, res) => {
   try {
-    await AdminMessage.findByIdAndUpdate(req.params.msgId, { read: true });
+    const message = await AdminMessage.findOne({
+      _id: req.params.msgId,
+      userId: req.user._id
+    });
+    if (!message) return res.status(404).json({ error: 'Message not found or not yours' });
+    message.read = true;
+    await message.save();
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// Get broadcast messages from last 7 days
+// Get all broadcast messages (no time limit, as frontend expects all)
 router.get('/broadcast', requireLogin, async (req, res) => {
   try {
-    const sevenDaysAgo = new Date();
-    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-    const broadcasts = await BroadcastMessage.find({
-      createdAt: { $gte: sevenDaysAgo }
-    }).sort({ createdAt: -1 });
+    const broadcasts = await BroadcastMessage.find()
+      .sort({ createdAt: -1 })
+      .limit(100); // reasonable limit
     res.json(broadcasts);
   } catch (err) {
     res.status(500).json({ error: err.message });
