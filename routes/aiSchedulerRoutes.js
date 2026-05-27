@@ -1,25 +1,33 @@
 const express = require('express');
 const router = express.Router();
 
-// MODELS
+// Models
 const AiTopic = require('../models/AiTopic');
 const AiScheduledPost = require('../models/AiScheduledPost');
 const AiLog = require('../models/AiLog');
 const Page = require('../models/Page');
 const PageProfile = require('../models/PageProfile');
 
-// SERVICES
+// Services
 const {
   generatePostsForTopic,
   deleteTopicPosts,
   createAiLog,
-  setAutoGeneration,
-  getAutoGeneration
 } = require('../services/aiSchedulerService');
 
-/* =========================================================
-   HELPERS
-========================================================= */
+// Helper: Check if user can access page (by Facebook pageId)
+async function canAccessPage(facebookPageId, req) {
+  const page = await Page.findOne({ pageId: facebookPageId });
+  if (!page) return false;
+  const isAdmin = req.session.userRole === 'admin';
+  return isAdmin || page.userId.toString() === req.session.userId;
+}
+
+// Helper: Get Facebook pageId from topicId
+async function getFacebookPageIdFromTopic(topicId) {
+  const topic = await AiTopic.findById(topicId);
+  return topic ? topic.pageId : null;
+}
 
 // Unified response helpers
 const safeJson = (res, data) => res.json(data || []);
@@ -41,26 +49,31 @@ const logAction = async ({ pageId, topicId = null, postId = null, action, messag
 // Get topics for a page
 router.get('/page/:pageId/topics', async (req, res) => {
   try {
+    if (!(await canAccessPage(req.params.pageId, req)))
+      return res.status(403).json({ error: 'Access denied' });
     const topics = await AiTopic.find({ pageId: req.params.pageId }).sort({ createdAt: -1 });
     safeJson(res, topics);
-  } catch (err) {
-    handleError(res, err);
-  }
+  } catch (err) { handleError(res, err); }
 });
 
 // Create topic
-// Create topic
 router.post('/page/:pageId/topic', async (req, res) => {
   try {
+    if (!(await canAccessPage(req.params.pageId, req)))
+      return res.status(403).json({ error: 'Access denied' });
+
     let { topicName, postsPerDay, times, startDate, endDate, repeatType, includeMedia, includeVideo } = req.body;
     if (!topicName?.trim()) return handleError(res, new Error('Topic name is required'), 400);
 
-    // Mutual exclusivity: if includeVideo is true, force includeMedia false
-    if (includeVideo === true) {
-      includeMedia = false;
-    } else if (includeMedia === true) {
-      includeVideo = false;
-    }
+    if (!startDate || !endDate) return handleError(res, new Error('Start and end dates are required'), 400);
+    if (new Date(endDate) < new Date(startDate))
+      return handleError(res, new Error('End date cannot be before start date'), 400);
+
+    if (!Array.isArray(times) || times.length === 0 || times.some(t => !t))
+      return handleError(res, new Error('At least one valid time is required'), 400);
+
+    if (includeVideo === true) includeMedia = false;
+    else if (includeMedia === true) includeVideo = false;
 
     const topic = await AiTopic.create({
       pageId: req.params.pageId,
@@ -82,16 +95,20 @@ router.post('/page/:pageId/topic', async (req, res) => {
 // Update topic
 router.put('/topic/:topicId', async (req, res) => {
   try {
-    let { includeMedia, includeVideo, ...otherFields } = req.body;
+    const facebookPageId = await getFacebookPageIdFromTopic(req.params.topicId);
+    if (!facebookPageId || !(await canAccessPage(facebookPageId, req)))
+      return res.status(403).json({ error: 'Access denied' });
 
-    // Mutual exclusivity
-    if (includeVideo === true) {
-      includeMedia = false;
-    } else if (includeMedia === true) {
-      includeVideo = false;
-    }
+    let { includeMedia, includeVideo, startDate, endDate, times, ...otherFields } = req.body;
 
-    const updateData = { ...otherFields, includeMedia, includeVideo };
+    if (startDate && endDate && new Date(endDate) < new Date(startDate))
+      return handleError(res, new Error('End date cannot be before start date'), 400);
+    if (times && (!Array.isArray(times) || times.length === 0 || times.some(t => !t)))
+      return handleError(res, new Error('At least one valid time is required'), 400);
+    if (includeVideo === true) includeMedia = false;
+    else if (includeMedia === true) includeVideo = false;
+
+    const updateData = { ...otherFields, includeMedia, includeVideo, startDate, endDate, times };
     const topic = await AiTopic.findByIdAndUpdate(req.params.topicId, updateData, { new: true });
     if (!topic) return handleError(res, new Error('Topic not found'), 404);
 
@@ -100,10 +117,13 @@ router.put('/topic/:topicId', async (req, res) => {
   } catch (err) { handleError(res, err); }
 });
 
-
 // Delete topic + posts
 router.delete('/topic/:topicId', async (req, res) => {
   try {
+    const facebookPageId = await getFacebookPageIdFromTopic(req.params.topicId);
+    if (!facebookPageId || !(await canAccessPage(facebookPageId, req)))
+      return res.status(403).json({ error: 'Access denied' });
+
     const topic = await AiTopic.findById(req.params.topicId);
     if (!topic) return handleError(res, new Error('Topic not found'), 404);
 
@@ -119,20 +139,37 @@ router.delete('/topic/:topicId', async (req, res) => {
    POST GENERATION
 ========================================================= */
 
-// Generate immediately
+const generatingTopics = new Set();
+
 router.post('/topic/:topicId/generate-now', async (req, res) => {
   try {
-    const posts = await generatePostsForTopic(req.params.topicId, { immediate: true });
-    const topic = await AiTopic.findById(req.params.topicId);
+    const facebookPageId = await getFacebookPageIdFromTopic(req.params.topicId);
+    if (!facebookPageId || !(await canAccessPage(facebookPageId, req)))
+      return res.status(403).json({ error: 'Access denied' });
 
+    if (generatingTopics.has(req.params.topicId))
+      return res.status(429).json({ error: 'Generation already in progress for this topic' });
+
+    generatingTopics.add(req.params.topicId);
+    const posts = await generatePostsForTopic(req.params.topicId, { immediate: true });
+    generatingTopics.delete(req.params.topicId);
+
+    const topic = await AiTopic.findById(req.params.topicId);
     await logAction({ pageId: topic.pageId, action: 'POSTS_GENERATED', message: `${posts.length} posts generated` });
     res.json(posts);
-  } catch (err) { handleError(res, err); }
+  } catch (err) {
+    generatingTopics.delete(req.params.topicId);
+    handleError(res, err);
+  }
 });
 
 // Delete all topic posts
 router.delete('/topic/:topicId/posts', async (req, res) => {
   try {
+    const facebookPageId = await getFacebookPageIdFromTopic(req.params.topicId);
+    if (!facebookPageId || !(await canAccessPage(facebookPageId, req)))
+      return res.status(403).json({ error: 'Access denied' });
+
     await deleteTopicPosts(req.params.topicId);
     res.json({ success: true });
   } catch (err) { handleError(res, err); }
@@ -142,23 +179,25 @@ router.delete('/topic/:topicId/posts', async (req, res) => {
    SCHEDULED POSTS
 ========================================================= */
 
-// Get upcoming posts
 router.get('/page/:pageId/upcoming-posts', async (req, res) => {
   try {
+    if (!(await canAccessPage(req.params.pageId, req)))
+      return res.status(403).json({ error: 'Access denied' });
+
     const posts = await AiScheduledPost.find({ pageId: req.params.pageId })
       .sort({ scheduledTime: 1 })
       .limit(100)
       .populate('topicId');
-
     safeJson(res, posts);
   } catch (err) { handleError(res, err); }
 });
 
-// Retry post
 router.post('/post/:postId/retry', async (req, res) => {
   try {
     const post = await AiScheduledPost.findById(req.params.postId);
     if (!post) return handleError(res, new Error('Post not found'), 404);
+    if (!(await canAccessPage(post.pageId, req)))
+      return res.status(403).json({ error: 'Access denied' });
 
     post.status = 'PENDING';
     post.retryCount = 0;
@@ -175,17 +214,22 @@ router.post('/post/:postId/retry', async (req, res) => {
 
 router.get('/page/:pageId/logs', async (req, res) => {
   try {
+    if (!(await canAccessPage(req.params.pageId, req)))
+      return res.status(403).json({ error: 'Access denied' });
+
     const logs = await AiLog.find({ pageId: req.params.pageId })
       .sort({ createdAt: -1 })
       .limit(20)
       .populate('postId');
-
     safeJson(res, logs);
   } catch (err) { handleError(res, err); }
 });
 
 router.delete('/page/:pageId/logs', async (req, res) => {
   try {
+    if (!(await canAccessPage(req.params.pageId, req)))
+      return res.status(403).json({ error: 'Access denied' });
+
     await AiLog.deleteMany({ pageId: req.params.pageId });
     res.json({ success: true });
   } catch (err) { handleError(res, err); }
@@ -195,11 +239,12 @@ router.delete('/page/:pageId/logs', async (req, res) => {
    INDIVIDUAL POSTS
 ========================================================= */
 
-// Post now
 router.post('/post/:postId/post-now', async (req, res) => {
   try {
     const post = await AiScheduledPost.findById(req.params.postId);
     if (!post) return handleError(res, new Error('Post not found'), 404);
+    if (!(await canAccessPage(post.pageId, req)))
+      return res.status(403).json({ error: 'Access denied' });
 
     post.status = 'POSTED';
     post.postedAt = new Date();
@@ -210,11 +255,12 @@ router.post('/post/:postId/post-now', async (req, res) => {
   } catch (err) { handleError(res, err); }
 });
 
-// Delete post
 router.delete('/post/:postId', async (req, res) => {
   try {
     const post = await AiScheduledPost.findById(req.params.postId);
     if (!post) return handleError(res, new Error('Post not found'), 404);
+    if (!(await canAccessPage(post.pageId, req)))
+      return res.status(403).json({ error: 'Access denied' });
 
     await post.deleteOne();
     await logAction({ pageId: post.pageId, postId: post._id, action: 'POST_DELETED', message: 'Post deleted manually' });
@@ -222,24 +268,27 @@ router.delete('/post/:postId', async (req, res) => {
   } catch (err) { handleError(res, err); }
 });
 
-// Edit post
 router.put('/post/:postId', async (req, res) => {
   try {
     const { text, mediaUrl } = req.body;
-    const post = await AiScheduledPost.findByIdAndUpdate(req.params.postId, { text, mediaUrl }, { new: true });
+    const post = await AiScheduledPost.findById(req.params.postId);
     if (!post) return handleError(res, new Error('Post not found'), 404);
+    if (!(await canAccessPage(post.pageId, req)))
+      return res.status(403).json({ error: 'Access denied' });
 
+    const updated = await AiScheduledPost.findByIdAndUpdate(req.params.postId, { text, mediaUrl }, { new: true });
     await logAction({ pageId: post.pageId, postId: post._id, action: 'POST_EDITED', message: 'Post edited manually' });
-    res.json(post);
+    res.json(updated);
   } catch (err) { handleError(res, err); }
 });
 
-// Set content type
 router.patch('/post/:postId/content-type', async (req, res) => {
   try {
     const { contentType } = req.body;
     const post = await AiScheduledPost.findById(req.params.postId);
     if (!post) return handleError(res, new Error('Post not found'), 404);
+    if (!(await canAccessPage(post.pageId, req)))
+      return res.status(403).json({ error: 'Access denied' });
 
     post.contentType = contentType;
     await post.save();
@@ -248,57 +297,58 @@ router.patch('/post/:postId/content-type', async (req, res) => {
     res.json({ success: true });
   } catch (err) { handleError(res, err); }
 });
+
 /* =========================================================
    AUTO-GENERATION TOGGLE
 ========================================================= */
 
-// Get auto generation state per page
 router.get('/page/:pageId/auto-generation', async (req, res) => {
   try {
+    if (!(await canAccessPage(req.params.pageId, req)))
+      return res.status(403).json({ error: 'Access denied' });
+
     const page = await Page.findOne({ pageId: req.params.pageId });
     if (!page) return handleError(res, new Error('Page not found'), 404);
     res.json({ enabled: page.autoGenerationEnabled });
-  } catch (err) {
-    handleError(res, err);
-  }
+  } catch (err) { handleError(res, err); }
 });
 
-// Toggle auto generation per page
 router.post('/page/:pageId/auto-generation', async (req, res) => {
   try {
-    const { enabled } = req.body;
+    if (!(await canAccessPage(req.params.pageId, req)))
+      return res.status(403).json({ error: 'Access denied' });
 
+    const { enabled } = req.body;
     const page = await Page.findOneAndUpdate(
       { pageId: req.params.pageId },
       { autoGenerationEnabled: !!enabled },
       { new: true }
     );
-
     if (!page) return handleError(res, new Error('Page not found'), 404);
-
     res.json({ enabled: page.autoGenerationEnabled });
-  } catch (err) {
-    handleError(res, err);
-  }
+  } catch (err) { handleError(res, err); }
 });
 
 /* =========================================================
    PAGE PROFILE CRUD
 ========================================================= */
 
-// Get PageProfile for a page
 router.get('/page/:pageId/profile', async (req, res) => {
   try {
+    if (!(await canAccessPage(req.params.pageId, req)))
+      return res.status(403).json({ error: 'Access denied' });
+
     const profile = await PageProfile.findOne({ pageId: req.params.pageId });
     safeJson(res, profile);
   } catch (err) { handleError(res, err); }
 });
 
-// Create or update profile
 router.post('/page/:pageId/profile', async (req, res) => {
   try {
+    if (!(await canAccessPage(req.params.pageId, req)))
+      return res.status(403).json({ error: 'Access denied' });
+
     const { name, tone, writingStyle, voice, audienceTone, audienceAge, audienceInterest, extraNotes } = req.body;
-    
     const profile = await PageProfile.findOneAndUpdate(
       { pageId: req.params.pageId },
       { name, tone, writingStyle, voice, audienceTone, audienceAge, audienceInterest, extraNotes },
@@ -306,14 +356,15 @@ router.post('/page/:pageId/profile', async (req, res) => {
     );
 
     await logAction({ pageId: req.params.pageId, action: 'PROFILE_UPDATED', message: 'Page profile saved/updated' });
-
     res.json(profile);
   } catch (err) { handleError(res, err); }
 });
 
-// Delete profile
 router.delete('/page/:pageId/profile', async (req, res) => {
   try {
+    if (!(await canAccessPage(req.params.pageId, req)))
+      return res.status(403).json({ error: 'Access denied' });
+
     await PageProfile.deleteOne({ pageId: req.params.pageId });
     await logAction({ pageId: req.params.pageId, action: 'PROFILE_DELETED', message: 'Page profile deleted' });
     res.json({ success: true });
@@ -321,4 +372,3 @@ router.delete('/page/:pageId/profile', async (req, res) => {
 });
 
 module.exports = router;
-
