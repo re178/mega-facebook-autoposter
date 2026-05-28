@@ -24,7 +24,18 @@ const PORT = process.env.PORT || 10000;
 const isProduction = process.env.NODE_ENV === 'production';
 
 // ---------------- SECURITY HEADERS ----------------
-app.use(helmet());
+app.use(helmet({
+    contentSecurityPolicy: {
+        directives: {
+            defaultSrc: ["'self'"],
+            scriptSrc: ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net"],
+            scriptSrcAttr: ["'unsafe-inline'"],
+            styleSrc: ["'self'", "'unsafe-inline'"],
+            imgSrc: ["'self'", "data:", "https://res.cloudinary.com", "https://*.cloudinary.com"],
+            connectSrc: ["'self'", "https://graph.facebook.com", "https://api.openai.com"],
+        },
+    },
+}));
 
 // ---------------- CORS ----------------
 app.use(
@@ -42,7 +53,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use(
     session({
         name: 'fbposter.sid',
-        secret: process.env.SESSION_SECRET, // MUST be set in Render
+        secret: process.env.SESSION_SECRET,
         resave: false,
         saveUninitialized: false,
         rolling: true,
@@ -53,7 +64,7 @@ app.use(
             httpOnly: true,
             secure: isProduction,
             sameSite: 'lax',
-            maxAge: 2 * 60 * 1000 // 2 minutes
+            maxAge: 2 * 60 * 60 * 1000 // 2 hours (increased from 2 minutes)
         }
     })
 );
@@ -61,7 +72,7 @@ app.use(
 // ---------------- RATE LIMITING ----------------
 const apiLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
-    max: 100,
+    max: 200,
     message: { error: 'Too many requests' }
 });
 
@@ -73,11 +84,14 @@ const authLimiter = rateLimit({
 
 app.use('/api', apiLimiter);
 app.post('/login', authLimiter);
+app.post('/api/auth/signup', authLimiter);
+app.post('/api/auth/forgot-password', authLimiter);
+app.post('/api/auth/reset-password', authLimiter);
 
 // ---------------- CSRF ----------------
 const csrfProtection = csrf({ cookie: false });
 
-const csrfExcludedRoutes = ['/login', '/webhook'];
+const csrfExcludedRoutes = ['/login', '/webhook', '/api/auth/signup', '/api/auth/forgot-password', '/api/auth/reset-password'];
 
 app.use((req, res, next) => {
     if (csrfExcludedRoutes.includes(req.path)) return next();
@@ -112,6 +126,7 @@ const webhookRoutes = require('./routes/webhookRoutes');
 const aiRoutes = require('./routes/aiSchedulerRoutes');
 const adminRoutes = require('./routes/adminRoutes');
 const userMessagesRoutes = require('./routes/userMessages');
+const authRoutes = require('./routes/authRoutes');  // NEW
 
 app.use('/', webhookRoutes);
 app.use('/api/dashboard', requireLogin, dashboardRoutes);
@@ -119,6 +134,7 @@ app.use('/api/dashboard', requireLogin, pageFeaturesRoutes);
 app.use('/api/ai', requireLogin, aiRoutes);
 app.use('/api/admin', requireLogin, adminRoutes);
 app.use('/api/user/messages', requireLogin, userMessagesRoutes);
+app.use('/api/auth', authRoutes);  // NEW - public auth routes (no login required)
 
 // ---------------- STATIC FILES ----------------
 app.use(express.static(path.join(__dirname, 'public')));
@@ -147,6 +163,38 @@ app.get('/login', (req, res) => {
     res.sendFile(path.join(__dirname, 'public/login.html'));
 });
 
+// NEW PAGES
+app.get('/signup', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public/signup.html'));
+});
+app.get('/forgot-password', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public/forgot-password.html'));
+});
+app.get('/reset-password', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public/reset-password.html'));
+});
+app.get('/verify-email', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public/verify-email.html'));
+});
+
+// LEGAL PAGES
+app.get('/privacy', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public/privacy.html'));
+});
+app.get('/terms', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public/terms.html'));
+});
+app.get('/cookies', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public/cookies.html'));
+});
+app.get('/data-deletion', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public/data-deletion.html'));
+});
+app.get('/community-guidelines', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public/community-guidelines.html'));
+});
+
+// PROTECTED PAGES
 app.get('/index.html', requireLogin, renderWithCsrf(path.join(__dirname, 'public/index.html')));
 app.get('/pages', requireLogin, renderWithCsrf(path.join(__dirname, 'public/page.html')));
 app.get('/schedule', requireLogin, renderWithCsrf(path.join(__dirname, 'public/schedule.html')));
@@ -164,6 +212,11 @@ app.post('/login', async (req, res) => {
 
         if (!user || !user.isActive) {
             return res.status(401).json({ error: 'Invalid account' });
+        }
+
+        // CHECK IF USER IS VERIFIED (for new signups, but allow old users)
+        if (user.createdAt > new Date('2025-01-01') && !user.isVerified) {
+            return res.status(401).json({ error: 'Please verify your email before logging in. Check your inbox.' });
         }
 
         const match = await bcrypt.compare(password, user.password);
