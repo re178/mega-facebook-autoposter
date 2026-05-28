@@ -1,4 +1,4 @@
-// Login.js – Corrected to handle JSON redirect
+// Login.js – Complete with error handling and redirects
 const emailInput = document.getElementById('email');
 const passwordInput = document.getElementById('password');
 const loginBtn = document.getElementById('loginBtn');
@@ -24,6 +24,9 @@ toggleButton();
 if (loginForm) {
     loginForm.addEventListener('submit', async (e) => {
         e.preventDefault();
+        
+        // Hide any previous error
+        errorDiv.style.display = 'none';
         errorDiv.textContent = '';
         
         const email = emailInput.value.trim();
@@ -31,10 +34,13 @@ if (loginForm) {
         
         if (!email || !password) {
             errorDiv.textContent = 'Please fill all fields.';
+            errorDiv.style.display = 'block';
             return;
         }
+        
         if (!isValidEmail(email)) {
             errorDiv.textContent = 'Invalid email format.';
+            errorDiv.style.display = 'block';
             return;
         }
         
@@ -56,23 +62,25 @@ if (loginForm) {
             const data = await res.json();
             
             if (res.ok && data.success) {
-                // Redirect to the URL provided by the backend
+                // Redirect to dashboard
                 window.location.href = data.redirect || '/index.html';
             } else {
                 errorDiv.textContent = data.error || 'Login failed. Please try again.';
+                errorDiv.style.display = 'block';
                 loginBtn.disabled = false;
                 loginBtn.textContent = 'Login';
             }
         } catch (err) {
             console.error('Login error:', err);
             errorDiv.textContent = 'Network error. Please try again.';
+            errorDiv.style.display = 'block';
             loginBtn.disabled = false;
             loginBtn.textContent = 'Login';
         }
     });
 }
 
-// Optional: If already logged in, redirect to dashboard
+// If already logged in, redirect to dashboard
 (async function checkSession() {
     try {
         const res = await fetch('/api/session', { credentials: 'include' });
@@ -80,5 +88,7 @@ if (loginForm) {
         if (session.loggedIn) {
             window.location.href = '/index.html';
         }
-    } catch(e) {}
+    } catch(e) {
+        console.log('Session check skipped');
+    }
 })();
