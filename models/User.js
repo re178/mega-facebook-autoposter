@@ -1,8 +1,12 @@
+```js
 const mongoose = require('mongoose');
 
 const UserSchema = new mongoose.Schema({
 
-  // 🔐 BASIC AUTH
+  /* =====================================================
+     BASIC AUTH
+  ===================================================== */
+
   email: {
     type: String,
     required: true,
@@ -16,20 +20,81 @@ const UserSchema = new mongoose.Schema({
     required: true
   },
 
-  // 👤 ROLES
+  /* =====================================================
+     EMAIL VERIFICATION
+  ===================================================== */
+
+  isVerified: {
+    type: Boolean,
+    default: false
+  },
+
+  verificationToken: {
+    type: String,
+    default: null
+  },
+
+  verificationExpires: {
+    type: Date,
+    default: null
+  },
+
+  /* =====================================================
+     PASSWORD RESET
+  ===================================================== */
+
+  resetPasswordToken: {
+    type: String,
+    default: null
+  },
+
+  resetPasswordExpires: {
+    type: Date,
+    default: null
+  },
+
+  /* =====================================================
+     USER ROLE
+  ===================================================== */
+
   role: {
     type: String,
     enum: ['admin', 'moderator', 'user'],
     default: 'user'
   },
 
-  // 📱 OPTIONAL (for M-PESA later)
+  /* =====================================================
+     PHONE
+  ===================================================== */
+
   phone: {
     type: String,
     default: null
   },
 
-  // 💳 SUBSCRIPTION SYSTEM (READY BUT SAFE)
+  /* =====================================================
+     LEGAL AGREEMENTS
+  ===================================================== */
+
+  acceptedTerms: {
+    type: Boolean,
+    default: false
+  },
+
+  acceptedPrivacy: {
+    type: Boolean,
+    default: false
+  },
+
+  acceptedTermsAt: {
+    type: Date,
+    default: null
+  },
+
+  /* =====================================================
+     SUBSCRIPTION
+  ===================================================== */
+
   subscription: {
     status: {
       type: String,
@@ -46,33 +111,80 @@ const UserSchema = new mongoose.Schema({
     expiryDate: Date
   },
 
-  // 📊 USAGE TRACKING (for limits later)
+  /* =====================================================
+     USAGE TRACKING
+  ===================================================== */
+
   usage: {
     postsToday: {
       type: Number,
       default: 0
     },
+
     lastPostDate: Date
   },
 
-  // 🔐 ACCOUNT STATUS
+  /* =====================================================
+     ACCOUNT STATUS
+  ===================================================== */
+
   isActive: {
     type: Boolean,
     default: true
   },
 
-  // 🔒 SECURITY (future-proof)
+  isSuspended: {
+    type: Boolean,
+    default: false
+  },
+
+  suspensionReason: {
+    type: String,
+    default: null
+  },
+
+  /* =====================================================
+     SECURITY
+  ===================================================== */
+
   lastLogin: Date,
 
-  // 🕒 TIMESTAMP
+  lastLoginIP: {
+    type: String,
+    default: null
+  },
+
+  loginHistory: [
+    {
+      ip: String,
+      userAgent: String,
+      date: {
+        type: Date,
+        default: Date.now
+      }
+    }
+  ],
+
+  /* =====================================================
+     PROFILE
+  ===================================================== */
+
+  fullName: {
+    type: String,
+    default: ''
+  },
+
+  avatar: {
+    type: String,
+    default: null
+  },
+
+  /* =====================================================
+     TIMESTAMPS
+  ===================================================== */
+
   createdAt: {
     type: Date,
     default: Date.now
-  }
-
-});
-
-// 🔍 INDEXES (SAFE)
-UserSchema.index({ email: 1 });
-
-module.exports = mongoose.model('User', UserSchema);
+ 
+```
