@@ -31,9 +31,9 @@
     "moment-timezone": "^0.5.45",
     "mongoose": "^7.6.3",
     "node-vibrant": "^4.0.3",
+    "nodemailer": "^6.9.14",
     "openai": "^4.10.0",
     "p-retry": "^5.1.0",
     "stability-client": "^1.0.0"
-  },
-  "optionalDependencies": {}
+  }
 }
