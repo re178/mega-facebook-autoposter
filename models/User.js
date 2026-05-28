@@ -1,4 +1,3 @@
-
 const mongoose = require('mongoose');
 
 const UserSchema = new mongoose.Schema({
@@ -166,6 +165,20 @@ const UserSchema = new mongoose.Schema({
   ],
 
   /* =====================================================
+     ANTI-BRUTE FORCE (NEW)
+  ===================================================== */
+
+  failedLoginAttempts: {
+    type: Number,
+    default: 0
+  },
+
+  lockedUntil: {
+    type: Date,
+    default: null
+  },
+
+  /* =====================================================
      PROFILE
   ===================================================== */
 
@@ -186,5 +199,18 @@ const UserSchema = new mongoose.Schema({
   createdAt: {
     type: Date,
     default: Date.now
- 
-```
+  },
+
+  updatedAt: {
+    type: Date,
+    default: Date.now
+  }
+});
+
+// Update the updatedAt field on save
+UserSchema.pre('save', function(next) {
+  this.updatedAt = Date.now();
+  next();
+});
+
+module.exports = mongoose.model('User', UserSchema);
