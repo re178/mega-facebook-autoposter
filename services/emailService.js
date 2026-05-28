@@ -7,7 +7,7 @@ const axios = require('axios');
    CONFIG
 ========================================================= */
 
-const APP_NAME = 'VOXTRAAPP';
+const APP_NAME = 'VIRALOOP';
 const APP_URL = process.env.APP_URL || 'https://voxtraapp.com';
 const SUPPORT_EMAIL = process.env.SUPPORT_EMAIL || 'support@voxtraapp.com';
 
