@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="csrf-token" content="{{ csrfToken }}">
+    <title>Sign Up - VIRALOOP</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(180deg, #020617, #0b1220);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+        .signup-card {
+            background: rgba(17, 24, 39, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 24px;
+            padding: 40px;
+            width: 100%;
+            max-width: 480px;
+            border: 1px solid #2a2f3b;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+        }
+        h1 {
+            color: #22c55e;
+            text-align: center;
+            margin-bottom: 8px;
+            font-size: 28px;
+        }
+        .subtitle {
+            text-align: center;
+            color: #9ca3af;
+            margin-bottom: 32px;
+            font-size: 14px;
+        }
+        input {
+            width: 100%;
+            padding: 14px 16px;
+            margin-bottom: 16px;
+            border-radius: 12px;
+            border: 1px solid #374151;
+            background: #1f2937;
+            color: #fff;
+            font-size: 14px;
+            transition: all 0.2s;
+        }
+        input:focus {
+            outline: none;
+            border-color: #22c55e;
+            box-shadow: 0 0 0 3px rgba(34,197,94,0.1);
+        }
+        .checkbox {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 24px;
+        }
+        .checkbox input {
+            width: auto;
+            margin-bottom: 0;
+        }
+        .checkbox label {
+            color: #9ca3af;
+            font-size: 13px;
+        }
+        .checkbox a {
+            color: #22c55e;
+            text-decoration: none;
+        }
+        .checkbox a:hover {
+            text-decoration: underline;
+        }
+        button {
+            width: 100%;
+            padding: 14px;
+            border-radius: 12px;
+            border: none;
+            background: #22c55e;
+            color: white;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        button:hover:not(:disabled) {
+            background: #16a34a;
+            transform: translateY(-1px);
+        }
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        .message {
+            padding: 12px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            font-size: 14px;
+            text-align: center;
+        }
+        .error {
+            background: rgba(239, 68, 68, 0.1);
+            border: 1px solid #ef4444;
+            color: #fca5a5;
+        }
+        .success {
+            background: rgba(34, 197, 94, 0.1);
+            border: 1px solid #22c55e;
+            color: #86efac;
+        }
+        .login-link {
+            text-align: center;
+            margin-top: 24px;
+            font-size: 14px;
+            color: #6c757d;
+        }
+        .login-link a {
+            color: #22c55e;
+            text-decoration: none;
+        }
+        .footer {
+            text-align: center;
+            margin-top: 32px;
+            padding-top: 20px;
+            border-top: 1px solid #2a2f3b;
+            font-size: 11px;
+            color: #4b5563;
+        }
+        .footer a {
+            color: #6b7280;
+            text-decoration: none;
+            margin: 0 8px;
+        }
+        .password-hint {
+            font-size: 11px;
+            color: #6b7280;
+            margin-top: -12px;
+            margin-bottom: 16px;
+        }
+    </style>
+</head>
+<body>
+    <div class="signup-card">
+        <h1>Create Account</h1>
+        <div class="subtitle">Start automating your social media</div>
+        
+        <div id="messageContainer"></div>
+        
+        <form id="signupForm">
+            <input type="text" id="name" placeholder="Full Name (optional)" autocomplete="name">
+            <input type="email" id="email" placeholder="Email Address" required autocomplete="email">
+            <input type="password" id="password" placeholder="Password (min 6 characters)" required autocomplete="new-password">
+            <div class="password-hint">Minimum 6 characters - use a strong password</div>
+            
+            <div class="checkbox">
+                <input type="checkbox" id="acceptTerms" required>
+                <label>
+                    I agree to the <a href="/terms" target="_blank">Terms of Service</a> 
+                    and <a href="/privacy" target="_blank">Privacy Policy</a>
+                </label>
+            </div>
+            
+            <button type="submit" id="signupBtn">Create Account</button>
+        </form>
+        
+        <div class="login-link">
+            Already have an account? <a href="/login">Log in</a>
+        </div>
+        
+        <div class="footer">
+            <a href="/privacy">Privacy</a> | 
+            <a href="/terms">Terms</a> | 
+            <a href="/cookies">Cookies</a>
+            <p style="margin-top: 12px;">&copy; 2025 VIRALOOP. All rights reserved.</p>
+        </div>
+    </div>
+    
+    <script>
+        const form = document.getElementById('signupForm');
+        const signupBtn = document.getElementById('signupBtn');
+        const messageContainer = document.getElementById('messageContainer');
+        
+        function showMessage(message, isError = true) {
+            messageContainer.innerHTML = `<div class="message ${isError ? 'error' : 'success'}">${message}</div>`;
+            setTimeout(() => {
+                if (messageContainer.firstChild) messageContainer.firstChild.remove();
+            }, 5000);
+        }
+        
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const name = document.getElementById('name').value;
+            const email = document.getElementById('email').value;
+            const password = document.getElementById('password').value;
+            const acceptTerms = document.getElementById('acceptTerms').checked;
+            
+            if (!email || !password) {
+                showMessage('Email and password are required');
+                return;
+            }
+            
+            if (password.length < 6) {
+                showMessage('Password must be at least 6 characters');
+                return;
+            }
+            
+            if (!acceptTerms) {
+                showMessage('You must accept the Terms and Privacy Policy');
+                return;
+            }
+            
+            signupBtn.disabled = true;
+            signupBtn.textContent = 'Creating Account...';
+            
+            try {
+                const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
+                const res = await fetch('/api/auth/signup', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...(csrfToken ? { 'X-CSRF-Token': csrfToken } : {})
+                    },
+                    credentials: 'include',
+                    body: JSON.stringify({ name, email, password, acceptTerms })
+                });
+                
+                const data = await res.json();
+                
+                if (res.ok && data.success) {
+                    showMessage(data.message || 'Account created! Please check your email to verify your account.', false);
+                    form.reset();
+                    // Redirect after 3 seconds
+                    setTimeout(() => {
+                        window.location.href = '/login?registered=true';
+                    }, 3000);
+                } else {
+                    showMessage(data.error || 'Signup failed. Please try again.');
+                }
+            } catch (err) {
+                showMessage('Network error. Please try again.');
+            } finally {
+                signupBtn.disabled = false;
+                signupBtn.textContent = 'Create Account';
+            }
+        });
+    </script>
+</body>
+</html>
