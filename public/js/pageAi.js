@@ -1,4 +1,4 @@
-// pageAi.js – Fixed syntax error, uses global apiFetch
+// pageAi.js – Complete working version with Page Profile and working delete buttons
 (function() {
     // Helper: escape HTML
     function escapeHtml(str) {
@@ -23,7 +23,7 @@
     const els = {
         topicSelect: document.getElementById('ai-topic-select'),
         editBtn: document.getElementById('ai-edit-topic'),
-        deleteBtn: document.getElementById('ai-delete-topic'),
+        deleteTopicBtn: document.getElementById('ai-delete-topic'),
         topicName: document.getElementById('ai-topic-name'),
         postsPerDay: document.getElementById('ai-posts-per-day'),
         timesContainer: document.getElementById('ai-times-container'),
@@ -42,11 +42,28 @@
         autoGenToggle: document.getElementById('autoGenToggle')
     };
 
+    // Page Profile elements
+    const profileEls = {
+        name: document.getElementById('profile-name'),
+        tone: document.getElementById('profile-tone'),
+        writingStyle: document.getElementById('profile-writing-style'),
+        voice: document.getElementById('profile-voice'),
+        audienceTone: document.getElementById('profile-audience-tone'),
+        audienceAge: document.getElementById('profile-audience-age'),
+        audienceInterest: document.getElementById('profile-audience-interest'),
+        extraNotes: document.getElementById('profile-extra-notes'),
+        saveBtn: document.getElementById('profile-save'),
+        deleteBtn: document.getElementById('profile-delete')
+    };
+
     // Use global apiFetch if available
     const apiFetch = window.apiFetch || (async (url, opts) => {
         const res = await fetch(url, { ...opts, credentials: 'include' });
         if (res.status === 401) window.location.href = '/login';
-        if (!res.ok) throw new Error(await res.text());
+        if (!res.ok) {
+            const errText = await res.text();
+            throw new Error(errText || `HTTP ${res.status}`);
+        }
         return res.json();
     });
 
@@ -54,11 +71,93 @@
     let pollTimer = null;
 
     function log(msg, type = 'info') {
+        if (!els.monitor) return;
         const color = type === 'error' ? '#ff4c4c' : type === 'warn' ? '#ffaa00' : '#00ff99';
         const line = document.createElement('div');
         line.innerHTML = `<span style="color:${color}">[${new Date().toLocaleTimeString()}]</span> ${escapeHtml(msg)}`;
         els.monitor.appendChild(line);
         els.monitor.scrollTop = els.monitor.scrollHeight;
+    }
+
+    // ========== PAGE PROFILE ==========
+    async function loadProfile() {
+        try {
+            const data = await apiFetch(`/api/ai/page/${pageId}/profile`);
+            console.log('Profile data:', data);
+            if (data && Object.keys(data).length > 0) {
+                if (profileEls.name) profileEls.name.value = data.name || '';
+                if (profileEls.tone) profileEls.tone.value = data.tone || 'friendly';
+                if (profileEls.writingStyle) profileEls.writingStyle.value = data.writingStyle || 'conversational';
+                if (profileEls.voice) profileEls.voice.value = data.voice || '';
+                if (profileEls.audienceTone) profileEls.audienceTone.value = data.audienceTone || '';
+                if (profileEls.audienceAge) profileEls.audienceAge.value = data.audienceAge || '';
+                if (profileEls.audienceInterest) profileEls.audienceInterest.value = (data.audienceInterest || []).join(', ');
+                if (profileEls.extraNotes) profileEls.extraNotes.value = data.extraNotes || '';
+                log('📄 Page profile loaded');
+            } else {
+                // Clear form
+                if (profileEls.name) profileEls.name.value = '';
+                if (profileEls.tone) profileEls.tone.value = 'friendly';
+                if (profileEls.writingStyle) profileEls.writingStyle.value = 'conversational';
+                if (profileEls.voice) profileEls.voice.value = '';
+                if (profileEls.audienceTone) profileEls.audienceTone.value = '';
+                if (profileEls.audienceAge) profileEls.audienceAge.value = '';
+                if (profileEls.audienceInterest) profileEls.audienceInterest.value = '';
+                if (profileEls.extraNotes) profileEls.extraNotes.value = '';
+                log('No existing profile', 'warn');
+            }
+        } catch (err) {
+            console.error('Profile load error:', err);
+            log('❌ Failed to load page profile', 'error');
+        }
+    }
+
+    if (profileEls.saveBtn) {
+        profileEls.saveBtn.onclick = async () => {
+            try {
+                const payload = {
+                    name: profileEls.name?.value || '',
+                    tone: profileEls.tone?.value || 'friendly',
+                    writingStyle: profileEls.writingStyle?.value || 'conversational',
+                    voice: profileEls.voice?.value || '',
+                    audienceTone: profileEls.audienceTone?.value || '',
+                    audienceAge: profileEls.audienceAge?.value || '',
+                    audienceInterest: (profileEls.audienceInterest?.value || '').split(',').map(i => i.trim()).filter(i => i),
+                    extraNotes: profileEls.extraNotes?.value || ''
+                };
+                await apiFetch(`/api/ai/page/${pageId}/profile`, {
+                    method: 'POST',
+                    body: JSON.stringify(payload)
+                });
+                log('💾 Page profile saved');
+                alert('Profile saved successfully!');
+            } catch (err) {
+                log('❌ Failed saving page profile', 'error');
+                alert('Error saving profile: ' + err.message);
+            }
+        };
+    }
+
+    if (profileEls.deleteBtn) {
+        profileEls.deleteBtn.onclick = async () => {
+            if (!confirm('Are you sure you want to delete the page profile?')) return;
+            try {
+                await apiFetch(`/api/ai/page/${pageId}/profile`, { method: 'DELETE' });
+                log('🗑 Page profile deleted');
+                // Clear form
+                if (profileEls.name) profileEls.name.value = '';
+                if (profileEls.tone) profileEls.tone.value = 'friendly';
+                if (profileEls.writingStyle) profileEls.writingStyle.value = 'conversational';
+                if (profileEls.voice) profileEls.voice.value = '';
+                if (profileEls.audienceTone) profileEls.audienceTone.value = '';
+                if (profileEls.audienceAge) profileEls.audienceAge.value = '';
+                if (profileEls.audienceInterest) profileEls.audienceInterest.value = '';
+                if (profileEls.extraNotes) profileEls.extraNotes.value = '';
+                alert('Profile deleted');
+            } catch (err) {
+                log('❌ Failed deleting profile', 'error');
+            }
+        };
     }
 
     // Mutual exclusivity for media/video
@@ -208,6 +307,32 @@
         };
     }
 
+    // Delete topic
+    if (els.deleteTopicBtn) {
+        els.deleteTopicBtn.onclick = async () => {
+            if (!currentTopicId) return log('❌ Select topic first', 'error');
+            if (!confirm('Delete entire topic and ALL its scheduled posts? This cannot be undone.')) return;
+            try {
+                await apiFetch(`/api/ai/topic/${currentTopicId}`, { method: 'DELETE' });
+                log('🗑 Topic deleted');
+                currentTopicId = null;
+                els.topicName.value = '';
+                els.postsPerDay.value = '1';
+                els.timesContainer.innerHTML = '';
+                els.startDate.value = '';
+                els.endDate.value = '';
+                els.repeatType.value = 'daily';
+                els.includeMedia.checked = false;
+                els.includeVideo.checked = false;
+                loadTopics();
+                loadUpcomingPosts();
+                loadLogs();
+            } catch (err) {
+                log('❌ Failed deleting topic', 'error');
+            }
+        };
+    }
+
     // Generate posts
     if (els.generateBtn) {
         els.generateBtn.onclick = async () => {
@@ -220,19 +345,23 @@
                 clearInterval(pollTimer);
                 pollTimer = setInterval(async () => {
                     attempts++;
-                    const posts = await apiFetch(`/api/ai/page/${pageId}/upcoming-posts`);
-                    const count = posts.filter(p => p.topicId?._id === currentTopicId).length;
-                    if (count >= Number(els.postsPerDay.value)) {
-                        clearInterval(pollTimer);
-                        log('🚀 Posts generated');
-                        loadUpcomingPosts();
-                        loadLogs();
-                        els.generateBtn.disabled = false;
-                    }
-                    if (attempts > 20) {
-                        clearInterval(pollTimer);
-                        log('⚠️ Generation timeout', 'warn');
-                        els.generateBtn.disabled = false;
+                    try {
+                        const posts = await apiFetch(`/api/ai/page/${pageId}/upcoming-posts`);
+                        const count = posts.filter(p => p.topicId?._id === currentTopicId).length;
+                        if (count >= Number(els.postsPerDay.value)) {
+                            clearInterval(pollTimer);
+                            log('🚀 Posts generated');
+                            loadUpcomingPosts();
+                            loadLogs();
+                            els.generateBtn.disabled = false;
+                        }
+                        if (attempts > 20) {
+                            clearInterval(pollTimer);
+                            log('⚠️ Generation timeout', 'warn');
+                            els.generateBtn.disabled = false;
+                        }
+                    } catch (err) {
+                        console.error('Poll error:', err);
                     }
                 }, 2000);
             } catch (err) {
@@ -242,12 +371,16 @@
         };
     }
 
-    // Load upcoming posts
+    // Load upcoming posts with WORKING delete buttons
     async function loadUpcomingPosts() {
         if (!els.postsTable) return;
         try {
             const posts = await apiFetch(`/api/ai/page/${pageId}/upcoming-posts`);
             els.postsTable.innerHTML = '';
+            if (posts.length === 0) {
+                els.postsTable.innerHTML = '<tr><td colspan="6">No scheduled posts</td></tr>';
+                return;
+            }
             posts.forEach(p => {
                 let mediaHtml = '—';
                 if (p.mediaUrl) {
@@ -264,42 +397,72 @@
                     <td>${mediaHtml}</td>
                     <td>${escapeHtml(p.status)}</td>
                     <td>
-                        <button class="post-now" data-id="${p._id}">Post</button>
-                        <button class="edit-post" data-id="${p._id}">Edit</button>
-                        <button class="delete-post" data-id="${p._id}">Delete</button>
+                        <button class="post-now-btn" data-id="${p._id}">▶ Post</button>
+                        <button class="edit-post-btn" data-id="${p._id}">✏️ Edit</button>
+                        <button class="delete-post-btn" data-id="${p._id}">🗑️ Delete</button>
                     </td>
                 `;
                 els.postsTable.appendChild(tr);
             });
-            // Event delegation for buttons
-            els.postsTable.querySelectorAll('.post-now').forEach(btn => {
+            
+            // Post Now buttons
+            els.postsTable.querySelectorAll('.post-now-btn').forEach(btn => {
                 btn.onclick = async () => {
-                    await apiFetch(`/api/ai/post/${btn.dataset.id}/post-now`, { method: 'POST' });
-                    loadUpcomingPosts();
-                };
-            });
-            els.postsTable.querySelectorAll('.edit-post').forEach(btn => {
-                btn.onclick = async () => {
-                    const text = prompt('Edit post text');
-                    if (text) {
-                        await apiFetch(`/api/ai/post/${btn.dataset.id}`, {
-                            method: 'PUT',
-                            body: JSON.stringify({ text })
-                        });
+                    const id = btn.dataset.id;
+                    try {
+                        await apiFetch(`/api/ai/post/${id}/post-now`, { method: 'POST' });
+                        log('📤 Post published');
                         loadUpcomingPosts();
+                        loadLogs();
+                    } catch (err) {
+                        log('❌ Failed to post: ' + err.message, 'error');
                     }
                 };
             });
-            els.postsTable.querySelectorAll('.delete-post').forEach(btn => {
+            
+            // Edit buttons
+            els.postsTable.querySelectorAll('.edit-post-btn').forEach(btn => {
                 btn.onclick = async () => {
-                    if (confirm('Delete this post?')) {
-                        await apiFetch(`/api/ai/post/${btn.dataset.id}`, { method: 'DELETE' });
-                        loadUpcomingPosts();
+                    const id = btn.dataset.id;
+                    const newText = prompt('Edit post text:');
+                    if (newText && newText.trim()) {
+                        try {
+                            await apiFetch(`/api/ai/post/${id}`, {
+                                method: 'PUT',
+                                body: JSON.stringify({ text: newText })
+                            });
+                            log('✏️ Post updated');
+                            loadUpcomingPosts();
+                        } catch (err) {
+                            log('❌ Failed to update post', 'error');
+                        }
+                    }
+                };
+            });
+            
+            // DELETE buttons - FIXED
+            els.postsTable.querySelectorAll('.delete-post-btn').forEach(btn => {
+                btn.onclick = async () => {
+                    const id = btn.dataset.id;
+                    if (!confirm('🗑️ Delete this scheduled post?')) return;
+                    try {
+                        btn.disabled = true;
+                        btn.textContent = 'Deleting...';
+                        await apiFetch(`/api/ai/post/${id}`, { method: 'DELETE' });
+                        log('✅ Post deleted');
+                        await loadUpcomingPosts();
+                        await loadLogs();
+                    } catch (err) {
+                        log('❌ Failed to delete post: ' + err.message, 'error');
+                        btn.disabled = false;
+                        btn.textContent = 'Delete';
                     }
                 };
             });
         } catch (err) {
-            log('❌ Failed loading posts', 'error');
+            console.error('Load posts error:', err);
+            log('❌ Failed loading posts: ' + err.message, 'error');
+            els.postsTable.innerHTML = '<tr><td colspan="6">Error loading posts</td></tr>';
         }
     }
 
@@ -320,7 +483,22 @@
         }
     }
 
+    // Clear logs
+    if (els.clearLogsBtn) {
+        els.clearLogsBtn.onclick = async () => {
+            if (!confirm('Clear all AI logs?')) return;
+            try {
+                await apiFetch(`/api/ai/page/${pageId}/logs`, { method: 'DELETE' });
+                log('🗑️ All logs cleared');
+                loadLogs();
+            } catch (err) {
+                log('❌ Failed to clear logs', 'error');
+            }
+        };
+    }
+
     // Initial load
+    loadProfile();
     loadTopics();
     loadUpcomingPosts();
     loadLogs();
