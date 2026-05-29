@@ -64,7 +64,7 @@ app.use(
             httpOnly: true,
             secure: isProduction,
             sameSite: 'lax',
-            maxAge: 2 * 60 * 60 * 1000 // 2 hours (increased from 2 minutes)
+            maxAge: 2 * 60 * 60 * 1000 // 2 hours
         }
     })
 );
@@ -126,7 +126,8 @@ const webhookRoutes = require('./routes/webhookRoutes');
 const aiRoutes = require('./routes/aiSchedulerRoutes');
 const adminRoutes = require('./routes/adminRoutes');
 const userMessagesRoutes = require('./routes/userMessages');
-const authRoutes = require('./routes/authRoutes');  // NEW
+const authRoutes = require('./routes/authRoutes');
+const facebookAuthRoutes = require('./routes/facebookAuthRoutes');  // NEW: Facebook OAuth
 
 app.use('/', webhookRoutes);
 app.use('/api/dashboard', requireLogin, dashboardRoutes);
@@ -134,7 +135,8 @@ app.use('/api/dashboard', requireLogin, pageFeaturesRoutes);
 app.use('/api/ai', requireLogin, aiRoutes);
 app.use('/api/admin', requireLogin, adminRoutes);
 app.use('/api/user/messages', requireLogin, userMessagesRoutes);
-app.use('/api/auth', authRoutes);  // NEW - public auth routes (no login required)
+app.use('/api/auth', authRoutes);
+app.use('/api/facebook', requireLogin, facebookAuthRoutes);  // NEW: Facebook OAuth routes
 
 // ---------------- STATIC FILES ----------------
 app.use(express.static(path.join(__dirname, 'public')));
@@ -163,7 +165,10 @@ app.get('/login', (req, res) => {
     res.sendFile(path.join(__dirname, 'public/login.html'));
 });
 
-// NEW PAGES
+// Facebook Connect Page (requires login)
+app.get('/connect-facebook', requireLogin, renderWithCsrf(path.join(__dirname, 'public/connect-facebook.html')));
+
+// Auth Pages
 app.get('/signup', (req, res) => {
     res.sendFile(path.join(__dirname, 'public/signup.html'));
 });
@@ -194,7 +199,7 @@ app.get('/community-guidelines', (req, res) => {
     res.sendFile(path.join(__dirname, 'public/community-guidelines.html'));
 });
 
-// PROTECTED PAGES
+// PROTECTED PAGES (require login)
 app.get('/index.html', requireLogin, renderWithCsrf(path.join(__dirname, 'public/index.html')));
 app.get('/pages', requireLogin, renderWithCsrf(path.join(__dirname, 'public/page.html')));
 app.get('/schedule', requireLogin, renderWithCsrf(path.join(__dirname, 'public/schedule.html')));
