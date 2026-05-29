@@ -1,4 +1,6 @@
+```js
 const mongoose = require('mongoose');
+const bcrypt = require('bcrypt');
 
 const UserSchema = new mongoose.Schema({
 
@@ -165,7 +167,7 @@ const UserSchema = new mongoose.Schema({
   ],
 
   /* =====================================================
-     ANTI-BRUTE FORCE (NEW)
+     ANTI-BRUTE FORCE
   ===================================================== */
 
   failedLoginAttempts: {
@@ -205,12 +207,45 @@ const UserSchema = new mongoose.Schema({
     type: Date,
     default: Date.now
   }
+
 });
 
-// Update the updatedAt field on save
-UserSchema.pre('save', function(next) {
+/* =====================================================
+   HASH PASSWORD BEFORE SAVE
+===================================================== */
+
+UserSchema.pre('save', async function(next) {
+
   this.updatedAt = Date.now();
-  next();
+
+  // only hash if password modified
+  if (!this.isModified('password')) {
+    return next();
+  }
+
+  try {
+
+    const salt = await bcrypt.genSalt(10);
+
+    this.password = await bcrypt.hash(this.password, salt);
+
+    next();
+
+  } catch (err) {
+
+    next(err);
+
+  }
+
 });
+
+/* =====================================================
+   PASSWORD COMPARISON METHOD
+===================================================== */
+
+UserSchema.methods.comparePassword = async function(candidatePassword) {
+  return bcrypt.compare(candidatePassword, this.password);
+};
 
 module.exports = mongoose.model('User', UserSchema);
+```
