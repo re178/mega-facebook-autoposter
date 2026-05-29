@@ -25,6 +25,81 @@
     #page-stats-container th { background: #2a2f3b; }
     .logs { max-height: 300px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
     .log { display: flex; justify-content: space-between; background: #161a27; padding: 8px 12px; border-radius: 6px; font-size: 0.9em; }
+    
+    /* Facebook Status Widget Styles */
+    .fb-status {
+      background: #1f2430;
+      border-radius: 12px;
+      padding: 20px;
+      margin-bottom: 20px;
+    }
+    .fb-status h3 {
+      margin: 0 0 16px 0;
+      color: #22c55e;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .pages-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+    .page-card {
+      background: #0b1220;
+      border-radius: 10px;
+      padding: 12px 16px;
+      flex: 1;
+      min-width: 150px;
+      border-left: 3px solid #22c55e;
+    }
+    .page-card .page-name {
+      font-weight: 600;
+      color: white;
+      margin-bottom: 4px;
+    }
+    .page-card .page-status {
+      font-size: 11px;
+      color: #22c55e;
+    }
+    .fb-connect-btn {
+      background: #1877f2;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 40px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      transition: transform 0.2s;
+      text-decoration: none;
+    }
+    .fb-connect-btn:hover {
+      transform: scale(1.02);
+      background: #166fe5;
+    }
+    .fb-add-more {
+      background: #2a2f3b;
+      color: #22c55e;
+      border: 1px dashed #22c55e;
+      padding: 10px 20px;
+      border-radius: 40px;
+      font-size: 14px;
+      cursor: pointer;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .loading-pages {
+      color: #9ca3af;
+      text-align: center;
+      padding: 20px;
+    }
   </style>
 </head>
 <body>
@@ -73,6 +148,16 @@
         <h1>Master Dashboard</h1>
       </div>
 
+      <!-- ============================================ -->
+      <!-- FACEBOOK CONNECTION STATUS WIDGET (NEW) -->
+      <!-- ============================================ -->
+      <section class="fb-status" id="facebook-status-section">
+        <h3>📘 Facebook Connection</h3>
+        <div id="fb-status-content">
+          <div class="loading-pages">Loading your connected pages...</div>
+        </div>
+      </section>
+
       <!-- Summary Cards -->
       <section class="stats" id="summary-cards">
         <!-- JS will inject summary cards here -->
@@ -111,6 +196,76 @@
   <script src="js/api.js"></script>
   <script src="js/master.js"></script>
   <script src="/js/dashboard.js"></script>
+  
+  <!-- Facebook Status Widget Script -->
+  <script>
+    // Helper function to escape HTML
+    function escapeHtml(str) {
+      if (!str) return '';
+      return str.replace(/[&<>]/g, function(m) {
+        if (m === '&') return '&amp;';
+        if (m === '<') return '&lt;';
+        if (m === '>') return '&gt;';
+        return m;
+      });
+    }
+    
+    // Load Facebook connection status
+    async function loadFacebookStatus() {
+      const container = document.getElementById('fb-status-content');
+      if (!container) return;
+      
+      try {
+        const res = await fetch('/api/facebook/pages', { credentials: 'include' });
+        
+        if (res.status === 401) {
+          window.location.href = '/login';
+          return;
+        }
+        
+        const pages = await res.json();
+        
+        if (!pages || pages.length === 0) {
+          container.innerHTML = `
+            <div style="text-align: center; padding: 20px;">
+              <p style="color: #9ca3af; margin-bottom: 16px;">⚠️ No Facebook pages connected</p>
+              <p style="color: #6b7280; font-size: 13px; margin-bottom: 20px;">Connect your Facebook account to start posting and managing your pages.</p>
+              <a href="/connect-facebook" class="fb-connect-btn">🔗 Connect Facebook Account</a>
+            </div>
+          `;
+        } else {
+          container.innerHTML = `
+            <div class="pages-grid">
+              ${pages.map(p => `
+                <div class="page-card">
+                  <div class="page-name">${escapeHtml(p.name)}</div>
+                  <div class="page-status">✅ Connected</div>
+                </div>
+              `).join('')}
+              <div style="display: flex; align-items: center;">
+                <a href="/connect-facebook" class="fb-add-more">+ Add More Pages</a>
+              </div>
+            </div>
+            <div style="margin-top: 12px; font-size: 12px; color: #6b7280;">
+              💡 Your pages are connected and ready for posting. Go to <a href="/pages" style="color: #22c55e;">Pages</a> to manage individual pages.
+            </div>
+          `;
+        }
+      } catch (err) {
+        console.error('Facebook status error:', err);
+        container.innerHTML = `
+          <div style="text-align: center; padding: 20px;">
+            <p style="color: #ef4444;">❌ Error loading connection status</p>
+            <a href="/connect-facebook" class="fb-connect-btn">🔗 Connect Facebook</a>
+          </div>
+        `;
+      }
+    }
+    
+    // Run when page loads
+    document.addEventListener('DOMContentLoaded', () => {
+      loadFacebookStatus();
+    });
+  </script>
 </body>
 </html>
-
