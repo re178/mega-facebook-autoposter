@@ -1,146 +1,172 @@
-const mongoose = require('mongoose');
+const express = require('express');
+const axios = require('axios');
 const crypto = require('crypto');
+const Page = require('../models/Page');
 
-const ENCRYPTION_KEY = process.env.TOKEN_ENCRYPTION_KEY;
+const router = express.Router();
 
-if (!ENCRYPTION_KEY || ENCRYPTION_KEY.length !== 64) {
-    console.error("❌ TOKEN_ENCRYPTION_KEY must be 64 hex characters");
-}
-
-const IV_LENGTH = 16;
+const FB_APP_ID = process.env.FB_APP_ID;
+const FB_APP_SECRET = process.env.FB_APP_SECRET;
+const REDIRECT_URI =
+  process.env.FB_REDIRECT_URI ||
+  `${process.env.APP_URL}/api/facebook/callback`;
 
 /* =====================================================
-   ENCRYPT / DECRYPT
+   LOGIN CHECK
 ===================================================== */
-function encryptToken(token) {
-    if (!token || !ENCRYPTION_KEY) return token;
-
-    try {
-        const iv = crypto.randomBytes(IV_LENGTH);
-        const key = Buffer.from(ENCRYPTION_KEY, 'hex');
-
-        const cipher = crypto.createCipheriv('aes-256-cbc', key, iv);
-
-        let encrypted = cipher.update(token, 'utf8', 'hex');
-        encrypted += cipher.final('hex');
-
-        return iv.toString('hex') + ':' + encrypted;
-
-    } catch (err) {
-        console.error("Encrypt error:", err.message);
-        return token;
-    }
-}
-
-function decryptToken(encryptedToken) {
-    if (!encryptedToken || !ENCRYPTION_KEY) return encryptedToken;
-    if (!encryptedToken.includes(':')) return encryptedToken;
-
-    try {
-        const [ivHex, data] = encryptedToken.split(':');
-
-        const iv = Buffer.from(ivHex, 'hex');
-        const key = Buffer.from(ENCRYPTION_KEY, 'hex');
-
-        const decipher = crypto.createDecipheriv('aes-256-cbc', key, iv);
-
-        let decrypted = decipher.update(data, 'hex', 'utf8');
-        decrypted += decipher.final('utf8');
-
-        return decrypted;
-
-    } catch (err) {
-        console.error("Decrypt error:", err.message);
-        return encryptedToken;
-    }
+function requireLogin(req, res, next) {
+  if (req.session?.userId) return next();
+  return res.status(401).json({ error: 'Unauthorized' });
 }
 
 /* =====================================================
-   PAGE SCHEMA (CLEAN PRODUCTION VERSION)
+   CONNECT
 ===================================================== */
-const PageSchema = new mongoose.Schema({
+router.get('/connect', requireLogin, (req, res) => {
+  const state = crypto.randomBytes(16).toString('hex');
+  req.session.fb_oauth_state = state;
 
-    name: {
-        type: String,
-        required: true
-    },
+  console.log("🔗 FB CONNECT STARTED");
 
-    pageId: {
-        type: String,
-        required: true
-        // ❌ NO UNIQUE HERE (FIXED FOR MULTI USERS)
-    },
+  const url =
+    `https://www.facebook.com/v20.0/dialog/oauth` +
+    `?client_id=${FB_APP_ID}` +
+    `&redirect_uri=${encodeURIComponent(REDIRECT_URI)}` +
+    `&state=${state}` +
+    `&scope=pages_manage_posts,pages_read_engagement,pages_manage_metadata,pages_messaging,email,public_profile` +
+    `&response_type=code`;
 
-    userId: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'User',
-        required: true
-    },
-
-    // store encrypted only (NO setter, NO pre-save conflict)
-    encryptedToken: {
-        type: String,
-        required: true,
-        select: false
-    },
-
-    isConnected: {
-        type: Boolean,
-        default: true
-    },
-
-    category: String,
-
-    tokenExpiresAt: Date,
-
-    createdAt: {
-        type: Date,
-        default: Date.now
-    },
-
-    updatedAt: {
-        type: Date,
-        default: Date.now
-    }
+  res.redirect(url);
 });
 
 /* =====================================================
-   IMPORTANT FIX: prevent duplicate per user
+   CALLBACK (DEBUG VERSION)
 ===================================================== */
-PageSchema.index({ userId: 1, pageId: 1 }, { unique: true });
+router.get('/callback', async (req, res) => {
+  try {
+    console.log("🔥 CALLBACK HIT");
 
-/* =====================================================
-   PRE-SAVE (ONLY TIMESTAMP)
-===================================================== */
-PageSchema.pre('save', function (next) {
-    this.updatedAt = Date.now();
-    next();
-});
+    const { code, state } = req.query;
 
-/* =====================================================
-   METHODS
-===================================================== */
-PageSchema.methods.getDecryptedToken = function () {
-    return decryptToken(this.encryptedToken);
-};
+    if (!code) return res.redirect('/connect-facebook?error=no_code');
+    if (state !== req.session.fb_oauth_state)
+        return res.redirect('/connect-facebook?error=bad_state');
 
-/* =====================================================
-   SAFE UPSERT (USED BY ROUTES)
-===================================================== */
-PageSchema.statics.savePage = async function (userId, page) {
-    return await this.findOneAndUpdate(
-        { userId, pageId: page.id },
-        {
-            $set: {
-                name: page.name,
-                encryptedToken: encryptToken(page.access_token),
-                isConnected: true,
-                category: page.category || null,
-                updatedAt: new Date()
-            }
-        },
-        { upsert: true, new: true }
+    delete req.session.fb_oauth_state;
+
+    console.log("🔑 Exchanging token...");
+
+    const tokenRes = await axios.get(
+      'https://graph.facebook.com/v20.0/oauth/access_token',
+      {
+        params: {
+          client_id: FB_APP_ID,
+          client_secret: FB_APP_SECRET,
+          redirect_uri: REDIRECT_URI,
+          code
+        }
+      }
     );
-};
 
-module.exports = mongoose.model('Page', PageSchema);
+    const accessToken = tokenRes.data.access_token;
+
+    console.log("📡 Fetching pages...");
+
+    const pagesRes = await axios.get(
+      'https://graph.facebook.com/v20.0/me/accounts',
+      {
+        params: {
+          access_token: accessToken,
+          fields: 'id,name,access_token,category'
+        }
+      }
+    );
+
+    const pages = pagesRes.data.data || [];
+
+    console.log("📄 Pages received:", pages.length);
+
+    req.session.fb_pages = pages;
+    req.session.fb_token = accessToken;
+
+    res.redirect('/connect-facebook?success=true');
+
+  } catch (err) {
+    console.error("❌ CALLBACK ERROR:", err.response?.data || err.message);
+    res.redirect('/connect-facebook?error=server_error');
+  }
+});
+
+/* =====================================================
+   TEMP PAGES
+===================================================== */
+router.get('/temp-pages', requireLogin, (req, res) => {
+  console.log("📦 TEMP PAGES REQUEST");
+  res.json({
+    pages: req.session.fb_pages || [],
+    token: req.session.fb_token || null
+  });
+});
+
+/* =====================================================
+   SAVE PAGES (FINAL FIX)
+===================================================== */
+router.post('/save-pages', requireLogin, async (req, res) => {
+  try {
+    const userId = req.session.userId;
+    const sessionPages = req.session.fb_pages;
+
+    console.log("💾 SAVE REQUEST:", { userId });
+
+    if (!sessionPages) {
+      return res.status(400).json({ error: "Session expired" });
+    }
+
+    const selected = req.body.pages || [];
+
+    console.log("📌 Selected pages:", selected.length);
+
+    let saved = 0;
+
+    for (const p of sessionPages) {
+      const isSelected = selected.find(x => x.id === p.id);
+      if (!isSelected) continue;
+
+      await Page.saveFacebookPage(userId, p);
+      saved++;
+
+      console.log("✅ SAVED:", p.name, p.id);
+    }
+
+    res.json({
+      success: true,
+      saved
+    });
+
+  } catch (err) {
+    console.error("❌ SAVE ERROR:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+/* =====================================================
+   GET USER PAGES
+===================================================== */
+router.get('/pages', requireLogin, async (req, res) => {
+  const pages = await Page.find({ userId: req.session.userId });
+  res.json(pages);
+});
+
+/* =====================================================
+   DISCONNECT
+===================================================== */
+router.delete('/pages/:id', requireLogin, async (req, res) => {
+  await Page.findOneAndUpdate(
+    { userId: req.session.userId, pageId: req.params.id },
+    { isConnected: false }
+  );
+
+  res.json({ success: true });
+});
+
+module.exports = router;
