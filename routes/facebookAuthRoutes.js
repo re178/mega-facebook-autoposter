@@ -1,52 +1,60 @@
-// routes/facebookAuthRoutes.js (UPGRADED - PRODUCTION SAFE)
-
 const express = require('express');
-const router = express.Router();
 const axios = require('axios');
+const crypto = require('crypto');
 const Page = require('../models/Page');
 
-/* =========================
-   AUTH MIDDLEWARE
-========================= */
+const router = express.Router();
+
+const FB_APP_ID = process.env.FB_APP_ID;
+const FB_APP_SECRET = process.env.FB_APP_SECRET;
+const REDIRECT_URI = process.env.FB_REDIRECT_URI || `${process.env.APP_URL}/api/facebook/callback`;
+
+/* =====================================================
+   REQUIRE LOGIN (only here, not duplicated in server.js)
+===================================================== */
 function requireLogin(req, res, next) {
     if (req.session?.userId) return next();
     return res.status(401).json({ error: 'Unauthorized' });
 }
 
-/* =========================
-   FACEBOOK AUTH URL
-========================= */
-function getFacebookAuthUrl(state) {
-    const fbAppId = process.env.FB_APP_ID;
-    const redirectUri = process.env.FB_REDIRECT_URI;
-
-    const scope =
-        'pages_manage_posts,pages_read_engagement,pages_manage_metadata,pages_messaging,email,public_profile';
-
-    return `https://www.facebook.com/v20.0/dialog/oauth?client_id=${fbAppId}&redirect_uri=${encodeURIComponent(
-        redirectUri
-    )}&scope=${scope}&response_type=code&state=${state}`;
-}
-
-/* =========================
-   START OAUTH
-========================= */
+/* =====================================================
+   CONNECT FACEBOOK
+===================================================== */
 router.get('/connect', requireLogin, (req, res) => {
-    // 🔐 state prevents CSRF attacks in OAuth
-    const state = `${req.session.userId}-${Date.now()}`;
+    const state = crypto.randomBytes(16).toString('hex');
+
     req.session.fb_oauth_state = state;
 
-    const authUrl = getFacebookAuthUrl(state);
-    return res.redirect(authUrl);
+    const scope = [
+        'pages_manage_posts',
+        'pages_read_engagement',
+        'pages_manage_metadata',
+        'pages_messaging',
+        'email',
+        'public_profile'
+    ].join(',');
+
+    const url =
+        `https://www.facebook.com/v20.0/dialog/oauth` +
+        `?client_id=${FB_APP_ID}` +
+        `&redirect_uri=${encodeURIComponent(REDIRECT_URI)}` +
+        `&state=${state}` +
+        `&scope=${scope}` +
+        `&response_type=code`;
+
+    console.log("➡️ Redirecting to Facebook OAuth");
+    res.redirect(url);
 });
 
-/* =========================
-   CALLBACK (SECURE)
-========================= */
+/* =====================================================
+   CALLBACK
+===================================================== */
 router.get('/callback', async (req, res) => {
-    const { code, state, error } = req.query;
-
     try {
+        console.log("🔥 Facebook callback hit");
+
+        const { code, state, error } = req.query;
+
         if (error) {
             return res.redirect('/connect-facebook?error=facebook_denied');
         }
@@ -55,34 +63,30 @@ router.get('/callback', async (req, res) => {
             return res.redirect('/connect-facebook?error=no_code');
         }
 
-        // 🔐 Validate state (IMPORTANT SECURITY FIX)
+        // 🔐 VERIFY STATE
         if (!state || state !== req.session.fb_oauth_state) {
             return res.redirect('/connect-facebook?error=invalid_state');
         }
 
         delete req.session.fb_oauth_state;
 
-        /* =========================
-           GET ACCESS TOKEN
-        ========================= */
-        const tokenResponse = await axios.get(
+        // 🔑 EXCHANGE TOKEN
+        const tokenRes = await axios.get(
             'https://graph.facebook.com/v20.0/oauth/access_token',
             {
                 params: {
-                    client_id: process.env.FB_APP_ID,
-                    client_secret: process.env.FB_APP_SECRET,
-                    redirect_uri: process.env.FB_REDIRECT_URI,
+                    client_id: FB_APP_ID,
+                    client_secret: FB_APP_SECRET,
+                    redirect_uri: REDIRECT_URI,
                     code
                 }
             }
         );
 
-        const accessToken = tokenResponse.data.access_token;
+        const accessToken = tokenRes.data.access_token;
 
-        /* =========================
-           GET PAGES
-        ========================= */
-        const pagesResponse = await axios.get(
+        // 📄 GET PAGES
+        const pagesRes = await axios.get(
             'https://graph.facebook.com/v20.0/me/accounts',
             {
                 params: {
@@ -92,125 +96,102 @@ router.get('/callback', async (req, res) => {
             }
         );
 
-        const pages = pagesResponse.data.data || [];
+        const pages = pagesRes.data.data || [];
 
         if (!pages.length) {
             return res.redirect('/connect-facebook?error=no_pages');
         }
 
-        /* =========================
-           STORE IN SESSION (SAFE)
-        ========================= */
-        req.session.fb_access_token = accessToken;
+        // 💾 STORE TEMP IN SESSION (IMPORTANT FIX)
         req.session.fb_pages = pages;
+        req.session.fb_token = accessToken;
 
         return res.redirect('/connect-facebook?success=true');
+
     } catch (err) {
-        console.error('OAuth callback error:', err.response?.data || err.message);
+        console.error("❌ Callback error:", err.response?.data || err.message);
         return res.redirect('/connect-facebook?error=server_error');
     }
 });
 
-/* =========================
-   GET CONNECTED PAGES
-========================= */
-router.get('/pages-session', requireLogin, (req, res) => {
-    res.json({
+/* =====================================================
+   GET TEMP PAGES (SAFE)
+===================================================== */
+router.get('/temp-pages', requireLogin, (req, res) => {
+    return res.json({
         pages: req.session.fb_pages || [],
-        connected: !!req.session.fb_access_token
+        token: req.session.fb_token || null
     });
 });
 
-/* =========================
-   SAVE PAGES TO DB
-========================= */
+/* =====================================================
+   SAVE PAGES
+===================================================== */
 router.post('/save-pages', requireLogin, async (req, res) => {
     try {
-        const pages = req.session.fb_pages;
-        const accessToken = req.session.fb_access_token;
         const userId = req.session.userId;
+        const { pages } = req.body;
 
-        if (!pages || !accessToken) {
-            return res.status(400).json({ error: 'No Facebook session found' });
+        if (!pages?.length) {
+            return res.status(400).json({ error: 'No pages selected' });
         }
 
         const saved = [];
 
-        for (const page of pages) {
-            const existing = await Page.findOne({ pageId: page.id });
+        for (const p of pages) {
+            let page = await Page.findOne({ pageId: p.id });
 
-            if (existing) {
-                existing.name = page.name;
-                existing.pageToken = page.access_token || accessToken;
-                existing.userId = userId;
-                existing.isConnected = true;
-                await existing.save();
-                saved.push(existing);
-            } else {
-                const newPage = await Page.create({
+            if (!page) {
+                page = await Page.create({
                     userId,
-                    pageId: page.id,
-                    name: page.name,
-                    pageToken: page.access_token || accessToken,
+                    pageId: p.id,
+                    name: p.name,
+                    pageToken: p.access_token,
                     isConnected: true
                 });
-                saved.push(newPage);
+            } else {
+                page.name = p.name;
+                page.pageToken = p.access_token;
+                page.isConnected = true;
+                await page.save();
             }
+
+            saved.push(page);
         }
 
-        res.json({ success: true, pages: saved });
+        return res.json({
+            success: true,
+            count: saved.length
+        });
+
     } catch (err) {
         console.error(err);
-        res.status(500).json({ error: err.message });
+        return res.status(500).json({ error: err.message });
     }
 });
 
-/* =========================
-   LIST USER PAGES
-========================= */
+/* =====================================================
+   GET USER PAGES
+===================================================== */
 router.get('/pages', requireLogin, async (req, res) => {
-    try {
-        const pages = await Page.find({
-            userId: req.session.userId,
-            isConnected: true
-        });
+    const pages = await Page.find({
+        userId: req.session.userId,
+        isConnected: true
+    });
 
-        res.json(
-            pages.map(p => ({
-                _id: p._id,
-                pageId: p.pageId,
-                name: p.name,
-                isConnected: p.isConnected,
-                autoGenerationEnabled: p.autoGenerationEnabled
-            }))
-        );
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
+    res.json(pages);
 });
 
-/* =========================
+/* =====================================================
    DISCONNECT PAGE
-========================= */
+===================================================== */
 router.delete('/pages/:pageId', requireLogin, async (req, res) => {
-    try {
-        const page = await Page.findOne({
-            pageId: req.params.pageId,
-            userId: req.session.userId
-        });
+    await Page.updateOne(
+        { pageId: req.params.pageId, userId: req.session.userId },
+        { isConnected: false }
+    );
 
-        if (!page) {
-            return res.status(404).json({ error: 'Page not found' });
-        }
-
-        page.isConnected = false;
-        page.pageToken = null;
-        await page.save();
-
-        res.json({ success: true });
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
+    res.json({ success: true });
 });
 
 module.exports = router;
