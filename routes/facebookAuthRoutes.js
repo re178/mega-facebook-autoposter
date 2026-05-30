@@ -1,8 +1,8 @@
 // routes/facebookAuthRoutes.js
 const express = require('express');
 const router = express.Router();
+const axios = require('axios');
 const Page = require('../models/Page');
-const { getAccessTokenFromCode, getLongLivedToken, getUserPages, getFacebookAuthUrl } = require('../services/facebookOAuthService');
 
 // Require login middleware
 function requireLogin(req, res, next) {
@@ -10,47 +10,72 @@ function requireLogin(req, res, next) {
     return res.status(401).json({ error: 'Unauthorized' });
 }
 
+// Facebook OAuth URL generator
+function getFacebookAuthUrl() {
+    const fbAppId = process.env.FB_APP_ID;
+    const redirectUri = process.env.FB_REDIRECT_URI;
+    const scope = 'pages_manage_posts,pages_read_engagement,pages_manage_metadata,pages_messaging,email,public_profile';
+    
+    return `https://www.facebook.com/v20.0/dialog/oauth?client_id=${fbAppId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${scope}&response_type=code`;
+}
+
 // Start OAuth flow
 router.get('/connect', requireLogin, (req, res) => {
     const authUrl = getFacebookAuthUrl();
+    console.log('Redirecting to Facebook OAuth:', authUrl);
     res.redirect(authUrl);
 });
 
 // OAuth callback
 router.get('/callback', async (req, res) => {
+    const { code, error, error_description } = req.query;
+    
+    console.log('OAuth callback received:', { code: !!code, error });
+    
+    if (error) {
+        console.error('Facebook OAuth error:', error, error_description);
+        return res.redirect('/connect-facebook?error=facebook_denied');
+    }
+    
+    if (!code) {
+        return res.redirect('/connect-facebook?error=no_code');
+    }
+    
     try {
-        const { code, error, error_description } = req.query;
-        
-        if (error) {
-            console.error('Facebook OAuth error:', error, error_description);
-            return res.redirect('/connect-facebook?error=facebook_denied');
-        }
-        
-        if (!code) {
-            return res.redirect('/connect-facebook?error=no_code');
-        }
-        
         // Exchange code for access token
-        const shortLivedToken = await getAccessTokenFromCode(code);
-        const longLivedToken = await getLongLivedToken(shortLivedToken);
+        const tokenResponse = await axios.get('https://graph.facebook.com/v20.0/oauth/access_token', {
+            params: {
+                client_id: process.env.FB_APP_ID,
+                client_secret: process.env.FB_APP_SECRET,
+                redirect_uri: process.env.FB_REDIRECT_URI,
+                code: code
+            }
+        });
+        
+        const accessToken = tokenResponse.data.access_token;
+        console.log('Access token obtained successfully');
         
         // Get user's pages
-        const pages = await getUserPages(longLivedToken);
+        const pagesResponse = await axios.get('https://graph.facebook.com/v20.0/me/accounts', {
+            params: {
+                access_token: accessToken,
+                fields: 'id,name,access_token,category'
+            }
+        });
         
-        if (!pages || pages.length === 0) {
+        const pages = pagesResponse.data.data || [];
+        console.log(`Found ${pages.length} pages for user`);
+        
+        if (pages.length === 0) {
             return res.redirect('/connect-facebook?error=no_pages');
         }
         
-        // Store the session user ID (we need to get it from session)
-        // The callback doesn't have session because it's a redirect from Facebook
-        // We need to store state or use a different approach
+        // Redirect to frontend with page data
+        const encodedPages = encodeURIComponent(JSON.stringify(pages));
+        res.redirect(`/connect-facebook?success=true&pages=${encodedPages}&token=${accessToken}`);
         
-        // For now, redirect to frontend with tokens (temporary)
-        // Better approach: store in session or use state parameter
-        res.redirect(`/connect-facebook?success=true&pages=${encodeURIComponent(JSON.stringify(pages))}&token=${longLivedToken}`);
-        
-    } catch (error) {
-        console.error('OAuth callback error:', error);
+    } catch (err) {
+        console.error('Callback error details:', err.response?.data || err.message);
         res.redirect('/connect-facebook?error=server_error');
     }
 });
@@ -104,8 +129,16 @@ router.post('/save-pages', requireLogin, async (req, res) => {
 router.get('/pages', requireLogin, async (req, res) => {
     try {
         const pages = await Page.find({ userId: req.session.userId, isConnected: true });
-        res.json(pages);
+        const safePages = pages.map(p => ({
+            _id: p._id,
+            pageId: p.pageId,
+            name: p.name,
+            isConnected: p.isConnected,
+            autoGenerationEnabled: p.autoGenerationEnabled
+        }));
+        res.json(safePages);
     } catch (error) {
+        console.error('Get pages error:', error);
         res.status(500).json({ error: error.message });
     }
 });
@@ -120,11 +153,11 @@ router.delete('/pages/:pageId', requireLogin, async (req, res) => {
         
         page.isConnected = false;
         page.pageToken = null;
-        page.pageTokenEncrypted = null;
         await page.save();
         
         res.json({ success: true });
     } catch (error) {
+        console.error('Disconnect page error:', error);
         res.status(500).json({ error: error.message });
     }
 });
