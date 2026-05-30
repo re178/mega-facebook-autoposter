@@ -53,7 +53,7 @@ async function getUserPages(accessToken) {
         const response = await axios.get('https://graph.facebook.com/v20.0/me/accounts', {
             params: {
                 access_token: accessToken,
-                fields: 'id,name,access_token,category,perms'
+                fields: 'id,name,access_token,category'
             }
         });
         return response.data.data || [];
