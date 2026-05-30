@@ -7,7 +7,7 @@ const REDIRECT_URI = process.env.FB_REDIRECT_URI || `${process.env.APP_URL}/api/
 
 // Generate Facebook OAuth URL
 function getFacebookAuthUrl() {
-    const scope = 'pages_manage_posts,pages_read_engagement,pages_manage_metadata,pages_messaging';
+    const scope = 'pages_manage_posts,pages_read_engagement,pages_manage_metadata,pages_messaging,email,public_profile';
     return `https://www.facebook.com/v20.0/dialog/oauth?client_id=${FACEBOOK_APP_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&scope=${scope}&response_type=code`;
 }
 
@@ -47,23 +47,29 @@ async function getLongLivedToken(shortLivedToken) {
     }
 }
 
-// Get user's Facebook pages
+// Get user's Facebook pages (FIXED - removed 'perms' field)
 async function getUserPages(accessToken) {
     try {
         const response = await axios.get('https://graph.facebook.com/v20.0/me/accounts', {
             params: {
                 access_token: accessToken,
-                fields: 'id,name,access_token,category'
+                fields: 'id,name,access_token,category'  // ✅ Removed 'perms' - it doesn't exist
             }
         });
-        return response.data.data || [];
+        
+        const pages = response.data.data || [];
+        
+        // Add debug logging
+        console.log(`Found ${pages.length} pages for user`);
+        
+        return pages;
     } catch (error) {
-        console.error('Get pages error:', error.response?.data || error.message);
-        throw new Error('Failed to fetch pages');
+        console.error('Get pages error details:', error.response?.data || error.message);
+        throw new Error('Failed to fetch pages from Facebook');
     }
 }
 
-// Refresh page token (if needed)
+// Refresh page token
 async function refreshPageToken(pageId, userToken) {
     try {
         const response = await axios.get(`https://graph.facebook.com/v20.0/${pageId}`, {
