@@ -3,10 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="csrf-token" content="{{ csrfToken }}">
     <title>Connect Facebook - VIRALOOP</title>
+
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
+
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             background: linear-gradient(180deg, #020617, #0b1220);
@@ -16,6 +17,7 @@
             align-items: center;
             padding: 20px;
         }
+
         .container {
             background: rgba(17, 24, 39, 0.95);
             backdrop-filter: blur(10px);
@@ -26,17 +28,11 @@
             border: 1px solid #2a2f3b;
             text-align: center;
         }
-        h1 { color: #22c55e; margin-bottom: 16px; font-size: 28px; }
-        .subtitle { color: #9ca3af; margin-bottom: 32px; font-size: 14px; }
-        .benefits {
-            text-align: left;
-            background: #1f2937;
-            padding: 20px;
-            border-radius: 16px;
-            margin-bottom: 32px;
-        }
-        .benefits h3 { color: #22c55e; margin-bottom: 12px; font-size: 18px; }
-        .benefits li { color: #d1d5db; margin: 8px 0; margin-left: 20px; }
+
+        h1 { color: #22c55e; margin-bottom: 16px; }
+
+        .subtitle { color: #9ca3af; margin-bottom: 30px; }
+
         .btn-facebook {
             background: #1877f2;
             color: white;
@@ -46,217 +42,245 @@
             font-size: 16px;
             font-weight: 600;
             cursor: pointer;
-            display: inline-flex;
-            align-items: center;
-            gap: 10px;
-            transition: transform 0.2s;
         }
-        .btn-facebook:hover { transform: scale(1.02); background: #166fe5; }
-        .error { background: rgba(239,68,68,0.1); border: 1px solid #ef4444; color: #fca5a5; padding: 12px; border-radius: 12px; margin-bottom: 20px; }
-        .success { background: rgba(34,197,94,0.1); border: 1px solid #22c55e; color: #86efac; padding: 12px; border-radius: 12px; margin-bottom: 20px; }
-        .pages-list { margin-top: 24px; text-align: left; }
+
+        .btn-facebook:hover {
+            background: #166fe5;
+        }
+
+        .benefits {
+            text-align: left;
+            background: #1f2937;
+            padding: 20px;
+            border-radius: 16px;
+            margin-bottom: 30px;
+            color: #d1d5db;
+        }
+
+        .benefits h3 {
+            color: #22c55e;
+            margin-bottom: 10px;
+        }
+
         .page-item {
             background: #1f2937;
-            padding: 16px;
+            padding: 14px;
             border-radius: 12px;
-            margin-bottom: 12px;
+            margin-bottom: 10px;
             display: flex;
             justify-content: space-between;
             align-items: center;
         }
-        .page-name { color: white; font-weight: 500; }
-        .page-id { color: #6b7280; font-size: 12px; margin-top: 4px; }
-        .checkbox { width: 20px; height: 20px; cursor: pointer; accent-color: #22c55e; }
+
+        .page-name { color: white; }
+
+        .page-id { color: #6b7280; font-size: 12px; }
+
+        .checkbox {
+            width: 18px;
+            height: 18px;
+            accent-color: #22c55e;
+        }
+
         .save-btn {
             background: #22c55e;
             color: white;
             border: none;
-            padding: 12px 24px;
-            border-radius: 12px;
-            font-size: 16px;
-            font-weight: 600;
-            cursor: pointer;
-            margin-top: 20px;
+            padding: 12px;
             width: 100%;
+            border-radius: 12px;
+            margin-top: 20px;
+            cursor: pointer;
+            font-weight: 600;
         }
-        .save-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-        .skip-link {
+
+        .error { color: #fca5a5; margin-top: 10px; }
+
+        .success { color: #86efac; margin-top: 10px; }
+
+        .skip {
             display: block;
             margin-top: 20px;
             color: #6b7280;
             text-decoration: none;
-            font-size: 14px;
         }
-        .footer { margin-top: 32px; padding-top: 20px; border-top: 1px solid #2a2f3b; font-size: 11px; color: #4b5563; }
     </style>
 </head>
+
 <body>
-    <div class="container">
-        <h1>🔗 Connect Your Facebook</h1>
-        <div class="subtitle">Connect your Facebook pages to start automating posts</div>
-        
-        <div class="benefits">
-            <h3>What you'll get:</h3>
-            <ul>
-                <li>✅ Schedule posts to your Facebook pages</li>
-                <li>✅ AI-powered content generation</li>
-                <li>✅ Reply to messages and comments</li>
-                <li>✅ Track analytics and insights</li>
-            </ul>
-        </div>
-        
-        <div id="messageContainer"></div>
-        <div id="pagesContainer" style="display: none;">
-            <h3 style="color: white; margin-bottom: 16px;">Select pages to connect:</h3>
-            <div id="pagesList" class="pages-list"></div>
-            <button id="savePagesBtn" class="save-btn">Save Selected Pages</button>
-        </div>
-        
-        <button id="connectBtn" class="btn-facebook">
-            🔗 Connect with Facebook
-        </button>
-        
-        <a href="/index.html" class="skip-link">Skip for now (You can connect later)</a>
-        
-        <div class="footer">
-            <a href="/privacy">Privacy</a> | <a href="/terms">Terms</a>
-        </div>
+
+<div class="container">
+
+    <h1>🔗 Connect Facebook</h1>
+    <div class="subtitle">Connect your pages to start automation</div>
+
+    <div class="benefits">
+        <h3>What you get</h3>
+        <ul>
+            <li>Auto post scheduling</li>
+            <li>AI content generation</li>
+            <li>Page analytics</li>
+            <li>Message automation</li>
+        </ul>
     </div>
-    
-    <script>
-        const connectBtn = document.getElementById('connectBtn');
-        const pagesContainer = document.getElementById('pagesContainer');
-        const pagesList = document.getElementById('pagesList');
-        const saveBtn = document.getElementById('savePagesBtn');
-        const messageContainer = document.getElementById('messageContainer');
-        
-        function showMessage(message, isError = true) {
-            messageContainer.innerHTML = `<div class="${isError ? 'error' : 'success'}">${message}</div>`;
+
+    <div id="msg"></div>
+
+    <div id="pagesBox" style="display:none; text-align:left;">
+        <h3 style="color:white; margin-bottom:10px;">Select Pages</h3>
+        <div id="pagesList"></div>
+
+        <button id="saveBtn" class="save-btn">Save Pages</button>
+    </div>
+
+    <button id="connectBtn" class="btn-facebook">Connect with Facebook</button>
+
+    <a class="skip" href="/index.html">Skip for now</a>
+
+</div>
+
+<script>
+
+const connectBtn = document.getElementById("connectBtn");
+const pagesBox = document.getElementById("pagesBox");
+const pagesList = document.getElementById("pagesList");
+const saveBtn = document.getElementById("saveBtn");
+const msg = document.getElementById("msg");
+
+let selectedPages = [];
+let accessToken = null;
+
+function showMessage(text, ok=false){
+    msg.innerHTML = `<div class="${ok ? 'success' : 'error'}">${text}</div>`;
+}
+
+connectBtn.onclick = () => {
+    window.location.href = "/api/facebook/connect";
+};
+
+/* =========================================
+   NEW: session-based page loading
+========================================= */
+
+const params = new URLSearchParams(window.location.search);
+const success = params.get("success");
+const error = params.get("error");
+
+if(error){
+    showMessage(error);
+}
+
+if(success === "true"){
+    fetch("/api/facebook/temp-pages", {
+        credentials: "include"
+    })
+    .then(r => r.json())
+    .then(data => {
+
+        if(!data.pages || data.pages.length === 0){
+            showMessage("No pages found");
+            return;
+        }
+
+        accessToken = data.token;
+
+        pagesBox.style.display = "block";
+        connectBtn.style.display = "none";
+
+        pagesList.innerHTML = "";
+
+        data.pages.forEach(page => {
+
+            const div = document.createElement("div");
+            div.className = "page-item";
+
+            div.innerHTML = `
+                <div>
+                    <div class="page-name">${page.name}</div>
+                    <div class="page-id">ID: ${page.id}</div>
+                </div>
+                <input type="checkbox" class="checkbox"
+                    data-id="${page.id}"
+                    data-name="${page.name}"
+                    data-token="${page.access_token || ''}">
+            `;
+
+            pagesList.appendChild(div);
+        });
+
+        document.querySelectorAll(".checkbox").forEach(cb => {
+            cb.onchange = () => {
+
+                const page = {
+                    id: cb.dataset.id,
+                    name: cb.dataset.name,
+                    access_token: cb.dataset.token
+                };
+
+                if(cb.checked){
+                    selectedPages.push(page);
+                } else {
+                    selectedPages = selectedPages.filter(p => p.id !== page.id);
+                }
+            };
+        });
+
+    })
+    .catch(() => {
+        showMessage("Failed to load pages");
+    });
+}
+
+/* =========================================
+   SAVE PAGES
+========================================= */
+
+saveBtn.onclick = async () => {
+
+    if(selectedPages.length === 0){
+        showMessage("Select at least one page");
+        return;
+    }
+
+    saveBtn.disabled = true;
+    saveBtn.innerText = "Saving...";
+
+    try {
+
+        const res = await fetch("/api/facebook/save-pages", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            credentials: "include",
+            body: JSON.stringify({
+                pages: selectedPages,
+                accessToken
+            })
+        });
+
+        const data = await res.json();
+
+        if(data.success){
+            showMessage("Pages connected successfully!", true);
+
             setTimeout(() => {
-                if (messageContainer.firstChild) messageContainer.firstChild.remove();
-            }, 5000);
+                window.location.href = "/index.html";
+            }, 1500);
+        } else {
+            showMessage(data.error || "Failed");
+            saveBtn.disabled = false;
+            saveBtn.innerText = "Save Pages";
         }
-        
-        // Check URL parameters for OAuth result
-        const urlParams = new URLSearchParams(window.location.search);
-        const error = urlParams.get('error');
-        const success = urlParams.get('success');
-        const pagesParam = urlParams.get('pages');
-        const token = urlParams.get('token');
-        
-        if (error === 'facebook_denied') {
-            showMessage('You denied access. Please connect Facebook to use the platform.', true);
-        } else if (error === 'no_pages') {
-            showMessage('No Facebook pages found. You need at least one page to use this platform.', true);
-        } else if (error === 'server_error') {
-            showMessage('Server error. Please try again.', true);
-        } else if (success === 'true' && pagesParam) {
-            try {
-                const pages = JSON.parse(decodeURIComponent(pagesParam));
-                if (pages && pages.length > 0) {
-                    displayPages(pages, token);
-                    showMessage(`Found ${pages.length} page(s). Select which ones to connect.`, false);
-                } else {
-                    showMessage('No pages found. Make sure your Facebook account has pages.', true);
-                }
-            } catch(e) {
-                showMessage('Error loading pages. Please try again.', true);
-            }
-        }
-        
-        connectBtn.addEventListener('click', () => {
-            window.location.href = '/api/facebook/connect';
-        });
-        
-        let selectedPages = [];
-        let accessToken = null;
-        
-        function displayPages(pages, token) {
-            accessToken = token;
-            pagesList.innerHTML = '';
-            selectedPages = [];
-            
-            pages.forEach(page => {
-                const div = document.createElement('div');
-                div.className = 'page-item';
-                div.innerHTML = `
-                    <div>
-                        <div class="page-name">${escapeHtml(page.name)}</div>
-                        <div class="page-id">ID: ${page.id}</div>
-                    </div>
-                    <input type="checkbox" class="checkbox" data-page-id="${page.id}" data-page-name="${escapeHtml(page.name)}" data-page-token="${page.access_token || ''}">
-                `;
-                pagesList.appendChild(div);
-            });
-            
-            // Add event listeners to checkboxes
-            document.querySelectorAll('.checkbox').forEach(cb => {
-                cb.addEventListener('change', (e) => {
-                    const pageId = cb.dataset.pageId;
-                    const pageName = cb.dataset.pageName;
-                    const pageToken = cb.dataset.pageToken;
-                    
-                    if (cb.checked) {
-                        selectedPages.push({ id: pageId, name: pageName, access_token: pageToken });
-                    } else {
-                        selectedPages = selectedPages.filter(p => p.id !== pageId);
-                    }
-                });
-            });
-            
-            pagesContainer.style.display = 'block';
-            connectBtn.style.display = 'none';
-        }
-        
-        saveBtn.addEventListener('click', async () => {
-            if (selectedPages.length === 0) {
-                showMessage('Please select at least one page to connect', true);
-                return;
-            }
-            
-            saveBtn.disabled = true;
-            saveBtn.textContent = 'Saving...';
-            
-            try {
-                const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
-                const res = await fetch('/api/facebook/save-pages', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        ...(csrfToken ? { 'X-CSRF-Token': csrfToken } : {})
-                    },
-                    credentials: 'include',
-                    body: JSON.stringify({ pages: selectedPages, accessToken })
-                });
-                
-                const data = await res.json();
-                
-                if (res.ok && data.success) {
-                    showMessage(`Successfully connected ${selectedPages.length} page(s)! Redirecting...`, false);
-                    setTimeout(() => {
-                        window.location.href = '/index.html';
-                    }, 2000);
-                } else {
-                    showMessage(data.error || 'Failed to save pages. Please try again.', true);
-                    saveBtn.disabled = false;
-                    saveBtn.textContent = 'Save Selected Pages';
-                }
-            } catch (err) {
-                showMessage('Network error. Please try again.', true);
-                saveBtn.disabled = false;
-                saveBtn.textContent = 'Save Selected Pages';
-            }
-        });
-        
-        function escapeHtml(str) {
-            if (!str) return '';
-            return str.replace(/[&<>]/g, m => {
-                if (m === '&') return '&amp;';
-                if (m === '<') return '&lt;';
-                if (m === '>') return '&gt;';
-                return m;
-            });
-        }
-    </script>
+
+    } catch (e) {
+        showMessage("Network error");
+        saveBtn.disabled = false;
+        saveBtn.innerText = "Save Pages";
+    }
+};
+
+</script>
+
 </body>
 </html>
