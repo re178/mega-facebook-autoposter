@@ -139,148 +139,215 @@
 
 </div>
 
-<script>
 
-const connectBtn = document.getElementById("connectBtn");
-const pagesBox = document.getElementById("pagesBox");
-const pagesList = document.getElementById("pagesList");
-const saveBtn = document.getElementById("saveBtn");
-const msg = document.getElementById("msg");
+    <script>
+const connectBtn = document.getElementById('connectBtn');
+const pagesContainer = document.getElementById('pagesContainer');
+const pagesList = document.getElementById('pagesList');
+const saveBtn = document.getElementById('savePagesBtn');
+const messageContainer = document.getElementById('messageContainer');
 
 let selectedPages = [];
-let accessToken = null;
 
-function showMessage(text, ok=false){
-    msg.innerHTML = `<div class="${ok ? 'success' : 'error'}">${text}</div>`;
+function showMessage(message, isError = true) {
+    messageContainer.innerHTML =
+        `<div class="${isError ? 'error' : 'success'}">${message}</div>`;
 }
 
-connectBtn.onclick = () => {
-    window.location.href = "/api/facebook/connect";
-};
+function escapeHtml(str) {
+    if (!str) return '';
 
-/* =========================================
-   NEW: session-based page loading
-========================================= */
-
-const params = new URLSearchParams(window.location.search);
-const success = params.get("success");
-const error = params.get("error");
-
-if(error){
-    showMessage(error);
-}
-
-if(success === "true"){
-    fetch("/api/facebook/temp-pages", {
-        credentials: "include"
-    })
-    .then(r => r.json())
-    .then(data => {
-
-        if(!data.pages || data.pages.length === 0){
-            showMessage("No pages found");
-            return;
-        }
-
-        accessToken = data.token;
-
-        pagesBox.style.display = "block";
-        connectBtn.style.display = "none";
-
-        pagesList.innerHTML = "";
-
-        data.pages.forEach(page => {
-
-            const div = document.createElement("div");
-            div.className = "page-item";
-
-            div.innerHTML = `
-                <div>
-                    <div class="page-name">${page.name}</div>
-                    <div class="page-id">ID: ${page.id}</div>
-                </div>
-                <input type="checkbox" class="checkbox"
-                    data-id="${page.id}"
-                    data-name="${page.name}"
-                    data-token="${page.access_token || ''}">
-            `;
-
-            pagesList.appendChild(div);
-        });
-
-        document.querySelectorAll(".checkbox").forEach(cb => {
-            cb.onchange = () => {
-
-                const page = {
-                    id: cb.dataset.id,
-                    name: cb.dataset.name,
-                    access_token: cb.dataset.token
-                };
-
-                if(cb.checked){
-                    selectedPages.push(page);
-                } else {
-                    selectedPages = selectedPages.filter(p => p.id !== page.id);
-                }
-            };
-        });
-
-    })
-    .catch(() => {
-        showMessage("Failed to load pages");
+    return str.replace(/[&<>"]/g, function (m) {
+        return {
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;'
+        }[m];
     });
 }
 
-/* =========================================
-   SAVE PAGES
-========================================= */
+connectBtn.addEventListener('click', () => {
+    window.location.href = '/api/facebook/connect';
+});
 
-saveBtn.onclick = async () => {
-
-    if(selectedPages.length === 0){
-        showMessage("Select at least one page");
-        return;
-    }
-
-    saveBtn.disabled = true;
-    saveBtn.innerText = "Saving...";
-
+async function loadPagesFromSession() {
     try {
-
-        const res = await fetch("/api/facebook/save-pages", {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json"
-            },
-            credentials: "include",
-            body: JSON.stringify({
-                pages: selectedPages,
-                accessToken
-            })
+        const res = await fetch('/api/facebook/temp-pages', {
+            credentials: 'include'
         });
 
         const data = await res.json();
 
-        if(data.success){
-            showMessage("Pages connected successfully!", true);
-
-            setTimeout(() => {
-                window.location.href = "/index.html";
-            }, 1500);
-        } else {
-            showMessage(data.error || "Failed");
-            saveBtn.disabled = false;
-            saveBtn.innerText = "Save Pages";
+        if (!res.ok) {
+            showMessage('Failed to load Facebook pages.', true);
+            return;
         }
 
-    } catch (e) {
-        showMessage("Network error");
-        saveBtn.disabled = false;
-        saveBtn.innerText = "Save Pages";
+        const pages = data.pages || [];
+
+        if (!pages.length) {
+            showMessage('No Facebook pages found.', true);
+            return;
+        }
+
+        displayPages(pages);
+
+        showMessage(
+            `Found ${pages.length} page(s). Select which pages to connect.`,
+            false
+        );
+
+    } catch (err) {
+        console.error(err);
+        showMessage('Unable to load pages.', true);
     }
-};
+}
 
+function displayPages(pages) {
+
+    selectedPages = [];
+    pagesList.innerHTML = '';
+
+    pages.forEach(page => {
+
+        const div = document.createElement('div');
+
+        div.className = 'page-item';
+
+        div.innerHTML = `
+            <div>
+                <div class="page-name">${escapeHtml(page.name)}</div>
+                <div class="page-id">ID: ${page.id}</div>
+            </div>
+
+            <input
+                type="checkbox"
+                class="checkbox"
+                data-page-id="${page.id}"
+            >
+        `;
+
+        const checkbox = div.querySelector('.checkbox');
+
+        checkbox.addEventListener('change', () => {
+
+            if (checkbox.checked) {
+
+                selectedPages.push({
+                    id: page.id,
+                    name: page.name,
+                    access_token: page.access_token
+                });
+
+            } else {
+
+                selectedPages =
+                    selectedPages.filter(
+                        p => p.id !== page.id
+                    );
+            }
+        });
+
+        pagesList.appendChild(div);
+    });
+
+    pagesContainer.style.display = 'block';
+    connectBtn.style.display = 'none';
+}
+
+saveBtn.addEventListener('click', async () => {
+
+    if (!selectedPages.length) {
+        showMessage(
+            'Please select at least one page.',
+            true
+        );
+        return;
+    }
+
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'Saving...';
+
+    try {
+
+        const res = await fetch(
+            '/api/facebook/save-pages',
+            {
+                method: 'POST',
+                credentials: 'include',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    pages: selectedPages
+                })
+            }
+        );
+
+        const data = await res.json();
+
+        if (!res.ok) {
+            throw new Error(
+                data.error || 'Save failed'
+            );
+        }
+
+        showMessage(
+            `Successfully connected ${data.count} page(s)!`,
+            false
+        );
+
+        setTimeout(() => {
+            window.location.href = '/index.html';
+        }, 1500);
+
+    } catch (err) {
+
+        console.error(err);
+
+        showMessage(
+            err.message || 'Save failed.',
+            true
+        );
+
+        saveBtn.disabled = false;
+        saveBtn.textContent =
+            'Save Selected Pages';
+    }
+});
+
+const params =
+    new URLSearchParams(window.location.search);
+
+if (params.get('error')) {
+
+    const error = params.get('error');
+
+    const messages = {
+        facebook_denied:
+            'Facebook access was denied.',
+
+        no_pages:
+            'No Facebook pages found.',
+
+        no_code:
+            'Facebook authorization failed.',
+
+        invalid_state:
+            'Session expired. Please reconnect.',
+
+        server_error:
+            'Server error occurred.'
+    };
+
+    showMessage(
+        messages[error] || error,
+        true
+    );
+}
+
+if (params.get('success') === 'true') {
+    loadPagesFromSession();
+}
 </script>
-
-</body>
-</html>
