@@ -23,13 +23,12 @@ body {
     border-radius: 20px;
     padding: 30px;
     width: 100%;
-    max-width: 600px;
+    max-width: 650px;
     border: 1px solid #2a2f3b;
     text-align: center;
 }
 
 h1 { color: #22c55e; margin-bottom: 10px; }
-
 .subtitle { color: #9ca3af; margin-bottom: 20px; }
 
 .btn {
@@ -42,8 +41,6 @@ h1 { color: #22c55e; margin-bottom: 10px; }
     font-weight: bold;
 }
 
-.btn:hover { background: #166fe5; }
-
 .save-btn {
     background: #22c55e;
     width: 100%;
@@ -53,6 +50,7 @@ h1 { color: #22c55e; margin-bottom: 10px; }
 .page {
     display: flex;
     justify-content: space-between;
+    align-items: center;
     background: #1f2937;
     padding: 12px;
     margin: 8px 0;
@@ -68,8 +66,9 @@ h1 { color: #22c55e; margin-bottom: 10px; }
     border-radius: 10px;
 }
 
-.error { background: rgba(255,0,0,0.1); color: #fca5a5; }
-.success { background: rgba(0,255,0,0.1); color: #86efac; }
+.error { background: rgba(255,0,0,0.15); color: #fca5a5; }
+.success { background: rgba(0,255,0,0.15); color: #86efac; }
+small { color: #9ca3af; }
 </style>
 </head>
 
@@ -92,7 +91,7 @@ h1 { color: #22c55e; margin-bottom: 10px; }
 
 <script>
 /* =========================
-   ELEMENTS (SAFE)
+   ELEMENTS
 ========================= */
 const connectBtn = document.getElementById('connectBtn');
 const saveBtn = document.getElementById('saveBtn');
@@ -101,14 +100,20 @@ const pagesList = document.getElementById('pagesList');
 const messageBox = document.getElementById('message');
 
 /* =========================
-   SAFE MESSAGE
+   STATE STORAGE
+========================= */
+let pagesData = [];
+let selectedIds = [];
+
+/* =========================
+   MESSAGE
 ========================= */
 function showMessage(msg, type = "error") {
     messageBox.innerHTML = `<div class="message ${type}">${msg}</div>`;
 }
 
 /* =========================
-   CHECK URL STATUS
+   URL STATUS CHECK
 ========================= */
 const url = new URL(window.location.href);
 const error = url.searchParams.get('error');
@@ -119,7 +124,7 @@ if (error) {
 }
 
 /* =========================
-   CONNECT BUTTON
+   CONNECT FACEBOOK
 ========================= */
 if (connectBtn) {
     connectBtn.addEventListener('click', () => {
@@ -128,7 +133,7 @@ if (connectBtn) {
 }
 
 /* =========================
-   LOAD TEMP PAGES (IMPORTANT FIX)
+   FETCH TEMP PAGES
 ========================= */
 async function loadPages() {
     try {
@@ -138,13 +143,17 @@ async function loadPages() {
 
         const data = await res.json();
 
+        console.log("TEMP PAGES RESPONSE:", data);
+
         if (!data.pages || data.pages.length === 0) {
-            showMessage("No pages found. Try reconnecting Facebook.", "error");
+            showMessage("No pages found. Reconnect Facebook.", "error");
             return;
         }
 
-        renderPages(data.pages, data.token);
+        renderPages(data.pages);
+
     } catch (err) {
+        console.error(err);
         showMessage("Failed to load pages", "error");
     }
 }
@@ -152,14 +161,11 @@ async function loadPages() {
 /* =========================
    RENDER PAGES
 ========================= */
-let selected = [];
-let accessToken = null;
-
-function renderPages(pages, token) {
-    accessToken = token;
+function renderPages(pages) {
+    pagesData = pages;
     pagesSection.classList.remove('hidden');
     pagesList.innerHTML = "";
-    selected = [];
+    selectedIds = [];
 
     pages.forEach(page => {
         const div = document.createElement('div');
@@ -168,7 +174,8 @@ function renderPages(pages, token) {
         div.innerHTML = `
             <div>
                 <strong>${page.name}</strong><br/>
-                <small>ID: ${page.id}</small>
+                <small>ID: ${page.id}</small><br/>
+                <small style="color:#60a5fa;">Token: ${page.access_token ? 'FOUND' : 'MISSING'}</small>
             </div>
             <input type="checkbox" data-id="${page.id}">
         `;
@@ -181,10 +188,11 @@ function renderPages(pages, token) {
             const id = cb.dataset.id;
 
             if (cb.checked) {
-                const page = pages.find(p => p.id === id);
-                selected.push(page);
+                if (!selectedIds.includes(id)) {
+                    selectedIds.push(id);
+                }
             } else {
-                selected = selected.filter(p => p.id !== id);
+                selectedIds = selectedIds.filter(x => x !== id);
             }
         });
     });
@@ -195,10 +203,17 @@ function renderPages(pages, token) {
 ========================= */
 if (saveBtn) {
     saveBtn.addEventListener('click', async () => {
-        if (selected.length === 0) {
+
+        if (selectedIds.length === 0) {
             showMessage("Select at least one page", "error");
             return;
         }
+
+        const selectedPages = pagesData.filter(p =>
+            selectedIds.includes(p.id)
+        );
+
+        console.log("SENDING TO BACKEND:", selectedPages);
 
         try {
             const res = await fetch('/api/facebook/save-pages', {
@@ -208,30 +223,34 @@ if (saveBtn) {
                 },
                 credentials: 'include',
                 body: JSON.stringify({
-                    pages: selected
+                    pages: selectedPages
                 })
             });
 
             const data = await res.json();
 
+            console.log("SAVE RESPONSE:", data);
+
             if (data.success) {
-                showMessage("Pages saved successfully!", "success");
+                showMessage(`Saved ${data.saved} pages successfully!`, "success");
 
                 setTimeout(() => {
                     window.location.href = "/index.html";
                 }, 1500);
+
             } else {
-                showMessage(data.error || "Failed to save pages", "error");
+                showMessage(data.error || "Save failed", "error");
             }
 
         } catch (err) {
+            console.error(err);
             showMessage("Network error", "error");
         }
     });
 }
 
 /* =========================
-   AUTO LOAD AFTER SUCCESS
+   AUTO LOAD
 ========================= */
 if (success === "true") {
     loadPages();
