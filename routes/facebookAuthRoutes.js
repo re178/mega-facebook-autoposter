@@ -40,7 +40,7 @@ router.get('/connect', requireLogin, (req, res) => {
 });
 
 /* =====================================================
-   CALLBACK (DEBUG VERSION)
+   CALLBACK
 ===================================================== */
 router.get('/callback', async (req, res) => {
   try {
@@ -50,11 +50,9 @@ router.get('/callback', async (req, res) => {
 
     if (!code) return res.redirect('/connect-facebook?error=no_code');
     if (state !== req.session.fb_oauth_state)
-        return res.redirect('/connect-facebook?error=bad_state');
+      return res.redirect('/connect-facebook?error=bad_state');
 
     delete req.session.fb_oauth_state;
-
-    console.log("🔑 Exchanging token...");
 
     const tokenRes = await axios.get(
       'https://graph.facebook.com/v20.0/oauth/access_token',
@@ -70,8 +68,6 @@ router.get('/callback', async (req, res) => {
 
     const accessToken = tokenRes.data.access_token;
 
-    console.log("📡 Fetching pages...");
-
     const pagesRes = await axios.get(
       'https://graph.facebook.com/v20.0/me/accounts',
       {
@@ -84,7 +80,7 @@ router.get('/callback', async (req, res) => {
 
     const pages = pagesRes.data.data || [];
 
-    console.log("📄 Pages received:", pages.length);
+    console.log("📄 Pages fetched:", pages.length);
 
     req.session.fb_pages = pages;
     req.session.fb_token = accessToken;
@@ -101,7 +97,8 @@ router.get('/callback', async (req, res) => {
    TEMP PAGES
 ===================================================== */
 router.get('/temp-pages', requireLogin, (req, res) => {
-  console.log("📦 TEMP PAGES REQUEST");
+  console.log("📦 TEMP REQUEST");
+
   res.json({
     pages: req.session.fb_pages || [],
     token: req.session.fb_token || null
@@ -109,33 +106,44 @@ router.get('/temp-pages', requireLogin, (req, res) => {
 });
 
 /* =====================================================
-   SAVE PAGES (FINAL FIX)
+   SAVE PAGES (FIXED + SAFE UPSERT)
 ===================================================== */
 router.post('/save-pages', requireLogin, async (req, res) => {
   try {
     const userId = req.session.userId;
     const sessionPages = req.session.fb_pages;
 
-    console.log("💾 SAVE REQUEST:", { userId });
-
-    if (!sessionPages) {
-      return res.status(400).json({ error: "Session expired" });
+    if (!sessionPages || !sessionPages.length) {
+      return res.status(400).json({ error: "Session expired or empty" });
     }
 
     const selected = req.body.pages || [];
 
-    console.log("📌 Selected pages:", selected.length);
+    console.log("💾 Saving pages:", selected.length);
 
     let saved = 0;
 
-    for (const p of sessionPages) {
-      const isSelected = selected.find(x => x.id === p.id);
+    for (const page of sessionPages) {
+      const isSelected = selected.find(p => p.id === page.id);
       if (!isSelected) continue;
 
-      await Page.saveFacebookPage(userId, p);
+      await Page.findOneAndUpdate(
+        { userId, pageId: page.id },
+        {
+          userId,
+          pageId: page.id,
+          name: page.name,
+          pageToken: page.access_token,
+          category: page.category || null,
+          isConnected: true,
+          updatedAt: new Date()
+        },
+        { upsert: true, new: true }
+      );
+
       saved++;
 
-      console.log("✅ SAVED:", p.name, p.id);
+      console.log("✅ SAVED:", page.name);
     }
 
     res.json({
@@ -153,20 +161,34 @@ router.post('/save-pages', requireLogin, async (req, res) => {
    GET USER PAGES
 ===================================================== */
 router.get('/pages', requireLogin, async (req, res) => {
-  const pages = await Page.find({ userId: req.session.userId });
-  res.json(pages);
+  try {
+    const pages = await Page.find({
+      userId: req.session.userId
+    });
+
+    res.json(pages);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to fetch pages" });
+  }
 });
 
 /* =====================================================
    DISCONNECT
 ===================================================== */
 router.delete('/pages/:id', requireLogin, async (req, res) => {
-  await Page.findOneAndUpdate(
-    { userId: req.session.userId, pageId: req.params.id },
-    { isConnected: false }
-  );
+  try {
+    await Page.findOneAndUpdate(
+      { userId: req.session.userId, pageId: req.params.id },
+      { isConnected: false }
+    );
 
-  res.json({ success: true });
+    res.json({ success: true });
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to disconnect" });
+  }
 });
 
 module.exports = router;
