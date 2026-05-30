@@ -34,7 +34,6 @@
   "openai": "^4.10.0",
   "p-retry": "^5.1.0",
   "stability-client": "^1.0.0"
-}
- 
   }
-}
+ }
+
