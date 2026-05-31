@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>MEGA Control Dashboard</title>
+  <title>VIRALOOP Dashboard</title>
   <link rel="stylesheet" href="css/style.css" />
   <style>
     /* Basic inline styles for live app usability */
@@ -15,7 +15,8 @@
     .sidebar nav a { display: block; padding: 10px 0; color: #fff; cursor: pointer; text-decoration: none; }
     .sidebar nav a.active { font-weight: bold; color: #22c55e; }
     .main { flex: 1; overflow-y: auto; padding: 20px; }
-    .topbar h1 { margin: 0 0 20px; }
+    .topbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+    .topbar h1 { margin: 0; }
     .stats { display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 20px; }
     .card { background: #1f2430; padding: 20px; border-radius: 12px; margin-bottom: 20px; }
     .card h3 { margin-top: 0; margin-bottom: 12px; }
@@ -51,17 +52,34 @@
       border-radius: 10px;
       padding: 12px 16px;
       flex: 1;
-      min-width: 150px;
+      min-width: 160px;
       border-left: 3px solid #22c55e;
+      position: relative;
     }
     .page-card .page-name {
       font-weight: 600;
       color: white;
       margin-bottom: 4px;
+      font-size: 14px;
     }
     .page-card .page-status {
       font-size: 11px;
       color: #22c55e;
+      margin-bottom: 8px;
+    }
+    .page-card .disconnect-btn {
+      background: #dc2626;
+      color: white;
+      border: none;
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 10px;
+      cursor: pointer;
+      margin-top: 6px;
+      width: 100%;
+    }
+    .page-card .disconnect-btn:hover {
+      background: #b91c1c;
     }
     .fb-connect-btn {
       background: #1877f2;
@@ -75,12 +93,7 @@
       display: inline-flex;
       align-items: center;
       gap: 8px;
-      transition: transform 0.2s;
       text-decoration: none;
-    }
-    .fb-connect-btn:hover {
-      transform: scale(1.02);
-      background: #166fe5;
     }
     .fb-add-more {
       background: #2a2f3b;
@@ -100,44 +113,120 @@
       text-align: center;
       padding: 20px;
     }
+    
+    /* Profile Dropdown Styles */
+    .profile-dropdown {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      z-index: 1000;
+    }
+    .profile-btn {
+      background: #007bff;
+      color: white;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    .dropdown-content {
+      display: none;
+      position: absolute;
+      right: 0;
+      top: 45px;
+      background: #1f2430;
+      min-width: 280px;
+      box-shadow: 0 8px 16px rgba(0,0,0,0.2);
+      padding: 12px;
+      border-radius: 8px;
+      z-index: 1001;
+    }
+    .dropdown-content a {
+      display: block;
+      padding: 8px;
+      text-decoration: none;
+      color: #e5e7eb;
+      font-size: 14px;
+    }
+    .dropdown-content a:hover {
+      background: #2a2f3b;
+      border-radius: 4px;
+    }
+    .dropdown-content .divider {
+      border-top: 1px solid #2a2f3b;
+      margin: 8px 0;
+    }
+    #msgList {
+      list-style: none;
+      padding-left: 0;
+      max-height: 200px;
+      overflow-y: auto;
+    }
+    #msgList li {
+      padding: 4px 0;
+      font-size: 12px;
+      color: #9ca3af;
+    }
+    #toastContainer {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      z-index: 9999;
+    }
+    .menu-btn {
+      background: none;
+      border: none;
+      color: white;
+      font-size: 24px;
+      cursor: pointer;
+      display: none;
+    }
+    @media (max-width: 768px) {
+      .sidebar { display: none; }
+      .menu-btn { display: block; }
+      .profile-dropdown { position: fixed; top: 10px; right: 10px; }
+      .profile-btn { padding: 6px 12px; font-size: 12px; }
+    }
   </style>
 </head>
 <body>
+  <!-- Profile Dropdown -->
+  <div class="profile-dropdown">
+    <button class="profile-btn" id="profileBtn">👤 My Account ▼</button>
+    <div id="dropdownContent" class="dropdown-content">
+      <a href="#" onclick="showProfileModal(); return false;">👤 My Profile</a>
+      <a href="#" onclick="showChangePasswordModal(); return false;">🔑 Change Password</a>
+      <div class="divider"></div>
+      <div id="privateMessagesList">
+        <strong>📩 Admin Messages</strong>
+        <ul id="msgList"></ul>
+      </div>
+      <div class="divider"></div>
+      <a href="#" onclick="deleteAccount(); return false;" style="color: #d9534f;">🗑️ Delete Account</a>
+      <div class="divider"></div>
+      <a href="/logout" style="color: #22c55e;">🚪 Logout</a>
+    </div>
+  </div>
+
+  <div id="toastContainer"></div>
+
   <div class="layout">
     <div class="overlay" id="overlay"></div>
+    
     <!-- Sidebar Navigation -->
     <aside class="sidebar">
-
-    <!-- Profile Dropdown -->
-<div class="profile-dropdown" style="position: fixed; top: 10px; right: 20px; z-index: 1000;">
-  <button id="profileBtn" style="background: #007bff; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer;">👤 My Account ▼</button>
-  <div id="dropdownContent" class="dropdown-content" style="display: none; position: absolute; right: 0; background: white; min-width: 280px; box-shadow: 0 8px 16px rgba(0,0,0,0.2); padding: 12px; border-radius: 8px; z-index: 1001;">
-    <a href="/profile" style="display: block; padding: 8px; text-decoration: none; color: #333;">👤 Profile</a>
-    <a href="/change-password" style="display: block; padding: 8px; text-decoration: none; color: #333;">🔑 Change Password</a>
-    <div style="border-top: 1px solid #ddd; margin: 8px 0;"></div>
-    <div id="privateMessagesList">
-      <strong>📩 Admin Messages</strong>
-      <ul id="msgList" style="list-style: none; padding-left: 0; max-height: 200px; overflow-y: auto;"></ul>
-    </div>
-    <div style="border-top: 1px solid #ddd; margin: 8px 0;"></div>
-    <a href="/logout" style="display: block; padding: 8px; text-decoration: none; color: #d9534f;">🚪 Logout</a>
-  </div>
-</div>
-
-<!-- Toast Container for Broadcasts -->
-<div id="toastContainer" style="position: fixed; bottom: 20px; right: 20px; z-index: 9999;"></div>
-      
-      <div class="brand"><span class="dot"></span><h2>MEGA CONTROL</h2></div>
+      <div class="brand"><span class="dot"></span><h2>VIRALOOP</h2></div>
       <nav class="nav">
-        <a class="active" data-page="master">Dashboard</a>
+        <a class="active" data-page="master" href="/index.html">Dashboard</a>
         <a data-page="page" href="/pages">Pages</a>
         <a data-page="schedule" href="/schedule">Schedule</a>
-        <a data-page="systems">Systems</a>
-        <a data-page="automations">Automations</a>
-        <a data-page="logs">Logs</a>
-        <a data-page="earnings">Earnings</a>
-        <a data-page="users">Users</a>
-        <a data-page="settings">Settings</a>
+        <a data-page="systems" href="#">Systems</a>
+        <a data-page="automations" href="#">Automations</a>
+        <a data-page="logs" href="#">Logs</a>
+        <a data-page="earnings" href="#">Earnings</a>
+        <a data-page="users" href="#">Users</a>
+        <a data-page="settings" href="#">Settings</a>
       </nav>
     </aside>
 
@@ -148,9 +237,7 @@
         <h1>Master Dashboard</h1>
       </div>
 
-      <!-- ============================================ -->
-      <!-- FACEBOOK CONNECTION STATUS WIDGET (NEW) -->
-      <!-- ============================================ -->
+      <!-- Facebook Connection Status Widget -->
       <section class="fb-status" id="facebook-status-section">
         <h3>📘 Facebook Connection</h3>
         <div id="fb-status-content">
@@ -192,12 +279,33 @@
     </main>
   </div>
 
+  <!-- Profile Modal (Hidden by default) -->
+  <div id="profileModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.8); z-index:2000; justify-content:center; align-items:center;">
+    <div style="background:#1f2430; padding:30px; border-radius:12px; max-width:400px; width:90%;">
+      <h3 style="color:#22c55e; margin-bottom:20px;">👤 My Profile</h3>
+      <div id="profileInfo"></div>
+      <button onclick="closeProfileModal()" style="background:#374151; color:white; padding:10px; border:none; border-radius:6px; margin-top:20px; width:100%; cursor:pointer;">Close</button>
+    </div>
+  </div>
+
+  <!-- Change Password Modal -->
+  <div id="passwordModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.8); z-index:2000; justify-content:center; align-items:center;">
+    <div style="background:#1f2430; padding:30px; border-radius:12px; max-width:400px; width:90%;">
+      <h3 style="color:#22c55e; margin-bottom:20px;">🔑 Change Password</h3>
+      <input type="password" id="oldPassword" placeholder="Current Password" style="width:100%; padding:10px; margin-bottom:10px; background:#0b1220; border:1px solid #2a2f3b; color:white; border-radius:6px;">
+      <input type="password" id="newPassword" placeholder="New Password (min 6 chars)" style="width:100%; padding:10px; margin-bottom:10px; background:#0b1220; border:1px solid #2a2f3b; color:white; border-radius:6px;">
+      <input type="password" id="confirmPassword" placeholder="Confirm New Password" style="width:100%; padding:10px; margin-bottom:20px; background:#0b1220; border:1px solid #2a2f3b; color:white; border-radius:6px;">
+      <button onclick="changePassword()" style="background:#22c55e; color:white; padding:10px; border:none; border-radius:6px; width:100%; cursor:pointer;">Update Password</button>
+      <button onclick="closePasswordModal()" style="background:#374151; color:white; padding:10px; border:none; border-radius:6px; margin-top:10px; width:100%; cursor:pointer;">Cancel</button>
+    </div>
+  </div>
+
   <!-- Scripts -->
   <script src="js/api.js"></script>
   <script src="js/master.js"></script>
   <script src="/js/dashboard.js"></script>
   
-  <!-- Facebook Status Widget Script -->
+  <!-- Main Dashboard Script -->
   <script>
     // Helper function to escape HTML
     function escapeHtml(str) {
@@ -210,7 +318,193 @@
       });
     }
     
-    // Load Facebook connection status
+    // ========================================
+    // PAGE DISCONNECT/DELETION FUNCTION
+    // ========================================
+    async function disconnectPage(pageId, pageName) {
+      if (!confirm(`⚠️ Remove "${pageName}" from VIRALOOP?\n\nYou can reconnect it later from the Connect Facebook page.`)) {
+        return;
+      }
+      
+      try {
+        const res = await fetch(`/api/facebook/pages/${pageId}`, {
+          method: 'DELETE',
+          credentials: 'include'
+        });
+        
+        const data = await res.json();
+        
+        if (data.success) {
+          showToast('✅ Page disconnected successfully', 'success');
+          loadFacebookStatus(); // Refresh the list
+        } else {
+          showToast('❌ Failed to disconnect: ' + (data.error || 'Unknown error'), 'error');
+        }
+      } catch (err) {
+        showToast('❌ Error: ' + err.message, 'error');
+      }
+    }
+    
+    // ========================================
+    // PROFILE FUNCTIONS
+    // ========================================
+    async function showProfileModal() {
+      try {
+        const res = await fetch('/api/auth/profile', { credentials: 'include' });
+        if (res.ok) {
+          const user = await res.json();
+          document.getElementById('profileInfo').innerHTML = `
+            <p><strong>Name:</strong> ${escapeHtml(user.name || 'N/A')}</p>
+            <p><strong>Email:</strong> ${escapeHtml(user.email)}</p>
+            <p><strong>Role:</strong> ${escapeHtml(user.role || 'User')}</p>
+            <p><strong>Member since:</strong> ${new Date(user.createdAt).toLocaleDateString()}</p>
+            <p><strong>Email Verified:</strong> ${user.isVerified ? '✅ Yes' : '⚠️ No'}</p>
+          `;
+          document.getElementById('profileModal').style.display = 'flex';
+        } else {
+          showToast('Failed to load profile', 'error');
+        }
+      } catch (err) {
+        showToast('Error loading profile', 'error');
+      }
+    }
+    
+    function closeProfileModal() {
+      document.getElementById('profileModal').style.display = 'none';
+    }
+    
+    function showChangePasswordModal() {
+      document.getElementById('passwordModal').style.display = 'flex';
+    }
+    
+    function closePasswordModal() {
+      document.getElementById('passwordModal').style.display = 'none';
+      document.getElementById('oldPassword').value = '';
+      document.getElementById('newPassword').value = '';
+      document.getElementById('confirmPassword').value = '';
+    }
+    
+    async function changePassword() {
+      const oldPassword = document.getElementById('oldPassword').value;
+      const newPassword = document.getElementById('newPassword').value;
+      const confirmPassword = document.getElementById('confirmPassword').value;
+      
+      if (!oldPassword || !newPassword) {
+        showToast('Please fill all fields', 'error');
+        return;
+      }
+      
+      if (newPassword.length < 6) {
+        showToast('New password must be at least 6 characters', 'error');
+        return;
+      }
+      
+      if (newPassword !== confirmPassword) {
+        showToast('Passwords do not match', 'error');
+        return;
+      }
+      
+      try {
+        const res = await fetch('/api/auth/change-password', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ oldPassword, newPassword })
+        });
+        
+        const data = await res.json();
+        
+        if (data.success) {
+          showToast('✅ Password changed successfully', 'success');
+          closePasswordModal();
+        } else {
+          showToast('❌ ' + (data.error || 'Failed to change password'), 'error');
+        }
+      } catch (err) {
+        showToast('Error changing password', 'error');
+      }
+    }
+    
+    async function deleteAccount() {
+      const confirmed = confirm('⚠️ PERMANENT ACTION ⚠️\n\nDelete your account? This will:\n- Delete all your pages\n- Delete all scheduled posts\n- Delete all AI topics\n- Delete all logs\n\nThis cannot be undone!\n\nType "DELETE" to confirm:');
+      
+      if (!confirmed) return;
+      
+      const confirmText = prompt('Type "DELETE" to confirm account deletion:');
+      if (confirmText !== 'DELETE') {
+        showToast('Account deletion cancelled', 'error');
+        return;
+      }
+      
+      try {
+        const res = await fetch('/api/auth/account', {
+          method: 'DELETE',
+          credentials: 'include'
+        });
+        
+        const data = await res.json();
+        
+        if (data.success) {
+          showToast('Account deleted. Redirecting...', 'success');
+          setTimeout(() => {
+            window.location.href = '/logout';
+          }, 2000);
+        } else {
+          showToast('❌ ' + (data.error || 'Failed to delete account'), 'error');
+        }
+      } catch (err) {
+        showToast('Error deleting account', 'error');
+      }
+    }
+    
+    // ========================================
+    // TOAST NOTIFICATION
+    // ========================================
+    function showToast(message, type = 'info') {
+      const container = document.getElementById('toastContainer');
+      const toast = document.createElement('div');
+      toast.style.cssText = `
+        background: ${type === 'success' ? '#22c55e' : type === 'error' ? '#dc2626' : '#1877f2'};
+        color: white;
+        padding: 12px 20px;
+        border-radius: 8px;
+        margin-bottom: 10px;
+        font-size: 14px;
+        animation: slideIn 0.3s ease;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+      `;
+      toast.textContent = message;
+      container.appendChild(toast);
+      
+      setTimeout(() => {
+        toast.style.opacity = '0';
+        setTimeout(() => toast.remove(), 300);
+      }, 3000);
+    }
+    
+    // ========================================
+    // LOAD MESSAGES
+    // ========================================
+    async function loadMessages() {
+      try {
+        const res = await fetch('/api/user/messages', { credentials: 'include' });
+        if (res.ok) {
+          const msgs = await res.json();
+          const msgList = document.getElementById('msgList');
+          if (msgList && msgs.length) {
+            msgList.innerHTML = msgs.map(m => `<li>📨 ${escapeHtml(m.message)}</li>`).join('');
+          } else if (msgList) {
+            msgList.innerHTML = '<li>No new messages</li>';
+          }
+        }
+      } catch (err) {
+        console.error('Messages error:', err);
+      }
+    }
+    
+    // ========================================
+    // LOAD FACEBOOK CONNECTION STATUS
+    // ========================================
     async function loadFacebookStatus() {
       const container = document.getElementById('fb-status-content');
       if (!container) return;
@@ -240,6 +534,9 @@
                 <div class="page-card">
                   <div class="page-name">${escapeHtml(p.name)}</div>
                   <div class="page-status">✅ Connected</div>
+                  <button class="disconnect-btn" onclick="disconnectPage('${p.pageId}', '${escapeHtml(p.name)}')">
+                    🚫 Disconnect
+                  </button>
                 </div>
               `).join('')}
               <div style="display: flex; align-items: center;">
@@ -262,9 +559,25 @@
       }
     }
     
-    // Run when page loads
+    // Profile dropdown toggle
     document.addEventListener('DOMContentLoaded', () => {
+      const profileBtn = document.getElementById('profileBtn');
+      const dropdownContent = document.getElementById('dropdownContent');
+      
+      if (profileBtn) {
+        profileBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const isVisible = dropdownContent.style.display === 'block';
+          dropdownContent.style.display = isVisible ? 'none' : 'block';
+        });
+        
+        document.addEventListener('click', () => {
+          dropdownContent.style.display = 'none';
+        });
+      }
+      
       loadFacebookStatus();
+      loadMessages();
     });
   </script>
 </body>
