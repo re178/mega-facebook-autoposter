@@ -114,5 +114,3 @@ function startAutoMaintenance() {
 module.exports = {
   startAutoMaintenance
 };
-
-Which does this does??
