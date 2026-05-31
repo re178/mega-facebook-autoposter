@@ -89,6 +89,14 @@ body::before {
     padding: 8px;
     border-radius: 6px;
 }
+.info-message {
+    color: #fbbf24;
+    margin-top: 10px;
+    font-size: 13px;
+    background: rgba(251,191,36,0.1);
+    padding: 8px;
+    border-radius: 6px;
+}
 .links {
     margin-top: 20px;
     display: flex;
@@ -114,6 +122,16 @@ body::before {
     text-decoration: none;
     margin: 0 8px;
 }
+.spam-warning {
+    background: #1e293b;
+    border-left: 3px solid #fbbf24;
+    padding: 10px;
+    margin-top: 15px;
+    font-size: 11px;
+    color: #94a3b8;
+    text-align: left;
+    border-radius: 6px;
+}
 </style>
 </head>
 <body>
@@ -135,6 +153,10 @@ body::before {
         <a href="/signup">Create Account</a>
     </div>
 
+    <div class="spam-warning">
+        📧 <strong>Tip:</strong> Didn't get verification email? Check your <strong>Spam/Junk folder</strong> and mark us as "Not Spam"!
+    </div>
+
     <div class="footer-text">
         <a href="/privacy">Privacy</a> | 
         <a href="/terms">Terms</a> | 
@@ -150,21 +172,28 @@ body::before {
     const messageContainer = document.getElementById('message-container');
     
     if (urlParams.get('verified') === 'true') {
-        messageContainer.innerHTML = '<div class="success-message">✅ Email verified! You can now log in.</div>';
+        messageContainer.innerHTML = '<div class="success-message">✅ Email verified successfully! You can now log in.</div>';
         setTimeout(() => {
             messageContainer.innerHTML = '';
-        }, 5000);
+        }, 8000);
     }
     
     if (urlParams.get('registered') === 'true') {
-        messageContainer.innerHTML = '<div class="success-message">✅ Account created! Please check your email to verify your account.</div>';
+        messageContainer.innerHTML = '<div class="success-message">✅ Account created! Please check your email to verify your account. <strong>Check your spam folder too!</strong></div>';
         setTimeout(() => {
             messageContainer.innerHTML = '';
-        }, 5000);
+        }, 10000);
     }
     
     if (urlParams.get('reset') === 'true') {
         messageContainer.innerHTML = '<div class="success-message">✅ Password reset successfully! You can now log in.</div>';
+        setTimeout(() => {
+            messageContainer.innerHTML = '';
+        }, 5000);
+    }
+    
+    if (urlParams.get('error') === 'invalid_or_expired') {
+        messageContainer.innerHTML = '<div class="error-message">❌ Invalid or expired verification link. Please request a new one.</div>';
         setTimeout(() => {
             messageContainer.innerHTML = '';
         }, 5000);
