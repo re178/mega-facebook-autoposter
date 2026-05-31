@@ -10,7 +10,7 @@ const {
 const router = express.Router();
 
 /* =====================================================
-   LOGGING HELPER (SMART DEBUG)
+   LOGGING HELPER
 ===================================================== */
 function log(step, data) {
     console.log(`\n🟢 [AUTH:${step}]`, data || '');
@@ -59,7 +59,7 @@ router.post('/signup', async (req, res) => {
 
         res.json({
             success: true,
-            message: 'Check your email to verify account'
+            message: 'Check your email to verify account (check spam folder too!)'
         });
 
     } catch (err) {
@@ -69,16 +69,11 @@ router.post('/signup', async (req, res) => {
 });
 
 /* =====================================================
-   VERIFY EMAIL (FIXED FOR PRODUCTION)
-   Works with BOTH:
-   - /api/auth/verify-email?token=xxx
-   - direct email link
+   VERIFY EMAIL - SIMPLE VERSION
 ===================================================== */
 router.get('/verify-email', async (req, res) => {
     try {
         const { token } = req.query;
-
-        log('VERIFY HIT', token);
 
         if (!token) {
             return res.redirect('/login?error=missing_token');
@@ -98,15 +93,13 @@ router.get('/verify-email', async (req, res) => {
         user.verificationExpires = null;
         await user.save();
 
-        log('VERIFIED', user.email);
-
+        // Send welcome email
         try {
             await sendWelcomeEmail(user.email, user.name);
-        } catch (e) {
-            console.log("Welcome email failed:", e.message);
+        } catch (err) {
+            console.log('Welcome email failed:', err.message);
         }
 
-        // IMPORTANT: redirect user properly
         return res.redirect('/login?verified=true');
 
     } catch (err) {
@@ -200,6 +193,82 @@ router.post('/resend-verification', async (req, res) => {
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: 'Server error' });
+    }
+});
+
+/* =====================================================
+   GET PROFILE
+===================================================== */
+router.get('/profile', async (req, res) => {
+    try {
+        if (!req.session.userId) {
+            return res.status(401).json({ error: 'Unauthorized' });
+        }
+        const user = await User.findById(req.session.userId).select('-password');
+        res.json(user);
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to fetch profile' });
+    }
+});
+
+/* =====================================================
+   CHANGE PASSWORD
+===================================================== */
+const bcrypt = require('bcrypt');
+router.post('/change-password', async (req, res) => {
+    try {
+        if (!req.session.userId) {
+            return res.status(401).json({ error: 'Unauthorized' });
+        }
+        
+        const { oldPassword, newPassword } = req.body;
+        const user = await User.findById(req.session.userId);
+        
+        const isValid = await bcrypt.compare(oldPassword, user.password);
+        if (!isValid) {
+            return res.status(401).json({ error: 'Current password is incorrect' });
+        }
+        
+        user.password = newPassword;
+        await user.save();
+        
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to change password' });
+    }
+});
+
+/* =====================================================
+   DELETE ACCOUNT
+===================================================== */
+router.delete('/account', async (req, res) => {
+    try {
+        if (!req.session.userId) {
+            return res.status(401).json({ error: 'Unauthorized' });
+        }
+        
+        const userId = req.session.userId;
+        
+        // Delete all user data
+        const Page = require('../models/Page');
+        const Post = require('../models/Post');
+        const AiTopic = require('../models/AiTopic');
+        const AiScheduledPost = require('../models/AiScheduledPost');
+        const Log = require('../models/Log');
+        
+        await Page.deleteMany({ userId });
+        await Post.deleteMany({ userId });
+        await AiTopic.deleteMany({ userId });
+        await AiScheduledPost.deleteMany({ userId });
+        await Log.deleteMany({ userId });
+        await User.findByIdAndDelete(userId);
+        
+        req.session.destroy();
+        
+        res.json({ success: true });
+    } catch (err) {
+        console.error('Delete account error:', err);
+        res.status(500).json({ error: 'Failed to delete account' });
     }
 });
 
