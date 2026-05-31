@@ -3,55 +3,148 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>Connect Facebook</title>
+<title>Connect Facebook - VIRALOOP</title>
 
 <style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
 body {
-    font-family: Arial;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     background: #0b1220;
     color: white;
     display: flex;
     justify-content: center;
-    padding: 30px;
+    align-items: center;
+    min-height: 100vh;
+    padding: 20px;
 }
 
 .container {
     width: 100%;
     max-width: 650px;
     background: #111827;
-    padding: 20px;
-    border-radius: 15px;
+    padding: 30px;
+    border-radius: 20px;
+    box-shadow: 0 25px 50px -12px rgba(0,0,0,0.25);
+}
+
+h2 {
+    color: #22c55e;
+    margin-bottom: 20px;
+    font-size: 24px;
 }
 
 button {
-    padding: 12px;
+    padding: 12px 20px;
     border: none;
     border-radius: 8px;
     cursor: pointer;
-    margin-top: 10px;
+    font-size: 14px;
+    font-weight: 600;
+    transition: opacity 0.2s;
+}
+
+button:hover {
+    opacity: 0.9;
 }
 
 .connect {
     background: #1877f2;
     color: white;
+    width: 100%;
+    margin-bottom: 20px;
 }
 
 .save {
     background: #22c55e;
+    color: white;
     width: 100%;
+    margin-top: 20px;
+}
+
+.save:disabled {
+    background: #4b5563;
+    cursor: not-allowed;
+    opacity: 0.7;
 }
 
 .page {
     display: flex;
     justify-content: space-between;
+    align-items: center;
     background: #1f2937;
-    padding: 10px;
+    padding: 15px;
     margin: 8px 0;
-    border-radius: 8px;
+    border-radius: 12px;
 }
 
-small {
+.page-info b {
+    color: white;
+    font-size: 16px;
+}
+
+.page-info small {
     color: #9ca3af;
+    font-size: 11px;
+    display: block;
+    margin-top: 4px;
+}
+
+.page-info .token-ok {
+    color: #22c55e;
+    font-size: 10px;
+    margin-top: 4px;
+    display: inline-block;
+}
+
+input[type="checkbox"] {
+    width: 20px;
+    height: 20px;
+    cursor: pointer;
+    accent-color: #22c55e;
+}
+
+.loading {
+    text-align: center;
+    padding: 40px;
+    color: #9ca3af;
+}
+
+.loading-spinner {
+    display: inline-block;
+    width: 40px;
+    height: 40px;
+    border: 3px solid #1f2937;
+    border-top: 3px solid #22c55e;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin-bottom: 12px;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+.error-message {
+    background: #7f1d1d;
+    padding: 12px;
+    border-radius: 8px;
+    margin: 16px 0;
+    color: #fca5a5;
+    font-size: 14px;
+    text-align: center;
+}
+
+.info-box {
+    background: #1e293b;
+    padding: 12px;
+    border-radius: 8px;
+    margin: 16px 0;
+    color: #94a3b8;
+    font-size: 13px;
+    text-align: center;
+    border-left: 3px solid #22c55e;
 }
 </style>
 </head>
@@ -59,15 +152,18 @@ small {
 <body>
 
 <div class="container">
+    <h2>📘 Connect Facebook Pages</h2>
 
-    <h2>Facebook Pages</h2>
+    <button class="connect" id="connectBtn">🔗 Connect Facebook Account</button>
 
-    <button class="connect" id="connectBtn">Connect Facebook</button>
+    <div id="pagesBox">
+        <div class="loading">
+            <div class="loading-spinner"></div>
+            <p>Loading your pages...</p>
+        </div>
+    </div>
 
-    <div id="pagesBox"></div>
-
-    <button class="save" id="saveBtn" style="display:none;">Save Selected Pages</button>
-
+    <button class="save" id="saveBtn" style="display:none;">💾 Save Selected Pages</button>
 </div>
 
 <script>
@@ -89,35 +185,45 @@ connectBtn.onclick = () => {
    LOAD PAGES FROM SESSION
 ========================= */
 async function loadPages() {
+    pagesBox.innerHTML = '<div class="loading"><div class="loading-spinner"></div><p>Loading your Facebook pages...</p></div>';
+    saveBtn.style.display = "none";
+    selected = [];
+    
     try {
         const res = await fetch("/api/facebook/temp-pages", {
             credentials: "include"
         });
 
+        if (res.status === 401) {
+            pagesBox.innerHTML = '<div class="error-message">⚠️ Session expired. Please reconnect your Facebook account.</div>';
+            return;
+        }
+
         const data = await res.json();
 
         console.log("📦 TEMP PAGES:", data);
 
-        if (!data.pages || data.pages.length === 0) {
-            pagesBox.innerHTML = "<p>No pages found</p>";
+        if (data.error === "No pages in session" || !data.pages || data.pages.length === 0) {
+            pagesBox.innerHTML = '<div class="info-box">🔑 No pages found. Click "Connect Facebook Account" to authorize VIRALOOP to access your pages.</div>';
             return;
         }
 
         pages = data.pages;
-        pagesBox.innerHTML = "";
+        pagesBox.innerHTML = '';
 
         data.pages.forEach(p => {
-
             const div = document.createElement("div");
             div.className = "page";
 
+            const hasToken = p.access_token ? true : false;
+            
             div.innerHTML = `
-                <div>
-                    <b>${p.name}</b><br/>
-                    <small>ID: ${p.id}</small><br/>
-                    <small>${p.access_token ? "Token OK" : "NO TOKEN"}</small>
+                <div class="page-info">
+                    <b>${escapeHtml(p.name)}</b>
+                    <small>ID: ${escapeHtml(p.id)}</small>
+                    ${hasToken ? '<span class="token-ok">✅ Token OK</span>' : '<span class="token-ok" style="color:#ef4444;">❌ No token</span>'}
                 </div>
-                <input type="checkbox" data-id="${p.id}">
+                <input type="checkbox" data-id="${p.id}" ${!hasToken ? 'disabled' : ''}>
             `;
 
             pagesBox.appendChild(div);
@@ -125,34 +231,46 @@ async function loadPages() {
 
         document.querySelectorAll("input[type='checkbox']").forEach(cb => {
             cb.addEventListener("change", () => {
-
                 const id = cb.dataset.id;
-
                 if (cb.checked) {
                     if (!selected.includes(id)) selected.push(id);
                 } else {
                     selected = selected.filter(x => x !== id);
                 }
-
                 console.log("🎯 SELECTED:", selected);
-
                 saveBtn.style.display = selected.length ? "block" : "none";
             });
         });
 
     } catch (err) {
         console.error(err);
-        pagesBox.innerHTML = "<p>Error loading pages</p>";
+        pagesBox.innerHTML = '<div class="error-message">❌ Error loading pages. Please try again.</div>';
     }
+}
+
+function escapeHtml(str) {
+    if (!str) return '';
+    return str.replace(/[&<>]/g, function(m) {
+        if (m === '&') return '&amp;';
+        if (m === '<') return '&lt;';
+        if (m === '>') return '&gt;';
+        return m;
+    });
 }
 
 /* =========================
    SAVE PAGES (ONLY IDS)
 ========================= */
 saveBtn.onclick = async () => {
-
+    if (selected.length === 0) {
+        alert("Please select at least one page to save.");
+        return;
+    }
+    
+    saveBtn.disabled = true;
+    saveBtn.textContent = "⏳ Saving...";
+    
     try {
-
         console.log("📤 SENDING IDS:", selected);
 
         const res = await fetch("/api/facebook/save-pages", {
@@ -171,15 +289,18 @@ saveBtn.onclick = async () => {
         console.log("💾 SAVE RESPONSE:", data);
 
         if (data.success) {
-            alert(`Saved ${data.saved} pages`);
+            alert(`Saved ${data.saved} page(s)! Redirecting to dashboard...`);
             window.location.href = "/index.html";
         } else {
-            alert(data.error || "Failed to save");
+            alert(data.error || "Failed to save pages");
+            saveBtn.disabled = false;
+            saveBtn.textContent = "💾 Save Selected Pages";
         }
-
     } catch (err) {
         console.error(err);
-        alert("Network error");
+        alert("Network error. Please try again.");
+        saveBtn.disabled = false;
+        saveBtn.textContent = "💾 Save Selected Pages";
     }
 };
 
@@ -187,6 +308,10 @@ saveBtn.onclick = async () => {
    AUTO LOAD AFTER SUCCESS
 ========================= */
 if (window.location.search.includes("success=true")) {
+    loadPages();
+} else if (window.location.search.includes("error")) {
+    pagesBox.innerHTML = '<div class="error-message">❌ Facebook connection failed. Please try again.</div>';
+} else {
     loadPages();
 }
 </script>
