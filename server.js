@@ -4,21 +4,26 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const path = require('path');
+const fs = require('fs');
 const session = require('express-session');
 const bcrypt = require('bcrypt');
+const csrf = require('csurf');
 const rateLimit = require('express-rate-limit');
 const helmet = require('helmet');
 const MongoStore = require('connect-mongo');
 
+// ==================== MODELS ====================
+const User = require('./models/User');
+const Page = require('./models/Page');
+
+// ==================== APP INIT ====================
 const app = express();
 app.set('trust proxy', 1);
 
 const PORT = process.env.PORT || 10000;
 const isProduction = process.env.NODE_ENV === 'production';
 
-/* =====================================================
-   SECURITY HEADERS
-===================================================== */
+// ==================== SECURITY HEADERS ====================
 app.use(
     helmet({
         contentSecurityPolicy: {
@@ -38,9 +43,7 @@ app.use(
     })
 );
 
-/* =====================================================
-   CORS
-===================================================== */
+// ==================== CORS ====================
 app.use(
     cors({
         origin: process.env.CLIENT_ORIGIN || 'http://localhost:10000',
@@ -48,15 +51,11 @@ app.use(
     })
 );
 
-/* =====================================================
-   BODY PARSER
-===================================================== */
+// ==================== BODY PARSER ====================
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-/* =====================================================
-   SESSION (CRITICAL FIX: STABLE FOR FACEBOOK OAUTH)
-===================================================== */
+// ==================== SESSION (STABLE FOR FACEBOOK OAUTH) ====================
 app.use(
     session({
         name: 'voxtra.sid',
@@ -76,34 +75,85 @@ app.use(
     })
 );
 
-/* =====================================================
-   RATE LIMITING
-===================================================== */
+// ==================== CSRF PROTECTION ====================
+const csrfProtection = csrf({ cookie: false });
+
+// Routes excluded from CSRF (webhooks, auth endpoints)
+const csrfExcludedRoutes = [
+    '/login',
+    '/webhook',
+    '/api/auth/signup',
+    '/api/auth/forgot-password',
+    '/api/auth/reset-password',
+    '/api/facebook/callback'
+];
+
+app.use((req, res, next) => {
+    // Skip CSRF for GET requests and excluded routes
+    if (req.method === 'GET' || csrfExcludedRoutes.includes(req.path)) {
+        return next();
+    }
+    return csrfProtection(req, res, next);
+});
+
+// Make CSRF token available to frontend
+app.use((req, res, next) => {
+    try {
+        if (req.csrfToken && !req.path.startsWith('/api')) {
+            res.locals.csrfToken = req.csrfToken();
+        }
+    } catch (e) {
+        res.locals.csrfToken = '';
+    }
+    next();
+});
+
+// Helper to inject CSRF token into HTML
+function renderWithCsrf(filePath) {
+    return (req, res) => {
+        const html = fs.readFileSync(filePath, 'utf8');
+        let token = '';
+        try {
+            token = req.csrfToken ? req.csrfToken() : '';
+        } catch (e) {}
+        const output = html.replace(
+            '</head>',
+            `<meta name="csrf-token" content="${token}">\n</head>`
+        );
+        res.send(output);
+    };
+}
+
+// ==================== RATE LIMITING ====================
 const apiLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
-    max: 200
+    max: 200,
+    message: { error: 'Too many requests' }
 });
 
 const authLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
-    max: 10
+    max: 10,
+    message: { error: 'Too many attempts, try later' }
 });
 
 app.use('/api', apiLimiter);
 app.post('/login', authLimiter);
 app.post('/api/auth/signup', authLimiter);
+app.post('/api/auth/forgot-password', authLimiter);
+app.post('/api/auth/reset-password', authLimiter);
 
-/* =====================================================
-   AUTH MIDDLEWARE
-===================================================== */
+// ==================== AUTH MIDDLEWARE ====================
 function requireLogin(req, res, next) {
     if (req.session?.userId) return next();
-    return res.status(401).json({ error: 'Unauthorized' });
+
+    if (req.path.startsWith('/api')) {
+        return res.status(401).json({ error: 'Unauthorized' });
+    }
+    return res.redirect('/login');
 }
 
-/* =====================================================
-   ROUTES
-===================================================== */
+// ==================== ROUTES ====================
 const dashboardRoutes = require('./routes/dashboardRoutes');
 const pageFeaturesRoutes = require('./routes/pageFeaturesRoutes');
 const webhookRoutes = require('./routes/webhookRoutes');
@@ -113,94 +163,85 @@ const userMessagesRoutes = require('./routes/userMessages');
 const authRoutes = require('./routes/authRoutes');
 const facebookAuthRoutes = require('./routes/facebookAuthRoutes');
 
-/* IMPORTANT FIX:
-   DO NOT protect facebook routes here
-   because they already handle auth internally
-*/
+// Public webhook (no auth)
 app.use('/', webhookRoutes);
 
+// Public auth routes (no login required)
+app.use('/api/auth', authRoutes);
+
+// Facebook OAuth routes (handle auth internally)
+app.use('/api/facebook', facebookAuthRoutes);
+
+// Protected API routes (require login)
 app.use('/api/dashboard', requireLogin, dashboardRoutes);
 app.use('/api/dashboard', requireLogin, pageFeaturesRoutes);
 app.use('/api/ai', requireLogin, aiRoutes);
 app.use('/api/admin', requireLogin, adminRoutes);
 app.use('/api/user/messages', requireLogin, userMessagesRoutes);
 
-app.use('/api/auth', authRoutes);
-
-/* 🔥 FIXED FACEBOOK ROUTES */
-app.use('/api/facebook', facebookAuthRoutes);
-
-/* =====================================================
-   STATIC FILES
-===================================================== */
+// ==================== STATIC FILES ====================
 app.use(express.static(path.join(__dirname, 'public')));
 
-/* =====================================================
-   FRONTEND PAGES
-===================================================== */
+// ==================== FRONTEND PAGES ====================
 app.get('/login', (req, res) =>
     res.sendFile(path.join(__dirname, 'public/login.html'))
 );
 
-app.get('/connect-facebook', requireLogin, (req, res) =>
-    res.sendFile(path.join(__dirname, 'public/connect-facebook.html'))
-);
+// Protected pages with CSRF token injection
+app.get('/connect-facebook', requireLogin, renderWithCsrf(path.join(__dirname, 'public/connect-facebook.html')));
+app.get('/index.html', requireLogin, renderWithCsrf(path.join(__dirname, 'public/index.html')));
+app.get('/pages', requireLogin, renderWithCsrf(path.join(__dirname, 'public/page.html')));
+app.get('/schedule', requireLogin, renderWithCsrf(path.join(__dirname, 'public/schedule.html')));
 
+// Auth pages (no CSRF needed)
 app.get('/signup', (req, res) =>
     res.sendFile(path.join(__dirname, 'public/signup.html'))
 );
-
 app.get('/forgot-password', (req, res) =>
     res.sendFile(path.join(__dirname, 'public/forgot-password.html'))
 );
-
 app.get('/reset-password', (req, res) =>
     res.sendFile(path.join(__dirname, 'public/reset-password.html'))
 );
-
 app.get('/verify-email', (req, res) =>
     res.sendFile(path.join(__dirname, 'public/verify-email.html'))
 );
 
-/* =====================================================
-   LEGAL PAGES
-===================================================== */
+// Legal pages
 app.get('/privacy', (req, res) =>
     res.sendFile(path.join(__dirname, 'public/privacy.html'))
 );
-
 app.get('/terms', (req, res) =>
     res.sendFile(path.join(__dirname, 'public/terms.html'))
 );
-
-/* =====================================================
-   PROTECTED PAGES
-===================================================== */
-app.get('/index.html', requireLogin, (req, res) =>
-    res.sendFile(path.join(__dirname, 'public/index.html'))
+app.get('/cookies', (req, res) =>
+    res.sendFile(path.join(__dirname, 'public/cookies.html'))
+);
+app.get('/data-deletion', (req, res) =>
+    res.sendFile(path.join(__dirname, 'public/data-deletion.html'))
+);
+app.get('/community-guidelines', (req, res) =>
+    res.sendFile(path.join(__dirname, 'public/community-guidelines.html'))
 );
 
-app.get('/pages', requireLogin, (req, res) =>
-    res.sendFile(path.join(__dirname, 'public/page.html'))
-);
-
-app.get('/schedule', requireLogin, (req, res) =>
-    res.sendFile(path.join(__dirname, 'public/schedule.html'))
-);
-
-/* =====================================================
-   LOGIN
-===================================================== */
-const User = require('./models/User');
-
+// ==================== LOGIN ====================
 app.post('/login', async (req, res) => {
     try {
         const { email, password } = req.body;
+
+        if (!email || !password) {
+            return res.status(400).json({ error: 'Missing credentials' });
+        }
 
         const user = await User.findOne({ email: email.toLowerCase() });
 
         if (!user || !user.isActive) {
             return res.status(401).json({ error: 'Invalid account' });
+        }
+
+        // Check if user is verified (new signups after Jan 1 2025)
+        if (user.createdAt > new Date('2025-01-01') && !user.isVerified) {
+            return res.status(401).json({ error: 'Please verify your email before logging in.' });
         }
 
         const match = await bcrypt.compare(password, user.password);
@@ -222,23 +263,19 @@ app.post('/login', async (req, res) => {
         });
 
     } catch (err) {
-        console.error(err);
+        console.error('Login error:', err);
         res.status(500).json({ error: 'Server error' });
     }
 });
 
-/* =====================================================
-   LOGOUT
-===================================================== */
+// ==================== LOGOUT ====================
 app.get('/logout', (req, res) => {
     req.session.destroy(() => {
         res.redirect('/login');
     });
 });
 
-/* =====================================================
-   SESSION CHECK
-===================================================== */
+// ==================== SESSION CHECK ====================
 app.get('/api/session', (req, res) => {
     if (!req.session.userId) {
         return res.json({ loggedIn: false });
@@ -251,18 +288,74 @@ app.get('/api/session', (req, res) => {
     });
 });
 
-/* =====================================================
-   DATABASE CONNECTION
-===================================================== */
+// ==================== ENV PAGE SYNC ====================
+async function syncPagesFromEnv(adminId) {
+    if (!process.env.PAGES_JSON) return;
+
+    let pages;
+    try {
+        pages = JSON.parse(process.env.PAGES_JSON);
+    } catch (err) {
+        console.error('Invalid PAGES_JSON');
+        return;
+    }
+
+    for (const p of pages) {
+        if (!p.pageId || !p.pageToken) continue;
+
+        const exists = await Page.findOne({ pageId: p.pageId });
+
+        if (!exists) {
+            await Page.create({
+                name: p.name,
+                pageId: p.pageId,
+                pageToken: p.pageToken,
+                userId: adminId
+            });
+
+            console.log(`✅ Page synced: ${p.name}`);
+        }
+    }
+}
+
+// ==================== START SCHEDULERS ====================
+const { startScheduler } = require('./services/scheduler');
+const { startAiPostScheduler } = require('./services/aiPostScheduler');
+
+// ==================== DATABASE CONNECTION & SERVER START ====================
 mongoose
     .connect(process.env.MONGO_URI)
-    .then(() => {
-        console.log('MongoDB connected');
+    .then(async () => {
+        console.log('✅ MongoDB connected');
 
+        // Find admin user for page sync (if any)
+        const admin = await User.findOne({ role: 'admin' });
+        if (admin) {
+            await syncPagesFromEnv(admin._id);
+        }
+
+        // Start both schedulers
+        try {
+            startScheduler();
+            console.log('✅ Regular scheduler started');
+        } catch (err) {
+            console.error('❌ Regular scheduler error:', err.message);
+        }
+
+        try {
+            startAiPostScheduler();
+            console.log('✅ AI Post scheduler started');
+        } catch (err) {
+            console.error('❌ AI Post scheduler error:', err.message);
+        }
+
+        // Start server
         app.listen(PORT, () => {
-            console.log(`Server running on port ${PORT}`);
+            console.log(`🚀 Server running on port ${PORT}`);
+            console.log(`📡 Environment: ${isProduction ? 'PRODUCTION' : 'DEVELOPMENT'}`);
         });
     })
     .catch(err => {
-        console.error('MongoDB error:', err.message);
+        console.error('❌ MongoDB connection error:', err.message);
+        process.exit(1);
     });
