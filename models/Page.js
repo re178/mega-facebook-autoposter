@@ -79,7 +79,7 @@ const PageSchema = new mongoose.Schema({
         required: true
     },
 
-    encryptedToken: {
+    pageToken: {
         type: String,
         required: true
     },
