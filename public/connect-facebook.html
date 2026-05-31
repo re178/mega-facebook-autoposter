@@ -3,243 +3,192 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>Connect Facebook - VIRALOOP</title>
+<title>Connect Facebook</title>
 
 <style>
-* { margin: 0; padding: 0; box-sizing: border-box; }
-
 body {
-    font-family: Arial, sans-serif;
-    background: linear-gradient(180deg, #020617, #0b1220);
-    min-height: 100vh;
+    font-family: Arial;
+    background: #0b1220;
+    color: white;
     display: flex;
     justify-content: center;
-    align-items: center;
-    padding: 20px;
+    padding: 30px;
 }
 
 .container {
-    background: rgba(17, 24, 39, 0.95);
-    border-radius: 20px;
-    padding: 30px;
     width: 100%;
     max-width: 650px;
-    border: 1px solid #2a2f3b;
-    text-align: center;
+    background: #111827;
+    padding: 20px;
+    border-radius: 15px;
 }
 
-h1 { color: #22c55e; margin-bottom: 10px; }
-.subtitle { color: #9ca3af; margin-bottom: 20px; }
+button {
+    padding: 12px;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    margin-top: 10px;
+}
 
-.btn {
+.connect {
     background: #1877f2;
     color: white;
-    border: none;
-    padding: 14px 20px;
-    border-radius: 30px;
-    cursor: pointer;
-    font-weight: bold;
 }
 
-.save-btn {
+.save {
     background: #22c55e;
     width: 100%;
-    margin-top: 15px;
 }
 
 .page {
     display: flex;
     justify-content: space-between;
-    align-items: center;
     background: #1f2937;
-    padding: 12px;
-    margin: 8px 0;
-    border-radius: 10px;
-    color: white;
-    text-align: left;
-}
-
-.hidden { display: none; }
-
-.message {
-    margin: 10px 0;
     padding: 10px;
-    border-radius: 10px;
+    margin: 8px 0;
+    border-radius: 8px;
 }
 
-.error { background: rgba(255,0,0,0.15); color: #fca5a5; }
-.success { background: rgba(0,255,0,0.15); color: #86efac; }
-
-small { color: #9ca3af; }
+small {
+    color: #9ca3af;
+}
 </style>
 </head>
 
 <body>
 
 <div class="container">
-    <h1>Connect Facebook</h1>
-    <div class="subtitle">Link your Facebook Pages</div>
 
-    <div id="message"></div>
+    <h2>Facebook Pages</h2>
 
-    <button id="connectBtn" class="btn">Connect Facebook</button>
+    <button class="connect" id="connectBtn">Connect Facebook</button>
 
-    <div id="pagesSection" class="hidden">
-        <h3 style="color:white; margin-top:20px;">Select Pages</h3>
-        <div id="pagesList"></div>
-        <button id="saveBtn" class="btn save-btn">Save Pages</button>
-    </div>
+    <div id="pagesBox"></div>
+
+    <button class="save" id="saveBtn" style="display:none;">Save Selected Pages</button>
+
 </div>
 
 <script>
-document.addEventListener("DOMContentLoaded", () => {
+const connectBtn = document.getElementById("connectBtn");
+const saveBtn = document.getElementById("saveBtn");
+const pagesBox = document.getElementById("pagesBox");
 
-    console.log("🔥 FRONTEND LOADED SUCCESSFULLY");
+let pages = [];
+let selected = [];
 
-    const connectBtn = document.getElementById('connectBtn');
-    const saveBtn = document.getElementById('saveBtn');
-    const pagesSection = document.getElementById('pagesSection');
-    const pagesList = document.getElementById('pagesList');
-    const messageBox = document.getElementById('message');
+/* =========================
+   CONNECT
+========================= */
+connectBtn.onclick = () => {
+    window.location.href = "/api/facebook/connect";
+};
 
-    let pagesData = [];
-    let selectedIds = [];
+/* =========================
+   LOAD PAGES FROM SESSION
+========================= */
+async function loadPages() {
+    try {
+        const res = await fetch("/api/facebook/temp-pages", {
+            credentials: "include"
+        });
 
-    function showMessage(msg, type = "error") {
-        messageBox.innerHTML = `<div class="message ${type}">${msg}</div>`;
-    }
+        const data = await res.json();
 
-    /* =========================
-       CONNECT FACEBOOK
-    ========================= */
-    connectBtn?.addEventListener("click", () => {
-        window.location.href = "/api/facebook/connect";
-    });
+        console.log("📦 TEMP PAGES:", data);
 
-    /* =========================
-       LOAD PAGES
-    ========================= */
-    async function loadPages() {
-        try {
-            const res = await fetch('/api/facebook/temp-pages', {
-                credentials: 'include'
-            });
-
-            const data = await res.json();
-
-            console.log("TEMP PAGES RESPONSE:", data);
-
-            if (!data.pages || data.pages.length === 0) {
-                showMessage("No pages found. Reconnect Facebook.", "error");
-                return;
-            }
-
-            pagesData = data.pages;
-            pagesSection.classList.remove("hidden");
-            pagesList.innerHTML = "";
-
-            selectedIds = [];
-
-            data.pages.forEach(page => {
-
-                const div = document.createElement("div");
-                div.className = "page";
-
-                div.innerHTML = `
-                    <div>
-                        <strong>${page.name}</strong><br/>
-                        <small>ID: ${page.id}</small><br/>
-                        <small>${page.access_token ? "Token OK" : "NO TOKEN"}</small>
-                    </div>
-                    <input type="checkbox" data-id="${page.id}">
-                `;
-
-                pagesList.appendChild(div);
-            });
-
-            document.querySelectorAll("input[type='checkbox']").forEach(cb => {
-
-                cb.addEventListener("change", () => {
-
-                    const id = cb.dataset.id;
-
-                    if (cb.checked) {
-                        if (!selectedIds.includes(id)) {
-                            selectedIds.push(id);
-                        }
-                    } else {
-                        selectedIds = selectedIds.filter(x => x !== id);
-                    }
-
-                    console.log("SELECTED IDS:", selectedIds);
-                });
-
-            });
-
-        } catch (err) {
-            console.error(err);
-            showMessage("Failed to load pages", "error");
-        }
-    }
-
-    /* =========================
-       SAVE PAGES
-    ========================= */
-    saveBtn?.addEventListener("click", async () => {
-
-        if (selectedIds.length === 0) {
-            showMessage("Select at least one page", "error");
+        if (!data.pages || data.pages.length === 0) {
+            pagesBox.innerHTML = "<p>No pages found</p>";
             return;
         }
 
-        const selectedPages = pagesData.filter(p =>
-            selectedIds.includes(p.id)
-        );
+        pages = data.pages;
+        pagesBox.innerHTML = "";
 
-        console.log("SENDING TO BACKEND:", selectedPages);
+        data.pages.forEach(p => {
 
-        try {
-            const res = await fetch('/api/facebook/save-pages', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                credentials: 'include',
-                body: JSON.stringify({
-                    pages: selectedPages
-                })
+            const div = document.createElement("div");
+            div.className = "page";
+
+            div.innerHTML = `
+                <div>
+                    <b>${p.name}</b><br/>
+                    <small>ID: ${p.id}</small><br/>
+                    <small>${p.access_token ? "Token OK" : "NO TOKEN"}</small>
+                </div>
+                <input type="checkbox" data-id="${p.id}">
+            `;
+
+            pagesBox.appendChild(div);
+        });
+
+        document.querySelectorAll("input[type='checkbox']").forEach(cb => {
+            cb.addEventListener("change", () => {
+
+                const id = cb.dataset.id;
+
+                if (cb.checked) {
+                    if (!selected.includes(id)) selected.push(id);
+                } else {
+                    selected = selected.filter(x => x !== id);
+                }
+
+                console.log("🎯 SELECTED:", selected);
+
+                saveBtn.style.display = selected.length ? "block" : "none";
             });
+        });
 
-            const data = await res.json();
-
-            console.log("SAVE RESPONSE:", data);
-
-            if (data.success) {
-                showMessage(`Saved ${data.saved} pages successfully!`, "success");
-
-                setTimeout(() => {
-                    window.location.href = "/index.html";
-                }, 1500);
-            } else {
-                showMessage(data.error || "Save failed", "error");
-            }
-
-        } catch (err) {
-            console.error(err);
-            showMessage("Network error", "error");
-        }
-    });
-
-    /* =========================
-       AUTO LOAD ON SUCCESS
-    ========================= */
-    const url = new URL(window.location.href);
-
-    if (url.searchParams.get("success") === "true") {
-        loadPages();
+    } catch (err) {
+        console.error(err);
+        pagesBox.innerHTML = "<p>Error loading pages</p>";
     }
+}
 
-});
+/* =========================
+   SAVE PAGES (ONLY IDS)
+========================= */
+saveBtn.onclick = async () => {
+
+    try {
+
+        console.log("📤 SENDING IDS:", selected);
+
+        const res = await fetch("/api/facebook/save-pages", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            credentials: "include",
+            body: JSON.stringify({
+                pages: selected
+            })
+        });
+
+        const data = await res.json();
+
+        console.log("💾 SAVE RESPONSE:", data);
+
+        if (data.success) {
+            alert(`Saved ${data.saved} pages`);
+            window.location.href = "/index.html";
+        } else {
+            alert(data.error || "Failed to save");
+        }
+
+    } catch (err) {
+        console.error(err);
+        alert("Network error");
+    }
+};
+
+/* =========================
+   AUTO LOAD AFTER SUCCESS
+========================= */
+if (window.location.search.includes("success=true")) {
+    loadPages();
+}
 </script>
 
 </body>
