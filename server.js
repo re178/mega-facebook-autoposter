@@ -7,7 +7,6 @@ const path = require('path');
 const fs = require('fs');
 const session = require('express-session');
 const bcrypt = require('bcrypt');
-const csrf = require('csurf');
 const rateLimit = require('express-rate-limit');
 const helmet = require('helmet');
 const MongoStore = require('connect-mongo');
@@ -75,55 +74,6 @@ app.use(
     })
 );
 
-// ==================== CSRF PROTECTION ====================
-const csrfProtection = csrf({ cookie: false });
-
-// Routes excluded from CSRF (webhooks, auth endpoints)
-const csrfExcludedRoutes = [
-    '/login',
-    '/webhook',
-    '/api/auth/signup',
-    '/api/auth/forgot-password',
-    '/api/auth/reset-password',
-    '/api/facebook/callback'
-];
-
-app.use((req, res, next) => {
-    // Skip CSRF for GET requests and excluded routes
-    if (req.method === 'GET' || csrfExcludedRoutes.includes(req.path)) {
-        return next();
-    }
-    return csrfProtection(req, res, next);
-});
-
-// Make CSRF token available to frontend
-app.use((req, res, next) => {
-    try {
-        if (req.csrfToken && !req.path.startsWith('/api')) {
-            res.locals.csrfToken = req.csrfToken();
-        }
-    } catch (e) {
-        res.locals.csrfToken = '';
-    }
-    next();
-});
-
-// Helper to inject CSRF token into HTML
-function renderWithCsrf(filePath) {
-    return (req, res) => {
-        const html = fs.readFileSync(filePath, 'utf8');
-        let token = '';
-        try {
-            token = req.csrfToken ? req.csrfToken() : '';
-        } catch (e) {}
-        const output = html.replace(
-            '</head>',
-            `<meta name="csrf-token" content="${token}">\n</head>`
-        );
-        res.send(output);
-    };
-}
-
 // ==================== RATE LIMITING ====================
 const apiLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
@@ -187,13 +137,21 @@ app.get('/login', (req, res) =>
     res.sendFile(path.join(__dirname, 'public/login.html'))
 );
 
-// Protected pages with CSRF token injection
-app.get('/connect-facebook', requireLogin, renderWithCsrf(path.join(__dirname, 'public/connect-facebook.html')));
-app.get('/index.html', requireLogin, renderWithCsrf(path.join(__dirname, 'public/index.html')));
-app.get('/pages', requireLogin, renderWithCsrf(path.join(__dirname, 'public/page.html')));
-app.get('/schedule', requireLogin, renderWithCsrf(path.join(__dirname, 'public/schedule.html')));
+// Protected pages (no CSRF injection needed)
+app.get('/connect-facebook', requireLogin, (req, res) =>
+    res.sendFile(path.join(__dirname, 'public/connect-facebook.html'))
+);
+app.get('/index.html', requireLogin, (req, res) =>
+    res.sendFile(path.join(__dirname, 'public/index.html'))
+);
+app.get('/pages', requireLogin, (req, res) =>
+    res.sendFile(path.join(__dirname, 'public/page.html'))
+);
+app.get('/schedule', requireLogin, (req, res) =>
+    res.sendFile(path.join(__dirname, 'public/schedule.html'))
+);
 
-// Auth pages (no CSRF needed)
+// Auth pages
 app.get('/signup', (req, res) =>
     res.sendFile(path.join(__dirname, 'public/signup.html'))
 );
