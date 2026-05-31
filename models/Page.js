@@ -1,9 +1,9 @@
 const mongoose = require('mongoose');
 const crypto = require('crypto');
 
-/* =====================================================
-   ENCRYPTION SETUP (SAFE CHECK)
-===================================================== */
+/* =========================
+   ENCRYPTION KEY CHECK
+========================= */
 const ENCRYPTION_KEY = process.env.TOKEN_ENCRYPTION_KEY;
 
 if (!ENCRYPTION_KEY || ENCRYPTION_KEY.length !== 64) {
@@ -12,9 +12,9 @@ if (!ENCRYPTION_KEY || ENCRYPTION_KEY.length !== 64) {
 
 const IV_LENGTH = 16;
 
-/* =====================================================
-   ENCRYPT
-===================================================== */
+/* =========================
+   ENCRYPT FUNCTION
+========================= */
 function encryptToken(token) {
     try {
         if (!token || !ENCRYPTION_KEY) return null;
@@ -34,9 +34,9 @@ function encryptToken(token) {
     }
 }
 
-/* =====================================================
-   DECRYPT
-===================================================== */
+/* =========================
+   DECRYPT FUNCTION
+========================= */
 function decryptToken(data) {
     try {
         if (!data || !data.includes(':')) return data;
@@ -58,10 +58,11 @@ function decryptToken(data) {
     }
 }
 
-/* =====================================================
-   PAGE MODEL (CLEAN + SAFE + NO BUG MAGIC)
-===================================================== */
+/* =========================
+   PAGE SCHEMA
+========================= */
 const PageSchema = new mongoose.Schema({
+
     userId: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User',
@@ -83,8 +84,6 @@ const PageSchema = new mongoose.Schema({
         required: true
     },
 
-    category: String,
-
     isConnected: {
         type: Boolean,
         default: true
@@ -101,23 +100,34 @@ const PageSchema = new mongoose.Schema({
     }
 });
 
-/* =====================================================
-   PREVENT DUPLICATES PER USER
-===================================================== */
+/* =========================
+   UNIQUE PER USER + PAGE
+========================= */
 PageSchema.index({ userId: 1, pageId: 1 }, { unique: true });
 
-/* =====================================================
-   AUTO UPDATE TIME
-===================================================== */
+/* =========================
+   AUTO TIMESTAMP
+========================= */
 PageSchema.pre('save', function (next) {
     this.updatedAt = Date.now();
     next();
 });
 
-/* =====================================================
-   SAFE STATIC SAVE FUNCTION
-===================================================== */
+/* =========================
+   SAVE FUNCTION (IMPORTANT)
+========================= */
 PageSchema.statics.saveFacebookPage = async function (userId, page) {
+
+    if (!page.access_token) {
+        console.log("❌ NO PAGE TOKEN RECEIVED:", page);
+    }
+
+    const encrypted = encryptToken(page.access_token);
+
+    if (!encrypted) {
+        console.log("❌ ENCRYPTION FAILED for:", page.name);
+    }
+
     return await this.findOneAndUpdate(
         { userId, pageId: page.id },
         {
@@ -125,9 +135,8 @@ PageSchema.statics.saveFacebookPage = async function (userId, page) {
                 userId,
                 pageId: page.id,
                 name: page.name,
-                category: page.category || null,
+                encryptedToken: encrypted,
                 isConnected: true,
-                encryptedToken: encryptToken(page.access_token),
                 updatedAt: new Date()
             }
         },
@@ -139,9 +148,9 @@ PageSchema.statics.saveFacebookPage = async function (userId, page) {
     );
 };
 
-/* =====================================================
-   GET DECRYPTED TOKEN
-===================================================== */
+/* =========================
+   GET TOKEN
+========================= */
 PageSchema.methods.getToken = function () {
     return decryptToken(this.encryptedToken);
 };
