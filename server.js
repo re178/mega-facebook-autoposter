@@ -15,6 +15,11 @@ const MongoStore = require('connect-mongo');
 const User = require('./models/User');
 const Page = require('./models/Page');
 
+// ==================== SERVICES ====================
+const { startScheduler } = require('./services/scheduler');
+const { startAiPostScheduler } = require('./services/aiPostScheduler');
+const { startAutoMaintenance } = require('./services/autoMaintenance'); // ADDED
+
 // ==================== APP INIT ====================
 const app = express();
 app.set('trust proxy', 1);
@@ -276,11 +281,8 @@ async function syncPagesFromEnv(adminId) {
     }
 }
 
-// ==================== START SCHEDULERS ====================
-const { startScheduler } = require('./services/scheduler');
-const { startAiPostScheduler } = require('./services/aiPostScheduler');
-
-// ==================== DATABASE CONNECTION & SERVER START ====================
+// ==================== START ALL SCHEDULERS ====================
+// DATABASE CONNECTION & SERVER START
 mongoose
     .connect(process.env.MONGO_URI)
     .then(async () => {
@@ -292,7 +294,7 @@ mongoose
             await syncPagesFromEnv(admin._id);
         }
 
-        // Start both schedulers
+        // Start Regular Scheduler
         try {
             startScheduler();
             console.log('✅ Regular scheduler started');
@@ -300,6 +302,7 @@ mongoose
             console.error('❌ Regular scheduler error:', err.message);
         }
 
+        // Start AI Post Scheduler
         try {
             startAiPostScheduler();
             console.log('✅ AI Post scheduler started');
@@ -307,10 +310,19 @@ mongoose
             console.error('❌ AI Post scheduler error:', err.message);
         }
 
+        // Start Auto Maintenance (NEW)
+        try {
+            startAutoMaintenance();
+            console.log('✅ Auto Maintenance started');
+        } catch (err) {
+            console.error('❌ Auto Maintenance error:', err.message);
+        }
+
         // Start server
         app.listen(PORT, () => {
             console.log(`🚀 Server running on port ${PORT}`);
             console.log(`📡 Environment: ${isProduction ? 'PRODUCTION' : 'DEVELOPMENT'}`);
+            console.log(`🧹 Auto Maintenance: Running every 30 minutes`);
         });
     })
     .catch(err => {
