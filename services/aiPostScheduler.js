@@ -1,6 +1,6 @@
 const AiScheduledPost = require('../models/AiScheduledPost');
 const AiLog = require('../models/AiLog');
-const Page = require('../models/Page'); // optional, in case pageId is a string
+const Page = require('../models/Page');
 const { postToFacebook } = require('../services/facebookService');
 
 const SCHEDULE_INTERVAL = 30000; // 30 seconds
