@@ -5,18 +5,15 @@ const { postToFacebook } = require('./facebookService');
 const SCHEDULE_INTERVAL = 30000; // Base interval: 30 seconds
 const MAX_RETRIES = 3;
 
+// ============= CLEANUP CONFIGURATION =============
+const DELETE_POSTS_AFTER_HOURS = 12;   // Delete ALL posts (POSTED + FAILED) after 12 hours
+const DELETE_LOGS_AFTER_HOURS = 12;    // Delete ALL logs after 12 hours
+
 // Track if scheduler is already running
 let isRunning = false;
 
 /**
  * Calculate exponential backoff time in milliseconds
- * @param {number} retryCount - Current retry attempt number (1-based)
- * @returns {number} - Milliseconds to wait before next retry
- * 
- * Examples:
- * - Retry 1: 30,000ms (30 seconds)
- * - Retry 2: 60,000ms (1 minute)
- * - Retry 3: 120,000ms (2 minutes)
  */
 function getBackoffTime(retryCount) {
     return SCHEDULE_INTERVAL * Math.pow(2, retryCount - 1);
@@ -24,16 +21,15 @@ function getBackoffTime(retryCount) {
 
 /**
  * Process a single post: publish to Facebook, handle success/failure, log results
- * @param {Object} post - Mongoose post document with populated pageId
  */
 async function processPost(post) {
     try {
         // Attempt to post to Facebook
         await postToFacebook(
-            post.pageId.pageId,      // Facebook page ID
-            post.pageId.pageToken,   // Facebook page access token
-            post.text,               // Post content
-            post.mediaUrl            // Optional media URL (image/video)
+            post.pageId.pageId,
+            post.pageId.pageToken,
+            post.text,
+            post.mediaUrl
         );
 
         // SUCCESS: Update post status
@@ -86,19 +82,72 @@ async function processPost(post) {
 }
 
 /**
+ * DELETE ALL OLD POSTS (both POSTED and FAILED) older than DELETE_POSTS_AFTER_HOURS
+ */
+async function cleanupOldPosts() {
+    const cutoffDate = new Date();
+    cutoffDate.setHours(cutoffDate.getHours() - DELETE_POSTS_AFTER_HOURS);
+
+    try {
+        // Delete posts that are either POSTED or FAILED and were updated before cutoff
+        const result = await Post.deleteMany({
+            status: { $in: ['POSTED', 'FAILED'] },
+            updatedAt: { $lt: cutoffDate }
+        });
+
+        if (result.deletedCount > 0) {
+            console.log(`🧹 CLEANUP: Deleted ${result.deletedCount} old posts (${DELETE_POSTS_AFTER_HOURS}+ hours old)`);
+        }
+    } catch (err) {
+        console.error('❌ Cleanup old posts error:', err.message);
+    }
+}
+
+/**
+ * DELETE ALL OLD LOGS older than DELETE_LOGS_AFTER_HOURS
+ */
+async function cleanupOldLogs() {
+    const cutoffDate = new Date();
+    cutoffDate.setHours(cutoffDate.getHours() - DELETE_LOGS_AFTER_HOURS);
+
+    try {
+        const result = await Log.deleteMany({
+            createdAt: { $lt: cutoffDate }
+        });
+
+        if (result.deletedCount > 0) {
+            console.log(`🧹 CLEANUP: Deleted ${result.deletedCount} old logs (${DELETE_LOGS_AFTER_HOURS}+ hours old)`);
+        }
+    } catch (err) {
+        console.error('❌ Cleanup logs error:', err.message);
+    }
+}
+
+/**
+ * Run cleanup tasks (called every hour)
+ */
+let lastCleanupTime = 0;
+const CLEANUP_INTERVAL = 60 * 60 * 1000; // 1 hour
+
+async function runCleanupIfNeeded() {
+    const now = Date.now();
+    if (now - lastCleanupTime >= CLEANUP_INTERVAL) {
+        lastCleanupTime = now;
+        await cleanupOldPosts();
+        await cleanupOldLogs();
+    }
+}
+
+/**
  * Start the post scheduler
- * - Runs continuously with exponential backoff for retries
- * - Checks for pending posts every 30 seconds
- * - Prevents overlapping runs
  */
 function startScheduler() {
-    console.log('🕒 Scheduler started with exponential backoff (30s interval, max 3 retries)');
+    console.log(`🕒 Scheduler started with:`);
+    console.log(`   - Interval: ${SCHEDULE_INTERVAL/1000}s, Max retries: ${MAX_RETRIES}`);
+    console.log(`   - Delete posts after: ${DELETE_POSTS_AFTER_HOURS}h`);
+    console.log(`   - Delete logs after: ${DELETE_LOGS_AFTER_HOURS}h`);
 
-    /**
-     * Main scheduler loop - runs recursively
-     */
     const runScheduler = async () => {
-        // Prevent overlapping executions
         if (isRunning) {
             console.log('⏳ Scheduler already running, skipping this cycle');
             return;
@@ -108,6 +157,9 @@ function startScheduler() {
 
         try {
             const now = new Date();
+
+            // Run cleanup every hour
+            await runCleanupIfNeeded();
 
             // Find all pending posts that are due for publishing
             const posts = await Post.find({
@@ -121,7 +173,6 @@ function startScheduler() {
 
             // Process each post individually
             for (const post of posts) {
-                // Skip if page reference is missing (shouldn't happen, but safety check)
                 if (!post.pageId) {
                     console.error(`❌ Post ${post._id} has no page reference, marking as FAILED`);
                     post.status = 'FAILED';
@@ -136,54 +187,42 @@ function startScheduler() {
                     const timeSinceLastAttempt = now - lastAttemptTime;
                     
                     if (timeSinceLastAttempt < backoffTimeMs) {
-                        // Not enough time has passed - skip this cycle
                         const remainingSeconds = Math.ceil((backoffTimeMs - timeSinceLastAttempt) / 1000);
-                        console.log(`⏰ Post ${post._id} retry ${post.retryCount} waiting ${remainingSeconds}s more (backoff)`);
+                        console.log(`⏰ Post ${post._id} retry ${post.retryCount} waiting ${remainingSeconds}s more`);
                         continue;
                     }
                 }
 
-                // Process the post (publish to Facebook)
                 await processPost(post);
             }
 
         } catch (err) {
             console.error('❌ Scheduler error:', err.message);
             
-            // Log the error but don't crash the scheduler
             await Log.create({
                 pageId: null,
                 action: 'SCHEDULER_ERROR',
-                message: `Scheduler encountered error: ${err.message}`
-            }).catch(e => console.error('Failed to log scheduler error:', e.message));
+                message: `Scheduler error: ${err.message}`
+            }).catch(e => console.error('Failed to log error:', e.message));
 
         } finally {
-            // Mark as not running and schedule next iteration
             isRunning = false;
             setTimeout(runScheduler, SCHEDULE_INTERVAL);
         }
     };
 
-    // Start the first iteration
     runScheduler();
 }
 
-/**
- * Stop the scheduler (useful for graceful shutdown)
- * Note: This doesn't stop the current running cycle, but prevents future cycles
- */
 function stopScheduler() {
     console.log('🛑 Scheduler stopping...');
-    // The scheduler uses setTimeout recursively, so we can't easily cancel
-    // without refactoring. This flag helps but doesn't stop an active run.
-    // For a more robust solution, you'd need to store the timeout ID.
-    isRunning = true; // This will prevent the next cycle from starting
+    isRunning = true;
 }
 
 module.exports = { 
     startScheduler,
     stopScheduler,
-    getBackoffTime,  // Exported for testing purposes
+    getBackoffTime,
     MAX_RETRIES,
     SCHEDULE_INTERVAL
 };
