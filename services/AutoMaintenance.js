@@ -39,11 +39,11 @@ async function runMaintenance() {
         }
 
         // ==============================
-        // 3. EXPIRED TOPIC CHECK (GRACE 2 DAYS)
+        // 3. EXPIRED TOPIC CHECK (NO GRACE PERIOD)
         // ==============================
         const end = moment(topic.endDate).tz(TIMEZONE);
 
-        if (end.isValid() && end.clone().add(2, 'days').isBefore(now)) {
+        if (end.isValid() && end.isBefore(now)) {
           await deleteTopic(topic._id, "EXPIRED_TOPIC");
           continue;
         }
@@ -61,31 +61,24 @@ async function runMaintenance() {
           continue;
         }
 
-        // ==============================
-        // 5. ORPHAN CHECK
-        // ==============================
-        const hasLogs = await AiLog.exists({ topicId: topic._id });
-        const hasPosts = await AiScheduledPost.exists({ topicId: topic._id });
-
-        if (!hasLogs && !hasPosts) {
-          await deleteTopic(topic._id, "ORPHAN_TOPIC");
-          continue;
-        }
-
       } catch (err) {
         console.error("Topic check error:", topic._id, err.message);
       }
     }
 
     // ==============================
-    // 6. CLEAN NON-AUTO LOGS
+    // 5. CLEAN NON-AUTO LOGS (every 30 minutes)
     // ==============================
     const cutoff = moment().subtract(30, 'minutes').toDate();
 
-    await AiLog.deleteMany({
+    const deleteResult = await AiLog.deleteMany({
       createdAt: { $lt: cutoff },
       action: { $not: /^AUTO_/ }
     });
+
+    if (deleteResult.deletedCount > 0) {
+      console.log(`🧹 Cleaned ${deleteResult.deletedCount} non-auto logs older than 30 minutes`);
+    }
 
     console.log("🧹 AUTO MAINTENANCE COMPLETED");
 
@@ -95,12 +88,11 @@ async function runMaintenance() {
 }
 
 // ==============================
-// SAFE DELETE FUNCTION
+// SAFE DELETE FUNCTION (Topic + Logs only, NOT scheduled posts)
 // ==============================
 async function deleteTopic(topicId, reason) {
   try {
     await AiLog.deleteMany({ topicId });
-    await AiScheduledPost.deleteMany({ topicId });
     await AiTopic.deleteOne({ _id: topicId });
 
     console.log(`❌ TOPIC DELETED [${reason}] ->`, topicId);
@@ -122,3 +114,5 @@ function startAutoMaintenance() {
 module.exports = {
   startAutoMaintenance
 };
+
+Which does this does??
