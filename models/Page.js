@@ -135,7 +135,7 @@ PageSchema.statics.saveFacebookPage = async function (userId, page) {
                 userId,
                 pageId: page.id,
                 name: page.name,
-                encryptedToken: encrypted,
+                pageToken: encrypted,
                 isConnected: true,
                 updatedAt: new Date()
             }
