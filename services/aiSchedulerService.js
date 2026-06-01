@@ -198,7 +198,7 @@ function selectProvider(providers) {
 }
 
 // ===================== TEXT GENERATION =====================
-async async function generateText(topic, angle, pageId, textSeed = null) {
+async function generateText(topic, angle, pageId, textSeed = null) {
   try {
     const prompt = await buildPrompt({ topic, angle, pageId, textSeed });
     const text = await smartGenerateText(prompt, TextProviders);
