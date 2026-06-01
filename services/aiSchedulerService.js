@@ -22,10 +22,6 @@ const {
   GroqText,
   GeminiText,
   OpenAIText,
-  CohereText,
-  ClaudeText,
-  AIHordeText,
-  AI21Text,
 } = require('../services/textProviders');
 
 const {
@@ -41,11 +37,7 @@ const TextProviders = [
   GeminiText,
   CloudflareText,
   GroqText,
-  OpenAIText,
-  CohereText,
-  ClaudeText,
-  AIHordeText,
-  AI21Text
+  OpenAIText
 ];
 
 const ImageProviders = [
