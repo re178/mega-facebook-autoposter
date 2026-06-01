@@ -16,12 +16,13 @@ const AutoTopicMeta = mongoose.model('AutoTopicMeta', new mongoose.Schema({
   createdAt: { type: Date, default: Date.now }
 }));
 
-// ===================== AI PROVIDERS =====================
+// ===================== AI PROVIDERS =====================//
 const {
   CloudflareText,
   GroqText,
   GeminiText,
   OpenAIText,
+  smartGenerateText
 } = require('../services/textProviders');
 
 const {
