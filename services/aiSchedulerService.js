@@ -7,8 +7,9 @@ const AiTopic = require('../models/AiTopic');
 const AiLog = require('../models/AiLog');
 const Page = require('../models/Page');
 const PageProfile = require('../models/PageProfile');
-const { renderPost } = require('../services/renderPost');// ✅ Now used
+const { renderPost } = require('../services/renderPost');
 const { generateCinematicReel } = require('../services/media/cinematicEngine');
+const qualityAssurance = require('./qualityAssurance');
 
 // New lightweight model to track auto-created topics (no changes to existing schemas)
 const AutoTopicMeta = mongoose.model('AutoTopicMeta', new mongoose.Schema({
@@ -16,7 +17,7 @@ const AutoTopicMeta = mongoose.model('AutoTopicMeta', new mongoose.Schema({
   createdAt: { type: Date, default: Date.now }
 }));
 
-// ===================== AI PROVIDERS =====================//
+// ===================== AI PROVIDERS =====================
 const {
   CloudflareText,
   GroqText,
@@ -51,27 +52,25 @@ const ImageProviders = [
 
 // ===================== GLOBAL SETTINGS =====================
 const TIMEZONE = 'Africa/Nairobi';
-const MAX_POSTS_PER_TOPIC = 5;        // must match number of custom angles
+const MAX_POSTS_PER_TOPIC = 5;
 const MAX_SCHEDULED_POSTS = 10;
 
 // ===================== AUTO TOPIC CREATION SETTINGS =====================
-const MIN_ACTIVE_TOPICS = 3;           // per page
-const MAX_ACTIVE_TOPICS = 6;           // per page
-const TOPIC_LIFETIME_DAYS = 5;         // startDate + (TOPIC_LIFETIME_DAYS - 1) days = endDate
-const POSTS_PER_DAY_AUTO = 1;           // 1 post per day
-const INCLUDE_MEDIA_AUTO = false;       // no images by default
-const AVOID_SIMILAR_DAYS = 7;           // don't repeat similar topics within this many days
-const MAX_START_DATE_DAYS = 21;         // topic must start within 21 days of creation
-const MAX_SAME_START_DAY = 2;           // no more than 2 topics start on same day per page
+const MIN_ACTIVE_TOPICS = 3;
+const MAX_ACTIVE_TOPICS = 6;
+const TOPIC_LIFETIME_DAYS = 5;
+const POSTS_PER_DAY_AUTO = 1;
+const INCLUDE_MEDIA_AUTO = false;
+const AVOID_SIMILAR_DAYS = 7;
+const MAX_START_DATE_DAYS = 21;
+const MAX_SAME_START_DAY = 2;
 
-// Global master switch (in-memory, can be toggled via API)
+// Global master switch
 let GLOBAL_AUTO_TOPIC_CREATION_ENABLED = true;
 
-// Default angles to use as fallback if custom generation fails
+// Default angles
 const DEFAULT_ANGLES = ['insight', 'example', 'warning', 'opinion', 'takeaway'];
-
-// Global angles for backward compatibility (used only when topic has no customAngles)
-const GLOBAL_ANGLES = ['memory','observation','curiosity','experience','reflection','surprise','casual'];
+const GLOBAL_ANGLES = ['memory', 'observation', 'curiosity', 'experience', 'reflection', 'surprise', 'casual'];
 
 // ===================== PROVIDER STATE =====================
 const providerState = {};
@@ -117,11 +116,6 @@ function shuffleTimes(times) {
   return [...times].sort(() => Math.random() - 0.5);
 }
 
-/**
- * Ensure we always have exactly 5 angles.
- * If provided array has fewer, pad with DEFAULT_ANGLES.
- * If empty, return a copy of DEFAULT_ANGLES.
- */
 function ensureFiveAngles(angles) {
   if (!angles || angles.length === 0) {
     return [...DEFAULT_ANGLES];
@@ -134,32 +128,23 @@ function ensureFiveAngles(angles) {
 }
 
 // ===================== PROMPT BUILDER =====================
-/**
- * Extract the Critical rules section from extraNotes.
- * Looks for "Critical rules:" (case-insensitive) and captures all text
- * until an empty line or another section heading (e.g., "[DESIGN]" or "Note:").
- */
 function extractCriticalRules(extraNotes) {
   if (!extraNotes) return '';
   
-  // Match "Critical rules:" followed by any lines until a blank line or another bracket/heading
   const match = extraNotes.match(/Critical rules:\s*\n([\s\S]*?)(?=\n\s*\n|\n\[|$)/i);
   if (!match) return '';
   
   let rules = match[1].trim();
-  // Remove any lines that start with [ (like [DESIGN] if it was inside by mistake)
   rules = rules.replace(/^\[.*$/gm, '').trim();
   return rules;
 }
 
-async function buildPrompt({ topic, angle, pageId, textSeed }) {
+async function buildPrompt({ topic, angle, pageId, textSeed, qualityFix = null }) {
   const profile = await PageProfile.findOne({ pageId });
   let extraNotes = profile?.extraNotes || '';
 
-  // Extract only the Critical rules section
   let criticalRules = extractCriticalRules(extraNotes);
 
-  // If no Critical rules section found, use a sensible default
   if (!criticalRules) {
     criticalRules = `CRITICAL RULES (DEFAULT):
 - Maximum 3 sentences total.
@@ -171,6 +156,7 @@ async function buildPrompt({ topic, angle, pageId, textSeed }) {
   }
 
   const seedText = textSeed ? ` Reference previous text: "${textSeed}"` : '';
+  const qualityFixText = qualityFix ? `\n\nIMPORTANT FIXES NEEDED: ${qualityFix}\nRewrite the post fixing these issues while keeping the same core message.` : '';
 
   return `
 Write a natural, relatable Facebook post about "${topic}".
@@ -183,6 +169,7 @@ Audience: ${profile?.audienceTone || 'casual'}, interests: ${profile?.audienceIn
 ${criticalRules}
 
 ${seedText}
+${qualityFixText}
 
 The rules above are MANDATORY and override any other instructions. Follow them exactly.
 `;
@@ -197,10 +184,10 @@ function selectProvider(providers) {
   }) || null;
 }
 
-// ===================== TEXT GENERATION =====================
-async function generateText(topic, angle, pageId, textSeed = null) {
+// ===================== TEXT GENERATION (with QA integration) =====================
+async function generateText(topic, angle, pageId, textSeed = null, qualityFix = null) {
   try {
-    const prompt = await buildPrompt({ topic, angle, pageId, textSeed });
+    const prompt = await buildPrompt({ topic, angle, pageId, textSeed, qualityFix });
     const text = await generateSmart(prompt);
 
     if (!text) {
@@ -213,6 +200,51 @@ async function generateText(topic, angle, pageId, textSeed = null) {
     await monitor(null, pageId, null, 'TEXT_FAILED', err.message);
     return null;
   }
+}
+
+// ===================== QA-ENHANCED POST GENERATION =====================
+async function generateAndValidatePost(topic, angle, pageId, pageProfile, recentPosts = [], attempt = 0) {
+  const maxAttempts = 3;
+  
+  // Generate raw text
+  let rawText = await generateText(topic, angle, pageId);
+  if (!rawText) return null;
+  
+  // Run through quality assurance
+  const qaResult = await qualityAssurance.processContent({
+    topic: topic,
+    post: rawText,
+    pageProfile: pageProfile,
+    pageId: pageId,
+    recentPosts: recentPosts,
+    generateFn: async (prompt) => {
+      // Extract fix instructions from prompt
+      const fixMatch = prompt.match(/IMPORTANT FIXES NEEDED: ([^\n]+)/);
+      const qualityFix = fixMatch ? fixMatch[1] : null;
+      return await generateText(topic, angle, pageId, null, qualityFix);
+    },
+    maxRegenerations: 2
+  });
+  
+  if (qaResult.pass) {
+    await monitor(null, pageId, null, 'QA_PASSED', `Score: ${qaResult.score}`);
+    return {
+      text: qaResult.finalPost,
+      score: qaResult.score,
+      breakdown: qaResult.breakdown
+    };
+  }
+  
+  // If QA failed and we have attempts left, try again with a different approach
+  if (attempt < maxAttempts) {
+    await monitor(null, pageId, null, 'QA_FAILED_RETRY', `Attempt ${attempt + 1}: ${qaResult.reason}`);
+    // Slightly modify the angle for retry
+    const modifiedAngle = `${angle} (different perspective)`;
+    return await generateAndValidatePost(topic, modifiedAngle, pageId, pageProfile, recentPosts, attempt + 1);
+  }
+  
+  await monitor(null, pageId, null, 'QA_FAILED_FINAL', qaResult.reason);
+  return null;
 }
 
 // ===================== IMAGE GENERATION =====================
@@ -229,10 +261,6 @@ async function generateImage(topic, pageId, textSeed = null) {
 }
 
 // ===================== CUSTOM ANGLES GENERATION =====================
-/**
- * Generate exactly 5 custom angles for a topic.
- * Uses AI; if AI returns less, pads with DEFAULT_ANGLES.
- */
 async function generateCustomAngles(topicName, pageId) {
   const profile = await PageProfile.findOne({ pageId });
   const audienceInterest = profile?.audienceInterest?.join(', ') || 'general audience';
@@ -258,11 +286,10 @@ Return only the 5 angles as a comma-separated list, no extra text.`;
       console.error(`Custom angle generation failed for ${provider.name}:`, err.message);
     }
   }
-  // Fallback to default angles
   return [...DEFAULT_ANGLES];
 }
 
-// ===================== TOPIC NAME GENERATION (short, 5-10 words) =====================
+// ===================== TOPIC NAME GENERATION =====================
 async function generateShortTopicName(audienceInterest, rawHeadline = null) {
   let prompt;
   if (rawHeadline) {
@@ -276,7 +303,6 @@ async function generateShortTopicName(audienceInterest, rawHeadline = null) {
       const topicName = await provider.generate(prompt);
       if (topicName) {
         const cleaned = cleanText(topicName);
-        // enforce max 10 words
         const words = cleaned.split(/\s+/);
         if (words.length <= 10) return cleaned;
         return words.slice(0, 10).join(' ');
@@ -389,6 +415,148 @@ async function getNonCollidingTime(pageId, targetDate) {
   return '12:00';
 }
 
+// ===================== BRANDED IMAGE CREATION =====================
+async function createBrandedImage(topicId, pageId, rawMediaUrl, postText) {
+  try {
+    const [topic, pageProfile, page] = await Promise.all([
+      AiTopic.findById(topicId).lean(),
+      PageProfile.findOne({ pageId }).lean(),
+      Page.findOne({ pageId }).select('name').lean()
+    ]);
+    if (!topic) return rawMediaUrl;
+
+    if (topic.includeVideo === true) {
+      const cinematicProfile = {
+        pageName: page?.name || 'Page',
+        brand: pageProfile?.extraNotes?.match(/brand=(\w+)/)?.[1] || 'modern',
+        mood: pageProfile?.extraNotes?.match(/mood=(\w+)/)?.[1] || 'neutral',
+        audienceInterest: pageProfile?.audienceInterest || [],
+      };
+      const videoUrl = await generateCinematicReel({
+        title: topic.topicName,
+        text: postText,
+        pageProfile: cinematicProfile,
+        pageName: page?.name || 'Page',
+        format: 'short'
+      });
+      return videoUrl || null;
+    }
+
+    if (topic.includeMedia === true) {
+      const finalImage = await renderPost({
+        title: topic.topicName,
+        text: postText,
+        rawImage: rawMediaUrl,
+        pageProfile: pageProfile || {},
+        pageName: page?.name || 'Page',
+        logoUrl: null
+      });
+      return finalImage || rawMediaUrl;
+    }
+
+    return null;
+  } catch (err) {
+    console.error('createBrandedImage failed:', err.message);
+    await monitor(topicId, pageId, null, 'BRANDED_MEDIA_FAILED', err.message);
+    return null;
+  }
+}
+
+// ===================== UPDATED POST GENERATOR (with QA integration) =====================
+async function generatePostsForTopic(topicId) {
+  const topic = await AiTopic.findById(topicId);
+  if (!topic) return [];
+
+  // Determine which angles to use
+  let anglesToUse;
+  if (topic.customAngles && topic.customAngles.length === MAX_POSTS_PER_TOPIC) {
+    anglesToUse = topic.customAngles;
+  } else {
+    anglesToUse = GLOBAL_ANGLES;
+  }
+
+  const start = moment.tz(topic.startDate, TIMEZONE);
+  const end = moment.tz(topic.endDate, TIMEZONE);
+  
+  // Get page profile for QA
+  const pageProfile = await PageProfile.findOne({ pageId: topic.pageId });
+  
+  // Get recent posts from this page for duplicate detection
+  const recentPosts = await AiScheduledPost.find({ 
+    pageId: topic.pageId,
+    status: 'PENDING'
+  })
+    .sort({ scheduledTime: -1 })
+    .limit(10)
+    .select('text')
+    .lean();
+  const recentPostTexts = recentPosts.map(p => p.text).filter(Boolean);
+
+  let created = [];
+  let angleIndex = 0;
+  const totalPostsNeeded = Math.ceil(end.diff(start, 'days') + 1) * topic.postsPerDay;
+
+  for (let day = start.clone(); day.isSameOrBefore(end); day.add(1, 'day')) {
+    for (let i = 0; i < topic.postsPerDay; i++) {
+      if (angleIndex >= totalPostsNeeded) break;
+      const angle = anglesToUse[angleIndex % anglesToUse.length];
+      const time = topic.times[i % topic.times.length];
+      const scheduled = moment.tz(`${day.format('YYYY-MM-DD')} ${time}`, TIMEZONE).toDate();
+
+      const existsScheduled = await AiScheduledPost.findOne({ topicId, scheduledTime: scheduled });
+      const existsLogged = await AiLog.findOne({ topicId, action: /POST_CREATED|AUTO_POST_CREATED/, message: new RegExp(time) });
+      if (existsScheduled || existsLogged) continue;
+
+      // Generate and validate post through QA pipeline
+      const validatedPost = await generateAndValidatePost(
+        topic.topicName,
+        angle,
+        topic.pageId,
+        pageProfile,
+        recentPostTexts
+      );
+      
+      if (!validatedPost) {
+        await monitor(topicId, topic.pageId, null, 'POST_GEN_FAILED', `Angle: ${angle} - Failed QA`);
+        continue;
+      }
+
+      // Generate image (if needed)
+      let rawMediaUrl = topic.includeMedia ? await generateImage(topic.topicName, topic.pageId, validatedPost.text) : null;
+      
+      // Create branded image/video
+      const finalMediaUrl = await createBrandedImage(topicId, topic.pageId, rawMediaUrl, validatedPost.text);
+
+      // Create the scheduled post
+      const post = await AiScheduledPost.create({
+        topicId,
+        pageId: topic.pageId,
+        text: validatedPost.text,
+        mediaUrl: finalMediaUrl,
+        scheduledTime: scheduled,
+        status: 'PENDING',
+        meta: { 
+          angle,
+          qaScore: validatedPost.score,
+          qaBreakdown: validatedPost.breakdown
+        }
+      });
+
+      created.push(post);
+      recentPostTexts.unshift(validatedPost.text);
+      recentPostTexts = recentPostTexts.slice(0, 10);
+      
+      await monitor(topicId, topic.pageId, post._id, 'POST_CREATED_QA', 
+        `Angle: ${angle}, QA Score: ${validatedPost.score}, Scheduled: ${scheduled}`
+      );
+      
+      angleIndex++;
+    }
+  }
+
+  return created;
+}
+
 // ===================== AUTO TOPIC CREATION =====================
 async function createAutoTopicForPage(pageId) {
   if (!GLOBAL_AUTO_TOPIC_CREATION_ENABLED) return null;
@@ -407,6 +575,13 @@ async function createAutoTopicForPage(pageId) {
   let topicName = await generateShortTopicName(interest, rawHeadline);
   if (!topicName) {
     await monitor(null, pageId, null, 'AUTO_TOPIC_FAILED', `Could not generate topic name for interest: ${interest}`);
+    return null;
+  }
+
+  // Score the topic before creating
+  const topicScore = qualityAssurance.scoreTopic(topicName, pageId);
+  if (topicScore < 40) {
+    await monitor(null, pageId, null, 'AUTO_TOPIC_SKIPPED', `Topic score too low (${topicScore}): ${topicName}`);
     return null;
   }
 
@@ -435,7 +610,6 @@ async function createAutoTopicForPage(pageId) {
     return null;
   }
 
-  // Generate custom angles for this topic
   const customAngles = await generateCustomAngles(topicName, pageId);
 
   const newTopic = await AiTopic.create({
@@ -447,366 +621,40 @@ async function createAutoTopicForPage(pageId) {
     postsPerDay: POSTS_PER_DAY_AUTO,
     includeMedia: INCLUDE_MEDIA_AUTO,
     includeVideo: false,   
-    customAngles,          // new field
+    customAngles,
   });
 
   await AutoTopicMeta.create({ topicId: newTopic._id });
-  console.log(`Auto-created topic "${topicName}" for page ${pageId} with angles: ${customAngles.join(', ')}`);
+  console.log(`Auto-created topic "${topicName}" for page ${pageId} with angles: ${customAngles.join(', ')} (Topic score: ${topicScore})`);
   return newTopic;
 }
 
-// ===================== HELPER: Create branded image using renderPost =====================
-async function createBrandedImage(topicId, pageId, rawMediaUrl, postText) {
-  try {
-    const [topic, pageProfile, page] = await Promise.all([
-      AiTopic.findById(topicId).lean(),
-      PageProfile.findOne({ pageId }).lean(),
-      Page.findOne({ pageId }).select('name').lean()
-    ]);
-    if (!topic) return rawMediaUrl;
-
-    // Priority: Video overrides image
-    if (topic.includeVideo === true) {
-      // Build pageProfile for cinematic engine
-      const cinematicProfile = {
-        pageName: page?.name || 'Page',
-        brand: pageProfile?.extraNotes?.match(/brand=(\w+)/)?.[1] || 'modern',
-        mood: pageProfile?.extraNotes?.match(/mood=(\w+)/)?.[1] || 'neutral',
-        audienceInterest: pageProfile?.audienceInterest || [],
-      };
-      const videoUrl = await generateCinematicReel({
-        title: topic.topicName,
-        text: postText,
-        pageProfile: cinematicProfile,
-        pageName: page?.name || 'Page',
-        format: 'short'
-      });
-      return videoUrl || null;
-    }
-
-    // Otherwise, handle image if includeMedia is true
-    if (topic.includeMedia === true) {
-      const finalImage = await renderPost({
-        title: topic.topicName,
-        text: postText,
-        rawImage: rawMediaUrl,
-        pageProfile: pageProfile || {},
-        pageName: page?.name || 'Page',
-        logoUrl: null
-      });
-      return finalImage || rawMediaUrl;
-    }
-
-    // No media requested
-    return null;
-  } catch (err) {
-    console.error('createBrandedImage failed:', err.message);
-    await monitor(topicId, pageId, null, 'BRANDED_MEDIA_FAILED', err.message);
-    return null;
-  }
+// ===================== HELPER FUNCTIONS =====================
+async function getPageMemory(pageId) {
+  return qualityAssurance.getPageMemory(pageId);
 }
 
-// ===================== MANUAL POST GENERATOR (with custom angles) =====================
-async function generatePostsForTopic(topicId) {
-  const topic = await AiTopic.findById(topicId);
-  if (!topic) return [];
-
-  // Determine which angles to use: custom if available, else global
-  let anglesToUse;
-  if (topic.customAngles && topic.customAngles.length === MAX_POSTS_PER_TOPIC) {
-    anglesToUse = topic.customAngles;
-  } else {
-    anglesToUse = GLOBAL_ANGLES;
-  }
-
-  const start = moment.tz(topic.startDate, TIMEZONE);
-  const end = moment.tz(topic.endDate, TIMEZONE);
-
-  let created = [];
-  let angleIndex = 0;
-  const totalPostsNeeded = Math.ceil(end.diff(start, 'days') + 1) * topic.postsPerDay;
-
-  for (let day = start.clone(); day.isSameOrBefore(end); day.add(1, 'day')) {
-    for (let i = 0; i < topic.postsPerDay; i++) {
-      if (angleIndex >= totalPostsNeeded) break;
-      const angle = anglesToUse[angleIndex % anglesToUse.length];
-      const time = topic.times[i % topic.times.length];
-      const scheduled = moment.tz(`${day.format('YYYY-MM-DD')} ${time}`, TIMEZONE).toDate();
-
-      const existsScheduled = await AiScheduledPost.findOne({ topicId, scheduledTime: scheduled });
-      const existsLogged = await AiLog.findOne({ topicId, action: /POST_CREATED|AUTO_POST_CREATED/, message: new RegExp(time) });
-      if (existsScheduled || existsLogged) continue;
-
-      const text = await generateText(topic.topicName, angle, topic.pageId);
-      if (!text) continue;
-
-      let rawMediaUrl = topic.includeMedia ? await generateImage(topic.topicName, topic.pageId, text) : null;
-
-      // Create branded image using renderPost
-      const finalMediaUrl = await createBrandedImage(topicId, topic.pageId, rawMediaUrl, text);
-
-      const post = await AiScheduledPost.create({
-        topicId,
-        pageId: topic.pageId,
-        text,
-        mediaUrl: finalMediaUrl,
-        scheduledTime: scheduled,
-        status: 'PENDING',
-        meta: { angle }
-      });
-
-      created.push(post);
-      await monitor(topicId, topic.pageId, post._id, 'POST_CREATED', 'Manual post created');
-      angleIndex++;
-    }
-  }
-  return created;
+async function getTopicScore(topicName, pageId) {
+  return qualityAssurance.scoreTopic(topicName, pageId);
 }
-
-// ===================== AUTO POST GENERATION (with custom angles) =====================
-async function autoGenerate() {
-  if (global.__AUTO_GEN_RUNNING__) return;
-  global.__AUTO_GEN_RUNNING__ = true;
-
-  try {
-    if (process.memoryUsage().heapUsed > 900 * 1024 * 1024) {
-      console.error("AUTO GEN SKIPPED: High memory usage");
-      return;
-    }
-
-    let now;
-    try {
-      now = moment().tz(TIMEZONE);
-      if (!now.isValid()) throw new Error("Invalid timezone");
-    } catch (err) {
-      console.error("TIMEZONE ERROR:", err.message);
-      return;
-    }
-
-    let activePages;
-    try {
-      activePages = await Page.find({ autoGenerationEnabled: true }).select("pageId").lean();
-    } catch (err) {
-      console.error("DB ERROR FETCHING PAGES:", err.message);
-      return;
-    }
-
-    if (!activePages.length) return;
-    const activePageIds = activePages.map(p => p.pageId);
-
-    let topics;
-    try {
-      topics = await AiTopic.find({ pageId: { $in: activePageIds } }).lean();
-    } catch (err) {
-      console.error("DB ERROR FETCHING TOPICS:", err.message);
-      return;
-    }
-
-    if (!topics || topics.length === 0) return;
-
-    for (const topic of topics) {
-      try {
-        const endMoment = moment(topic.endDate).tz(TIMEZONE);
-        if (!endMoment.isValid()) {
-          await monitor(topic._id, topic.pageId, null, "AUTO_INVALID_ENDDATE", "Invalid endDate");
-          continue;
-        }
-
-        if (endMoment.isBefore(now)) {
-          await AiLog.deleteMany({ topicId: topic._id });
-          await AiTopic.deleteOne({ _id: topic._id });
-          await monitor(topic._id, topic.pageId, null, "TOPIC_EXPIRED", "Topic expired and deleted");
-          maintainAutoTopics().catch(err => console.error(err));
-          continue;
-        }
-
-        const [logCount, scheduledCount] = await Promise.all([
-          AiLog.countDocuments({
-            topicId: topic._id,
-            action: "AUTO_POST_CREATED"
-          }),
-          AiScheduledPost.countDocuments({
-            topicId: topic._id,
-            "meta.auto": true
-          })
-        ]);
-
-        if ((logCount + scheduledCount) >= MAX_POSTS_PER_TOPIC) {
-          await AiLog.deleteMany({ topicId: topic._id });
-          await AiTopic.deleteOne({ _id: topic._id });
-          await monitor(topic._id, topic.pageId, null, "TOPIC_MAX_POSTS", "Topic max posts reached");
-          maintainAutoTopics().catch(err => console.error(err));
-          continue;
-        }
-
-        const pending = await AiScheduledPost.findOne({
-          topicId: topic._id,
-          status: "PENDING"
-        }).lean();
-
-        if (pending) continue;
-
-        // Determine next angle to use
-        let angle;
-        if (topic.customAngles && topic.customAngles.length === MAX_POSTS_PER_TOPIC) {
-          const usedAngles = await AiLog.distinct("message", {
-            topicId: topic._id,
-            action: "AUTO_POST_CREATED"
-          });
-          const available = topic.customAngles.filter(a => !usedAngles.includes(a));
-          if (available.length === 0) {
-            await AiLog.deleteMany({ topicId: topic._id });
-            await AiTopic.deleteOne({ _id: topic._id });
-            await monitor(topic._id, topic.pageId, null, "TOPIC_ANGLES_EXHAUSTED", "All custom angles used");
-            maintainAutoTopics().catch(err => console.error(err));
-            continue;
-          }
-          angle = available[0];
-        } else {
-          const usedAngles = await AiLog.distinct("message", {
-            topicId: topic._id,
-            action: "AUTO_POST_CREATED"
-          });
-          angle = GLOBAL_ANGLES.find(a => !usedAngles.includes(a));
-          if (!angle) {
-            await AiLog.deleteMany({ topicId: topic._id });
-            await AiTopic.deleteOne({ _id: topic._id });
-            await monitor(topic._id, topic.pageId, null, "TOPIC_ANGLES_EXHAUSTED", "All global angles used");
-            maintainAutoTopics().catch(err => console.error(err));
-            continue;
-          }
-        }
-
-        if (!Array.isArray(topic.times) || topic.times.length === 0) {
-          await monitor(topic._id, topic.pageId, null, "TOPIC_NO_TIMES", "No time slots defined");
-          continue;
-        }
-
-        const startDate = moment(topic.startDate).tz(TIMEZONE);
-        const endDate = moment(topic.endDate).tz(TIMEZONE);
-
-        let scheduledTime = null;
-        let day = moment.max(now.clone().startOf("day"), startDate.clone().startOf("day"));
-        let safetyCounter = 0;
-
-        while (day.isSameOrBefore(endDate) && safetyCounter < 365) {
-          safetyCounter++;
-          const times = shuffleTimes(topic.times);
-          for (const t of times) {
-            const slot = moment.tz(`${day.format("YYYY-MM-DD")} ${t}`, TIMEZONE);
-            if (!slot.isValid()) continue;
-            if (slot.isSameOrBefore(now)) continue;
-            if (slot.isBefore(startDate) || slot.isAfter(endDate)) continue;
-
-            const collision = await AiScheduledPost.findOne({
-              pageId: topic.pageId,
-              scheduledTime: slot.toDate()
-            }).lean();
-
-            if (!collision) {
-              scheduledTime = slot.toDate();
-              break;
-            }
-          }
-          if (scheduledTime) break;
-          day.add(1, "day");
-        }
-
-        if (!scheduledTime) continue;
-
-        let text;
-        try {
-          text = await generateText(topic.topicName, angle, topic.pageId);
-        } catch (err) {
-          console.error("TEXT GENERATION ERROR:", err.message);
-          await monitor(topic._id, topic.pageId, null, "TEXT_GEN_ERROR", err.message);
-          continue;
-        }
-
-        if (!text) continue;
-
-        let rawMediaUrl = null;
-        if (topic.includeMedia) {
-          try {
-            rawMediaUrl = await generateImage(topic.topicName, topic.pageId, text);
-          } catch (err) {
-            console.error("IMAGE GENERATION ERROR:", err.message);
-            await monitor(topic._id, topic.pageId, null, "IMAGE_GEN_ERROR", err.message);
-          }
-        }
-
-        // Create branded image using renderPost
-        const finalMediaUrl = await createBrandedImage(topic._id, topic.pageId, rawMediaUrl, text);
-
-        const post = await AiScheduledPost.create({
-          topicId: topic._id,
-          pageId: topic.pageId,
-          text,
-          mediaUrl: finalMediaUrl,
-          scheduledTime,
-          status: "PENDING",
-          meta: { angle, auto: true }
-        });
-
-        await monitor(topic._id, topic.pageId, post._id, "AUTO_POST_CREATED", angle);
-
-        break; // original break preserved
-
-      } catch (topicErr) {
-        console.error(`AUTO TOPIC ERROR ${topic._id}:`, topicErr.message);
-        await monitor(topic._id, topic.pageId, null, "AUTO_GEN_ERROR", topicErr.message);
-        continue;
-      }
-    }
-  } catch (fatalError) {
-    console.error("FATAL AUTO GENERATION ERROR:", fatalError);
-  } finally {
-    global.__AUTO_GEN_RUNNING__ = false;
-  }
-}
-
-// ===================== ACTIVE TOPIC MAINTENANCE =====================
-async function maintainAutoTopics() {
-  if (!GLOBAL_AUTO_TOPIC_CREATION_ENABLED) return;
-  if (process.memoryUsage().heapUsed > 900 * 1024 * 1024) {
-    console.log('High memory usage, skipping auto topic creation');
-    return;
-  }
-
-  const pages = await Page.find({ autoGenerationEnabled: true }).lean();
-  for (const page of pages) {
-    const activeCount = await AiTopic.countDocuments({
-      pageId: page.pageId,
-      endDate: { $gt: new Date() }
-    });
-    if (activeCount < MIN_ACTIVE_TOPICS) {
-      const needed = MIN_ACTIVE_TOPICS - activeCount;
-      for (let i = 0; i < needed; i++) {
-        const currentActive = await AiTopic.countDocuments({
-          pageId: page.pageId,
-          endDate: { $gt: new Date() }
-        });
-        if (currentActive >= MAX_ACTIVE_TOPICS) break;
-        await createAutoTopicForPage(page.pageId);
-      }
-    }
-  }
-}
-
-// Run maintainAutoTopics every 30 minutes
-setInterval(maintainAutoTopics, 30 * 60 * 1000);
-setInterval(autoGenerate, 60 * 1000);
 
 // ===================== EXPORTS =====================
 module.exports = {
+  // Core functions
   generatePostsForTopic,
-  enableAutoGeneration: () => {},
-  disableAutoGeneration: () => {},
-  createAiLog: monitor,
-  enableAutoTopicCreation: () => { GLOBAL_AUTO_TOPIC_CREATION_ENABLED = true; },
-  disableAutoTopicCreation: () => { GLOBAL_AUTO_TOPIC_CREATION_ENABLED = false; },
-  maintainAutoTopics,
   createAutoTopicForPage,
+  generateAndValidatePost,
+  
+  // Quality assurance helpers
+  getPageMemory,
+  getTopicScore,
+  
+  // Legacy exports for backward compatibility
+  generateText,
+  generateImage,
   generateCustomAngles,
-  generateShortTopicName,
+  
+  // Settings
+  setAutoTopicCreationEnabled: (enabled) => { GLOBAL_AUTO_TOPIC_CREATION_ENABLED = enabled; },
+  getAutoTopicCreationEnabled: () => GLOBAL_AUTO_TOPIC_CREATION_ENABLED
 };
