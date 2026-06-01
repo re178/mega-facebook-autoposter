@@ -19,7 +19,8 @@ const AutoTopicMeta = mongoose.model('AutoTopicMeta', new mongoose.Schema({
 // ===================== AI PROVIDERS =====================
 const {
   CloudflareText,
-  GrokText,
+  GroqText,
+  GeminiText,
   OpenAIText,
   CohereText,
   ClaudeText,
@@ -37,8 +38,9 @@ const {
 
 // ===================== PROVIDER ARRAYS =====================
 const TextProviders = [
+  GeminiText,
   CloudflareText,
-  GrokText,
+  GroqText,
   OpenAIText,
   CohereText,
   ClaudeText,
