@@ -22,7 +22,7 @@ const {
   GroqText,
   GeminiText,
   OpenAIText,
-  smartGenerateText
+  generateSmart
 } = require('../services/textProviders');
 
 const {
@@ -201,7 +201,7 @@ function selectProvider(providers) {
 async function generateText(topic, angle, pageId, textSeed = null) {
   try {
     const prompt = await buildPrompt({ topic, angle, pageId, textSeed });
-    const text = await smartGenerateText(prompt, TextProviders);
+    const text = await generateSmart(prompt);
 
     if (!text) {
       await monitor(null, pageId, null, 'TEXT_FAILED', 'Empty response');
