@@ -202,7 +202,7 @@ async function generateText(topic, angle, pageId, textSeed = null) {
   for (const provider of TextProviders) {
     try {
       const prompt = await buildPrompt({ topic, angle, pageId, textSeed });
-      const text = await provider.generate(prompt);
+      const text = await smartGenerateText(prompt, TextProviders);
       providerState[provider.name].callsToday++;
       if (text) return cleanText(text);
     } catch {
