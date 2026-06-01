@@ -198,21 +198,21 @@ function selectProvider(providers) {
 }
 
 // ===================== TEXT GENERATION =====================
-async function generateText(topic, angle, pageId, textSeed = null) {
-  for (const provider of TextProviders) {
-    try {
-      const prompt = await buildPrompt({ topic, angle, pageId, textSeed });
-      const text = await smartGenerateText(prompt, TextProviders);
-      providerState[provider.name].callsToday++;
-      if (text) return cleanText(text);
-    } catch {
-      providerState[provider.name].failures++;
-      providerState[provider.name].cooldownUntil =
-        Date.now() + providerState[provider.name].failures * 60000;
+async async function generateText(topic, angle, pageId, textSeed = null) {
+  try {
+    const prompt = await buildPrompt({ topic, angle, pageId, textSeed });
+    const text = await smartGenerateText(prompt, TextProviders);
+
+    if (!text) {
+      await monitor(null, pageId, null, 'TEXT_FAILED', 'Empty response');
+      return null;
     }
+
+    return cleanText(text);
+  } catch (err) {
+    await monitor(null, pageId, null, 'TEXT_FAILED', err.message);
+    return null;
   }
-  await monitor(null, pageId, null, 'TEXT_FAILED', 'All providers failed');
-  return null;
 }
 
 // ===================== IMAGE GENERATION =====================
