@@ -482,4 +482,4 @@ module.exports = {
   aiStructureScore,
   finalPostScore,
   scoreTopic
-};R
+};
