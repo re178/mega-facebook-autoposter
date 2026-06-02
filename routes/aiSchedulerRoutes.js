@@ -8,6 +8,7 @@ const AiLog = require('../models/AiLog');
 const Page = require('../models/Page');
 const PageProfile = require('../models/PageProfile');
 
+const generatingTopics = new Set();
 // Services (updated with new exports)
 const {
   generatePostsForTopic,
