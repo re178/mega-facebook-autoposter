@@ -204,7 +204,7 @@ function selectProvider(providers) {
   }) || null;
 }
 
-// ===================== TEXT GENERATION (with QA integration) =====================
+// ===================== TEXT GENERATION =====================
 async function generateText(topic, angle, pageId, textSeed = null, qualityFix = null) {
   try {
     const prompt = await buildPrompt({ topic, angle, pageId, textSeed, qualityFix });
@@ -222,23 +222,45 @@ async function generateText(topic, angle, pageId, textSeed = null, qualityFix = 
   }
 }
 
-// ===================== QA-ENHANCED POST GENERATION =====================
+// ===================== SELF-REVIEW FUNCTION =====================
+async function selfReviewAndImprove(postText, topic, angle, pageId) {
+  const selfReviewPrompt = `Review this Facebook post about "${topic}" (angle: ${angle}):
+
+"${postText}"
+
+Rate each (1-10): Hook, Human tone, Curiosity, Virality.
+If any score is below 7, rewrite the post to fix it. Keep max 2-3 sentences.
+Return ONLY the improved post.`;
+
+  const improved = await generateSmart(selfReviewPrompt);
+  if (improved && improved.length > 20) {
+    return cleanText(improved);
+  }
+  return postText;
+}
+
+// ===================== QA-ENHANCED POST GENERATION (FIXED FEEDBACK) =====================
 async function generateAndValidatePost(topic, angle, pageId, pageProfile, recentPosts = [], attempt = 0) {
   const maxAttempts = 3;
   
+  // 1. Generate raw text
   let rawText = await generateText(topic, angle, pageId);
   if (!rawText) return null;
   
+  // 2. Self-review to boost scores before QA
+  const improvedText = await selfReviewAndImprove(rawText, topic, angle, pageId);
+  if (improvedText) rawText = improvedText;
+  
+  // 3. Run QA with PROPER feedback callback (no regex extraction)
   const qaResult = await qualityAssurance.processContent({
     topic: topic,
     post: rawText,
     pageProfile: pageProfile,
     pageId: pageId,
     recentPosts: recentPosts,
-    generateFn: async (prompt) => {
-      const fixMatch = prompt.match(/IMPORTANT FIXES NEEDED: ([^\n]+)/);
-      const qualityFix = fixMatch ? fixMatch[1] : null;
-      return await generateText(topic, angle, pageId, null, qualityFix);
+    generateFn: async (feedbackPrompt) => {
+      // Directly call AI with the full feedback from QA
+      return await generateSmart(feedbackPrompt);
     },
     maxRegenerations: 2
   });
@@ -252,6 +274,7 @@ async function generateAndValidatePost(topic, angle, pageId, pageProfile, recent
     };
   }
   
+  // Retry with a different angle if QA failed (and we have attempts left)
   if (attempt < maxAttempts) {
     await monitor(null, pageId, null, 'QA_FAILED_RETRY', `Attempt ${attempt + 1}: ${qaResult.reason}`);
     const modifiedAngle = `${angle} (different perspective)`;
@@ -477,7 +500,7 @@ async function createBrandedImage(topicId, pageId, rawMediaUrl, postText) {
   }
 }
 
-// ===================== CREATE MANUAL TOPIC WITH QA (enhanced) =====================
+// ===================== CREATE MANUAL TOPIC WITH QA =====================
 async function createManualTopicWithQA(pageId, topicName, startDate, endDate, times, postsPerDay, includeMedia, includeVideo) {
   const topicScore = qualityAssurance.scoreTopic(topicName, pageId);
   if (topicScore < 20) {
@@ -490,7 +513,6 @@ async function createManualTopicWithQA(pageId, topicName, startDate, endDate, ti
     return { success: false, reason: `Similar topic already exists. Choose a different topic.` };
   }
 
-  // Generate custom angles (pre-save hook will also do this, but we do it explicitly here)
   const customAngles = await generateCustomAngles(topicName, pageId);
   
   const newTopic = await AiTopic.create({
@@ -625,7 +647,7 @@ async function regenerateTopicAngles(topicId) {
   return { success: true, angles: newAngles, postsRegenerated: result.postsCreated };
 }
 
-// ===================== POST GENERATOR FOR ANY TOPIC (auto or manual) =====================
+// ===================== POST GENERATOR FOR ANY TOPIC =====================
 async function generatePostsForTopic(topicId) {
   const topic = await AiTopic.findById(topicId);
   if (!topic) return [];
