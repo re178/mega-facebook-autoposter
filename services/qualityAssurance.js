@@ -391,7 +391,7 @@ async function adaptiveRegenerate(originalPost, failureReason, suggestion, gener
 //      detailedFeedback += `\n\nAlso, this post doesn't sound like the page's authentic voice (identity score ${idScore}/100). Make it sound more like: authority ${pageProfile.authority || 50}, seriousness ${pageProfile.seriousness || 50}, humor ${pageProfile.humor || 20}.`;
   //    newPost = await generateFn(detailedFeedback);
     }
-  }
+  
   return newPost;
 
 
