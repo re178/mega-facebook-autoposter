@@ -17,6 +17,26 @@ const AutoTopicMeta = mongoose.model('AutoTopicMeta', new mongoose.Schema({
   createdAt: { type: Date, default: Date.now }
 }));
 
+// ===================== ADD PRE-SAVE HOOK TO AUTO-GENERATE CUSTOM ANGLES =====================
+// This ensures ANY topic saved without customAngles gets them automatically
+AiTopic.schema.pre('save', async function(next) {
+  // Skip if angles already exist
+  if (this.customAngles && this.customAngles.length > 0) return next();
+  
+  try {
+    // Generate custom angles using the existing function
+    const angles = await generateCustomAngles(this.topicName, this.pageId);
+    this.customAngles = angles;
+    console.log(`[AUTO] Generated custom angles for topic "${this.topicName}":`, angles);
+    next();
+  } catch (err) {
+    console.error('Pre-save angle generation failed:', err);
+    // Fallback to default angles so save doesn't fail
+    this.customAngles = [...DEFAULT_ANGLES];
+    next();
+  }
+});
+
 // ===================== AI PROVIDERS =====================
 const {
   CloudflareText,
@@ -206,11 +226,9 @@ async function generateText(topic, angle, pageId, textSeed = null, qualityFix = 
 async function generateAndValidatePost(topic, angle, pageId, pageProfile, recentPosts = [], attempt = 0) {
   const maxAttempts = 3;
   
-  // Generate raw text
   let rawText = await generateText(topic, angle, pageId);
   if (!rawText) return null;
   
-  // Run through quality assurance
   const qaResult = await qualityAssurance.processContent({
     topic: topic,
     post: rawText,
@@ -218,7 +236,6 @@ async function generateAndValidatePost(topic, angle, pageId, pageProfile, recent
     pageId: pageId,
     recentPosts: recentPosts,
     generateFn: async (prompt) => {
-      // Extract fix instructions from prompt
       const fixMatch = prompt.match(/IMPORTANT FIXES NEEDED: ([^\n]+)/);
       const qualityFix = fixMatch ? fixMatch[1] : null;
       return await generateText(topic, angle, pageId, null, qualityFix);
@@ -235,10 +252,8 @@ async function generateAndValidatePost(topic, angle, pageId, pageProfile, recent
     };
   }
   
-  // If QA failed and we have attempts left, try again with a different approach
   if (attempt < maxAttempts) {
     await monitor(null, pageId, null, 'QA_FAILED_RETRY', `Attempt ${attempt + 1}: ${qaResult.reason}`);
-    // Slightly modify the angle for retry
     const modifiedAngle = `${angle} (different perspective)`;
     return await generateAndValidatePost(topic, modifiedAngle, pageId, pageProfile, recentPosts, attempt + 1);
   }
@@ -462,28 +477,22 @@ async function createBrandedImage(topicId, pageId, rawMediaUrl, postText) {
   }
 }
 
-// ===================== ENHANCED: Create Manual Topic with QA =====================
+// ===================== CREATE MANUAL TOPIC WITH QA (enhanced) =====================
 async function createManualTopicWithQA(pageId, topicName, startDate, endDate, times, postsPerDay, includeMedia, includeVideo) {
-  // 1. Score the topic before creation
   const topicScore = qualityAssurance.scoreTopic(topicName, pageId);
   if (topicScore < 20) {
     await monitor(null, pageId, null, 'MANUAL_TOPIC_REJECTED', `Topic score too low (${topicScore}): ${topicName}`);
     return { success: false, reason: `Topic score too low (${topicScore}). Choose a more specific or trending topic.` };
   }
 
-  // 2. Check for similar topics
   if (await isTopicTooSimilar(topicName, pageId)) {
     await monitor(null, pageId, null, 'MANUAL_TOPIC_REJECTED', `Similar topic exists: ${topicName}`);
     return { success: false, reason: `Similar topic already exists. Choose a different topic.` };
   }
 
-  // 3. Generate custom angles for this topic (same as auto-topics)
+  // Generate custom angles (pre-save hook will also do this, but we do it explicitly here)
   const customAngles = await generateCustomAngles(topicName, pageId);
-  if (!customAngles || customAngles.length < 3) {
-    await monitor(null, pageId, null, 'MANUAL_TOPIC_WARNING', `Using default angles for: ${topicName}`);
-  }
-
-  // 4. Create the topic with custom angles
+  
   const newTopic = await AiTopic.create({
     topicName,
     pageId,
@@ -504,15 +513,13 @@ async function createManualTopicWithQA(pageId, topicName, startDate, endDate, ti
   return { success: true, topic: newTopic, topicScore, customAngles };
 }
 
-// ===================== ENHANCED: Generate Posts for Manual Topic =====================
+// ===================== GENERATE POSTS FOR MANUAL TOPIC =====================
 async function generatePostsForManualTopic(topicId, generateImmediately = false) {
   const topic = await AiTopic.findById(topicId);
   if (!topic) return { success: false, reason: 'Topic not found' };
 
-  // Get page profile for QA
   const pageProfile = await PageProfile.findOne({ pageId: topic.pageId });
   
-  // Get recent posts for duplicate detection
   const recentPosts = await AiScheduledPost.find({ 
     pageId: topic.pageId,
     status: 'PENDING'
@@ -523,17 +530,14 @@ async function generatePostsForManualTopic(topicId, generateImmediately = false)
     .lean();
   const recentPostTexts = recentPosts.map(p => p.text).filter(Boolean);
 
-  // Determine angles to use
   let anglesToUse;
   if (topic.customAngles && topic.customAngles.length > 0) {
     anglesToUse = topic.customAngles;
   } else {
-    // Generate custom angles on the fly if missing
     anglesToUse = await generateCustomAngles(topic.topicName, topic.pageId);
     await AiTopic.findByIdAndUpdate(topicId, { customAngles: anglesToUse });
   }
 
-  // Ensure we have enough angles
   while (anglesToUse.length < 5) {
     anglesToUse.push(DEFAULT_ANGLES[anglesToUse.length % DEFAULT_ANGLES.length]);
   }
@@ -553,11 +557,9 @@ async function generatePostsForManualTopic(topicId, generateImmediately = false)
       const time = topic.times[i % topic.times.length];
       const scheduled = moment.tz(`${day.format('YYYY-MM-DD')} ${time}`, TIMEZONE).toDate();
 
-      // Skip if already scheduled
       const existsScheduled = await AiScheduledPost.findOne({ topicId, scheduledTime: scheduled });
       if (existsScheduled) continue;
 
-      // Generate and validate post through QA pipeline
       const validatedPost = await generateAndValidatePost(
         topic.topicName,
         angle,
@@ -571,19 +573,16 @@ async function generatePostsForManualTopic(topicId, generateImmediately = false)
         continue;
       }
 
-      // Generate image if needed
       let rawMediaUrl = null;
       if (topic.includeMedia) {
         rawMediaUrl = await generateImage(topic.topicName, topic.pageId, validatedPost.text);
       }
       
-      // Create branded image/video
       let finalMediaUrl = null;
       if (rawMediaUrl || topic.includeVideo) {
         finalMediaUrl = await createBrandedImage(topicId, topic.pageId, rawMediaUrl, validatedPost.text);
       }
 
-      // Create the scheduled post
       const post = await AiScheduledPost.create({
         topicId,
         pageId: topic.pageId,
@@ -614,28 +613,23 @@ async function generatePostsForManualTopic(topicId, generateImmediately = false)
   return { success: true, postsCreated: created.length, totalPosts: totalPostsNeeded, posts: created };
 }
 
-// ===================== ENHANCED: Regenerate Topic Angles =====================
+// ===================== REGENERATE TOPIC ANGLES =====================
 async function regenerateTopicAngles(topicId) {
   const topic = await AiTopic.findById(topicId);
   if (!topic) return { success: false, reason: 'Topic not found' };
   
   const newAngles = await generateCustomAngles(topic.topicName, topic.pageId);
-  
   await AiTopic.findByIdAndUpdate(topicId, { customAngles: newAngles });
-  
-  // Delete existing posts for this topic and regenerate
   await AiScheduledPost.deleteMany({ topicId });
   const result = await generatePostsForManualTopic(topicId, false);
-  
   return { success: true, angles: newAngles, postsRegenerated: result.postsCreated };
 }
 
-// ===================== UPDATED POST GENERATOR (with QA integration) =====================
+// ===================== POST GENERATOR FOR ANY TOPIC (auto or manual) =====================
 async function generatePostsForTopic(topicId) {
   const topic = await AiTopic.findById(topicId);
   if (!topic) return [];
 
-  // Determine which angles to use
   let anglesToUse;
   if (topic.customAngles && topic.customAngles.length === MAX_POSTS_PER_TOPIC) {
     anglesToUse = topic.customAngles;
@@ -645,11 +639,8 @@ async function generatePostsForTopic(topicId) {
 
   const start = moment.tz(topic.startDate, TIMEZONE);
   const end = moment.tz(topic.endDate, TIMEZONE);
-  
-  // Get page profile for QA
   const pageProfile = await PageProfile.findOne({ pageId: topic.pageId });
   
-  // Get recent posts from this page for duplicate detection
   const recentPosts = await AiScheduledPost.find({ 
     pageId: topic.pageId,
     status: 'PENDING'
@@ -675,7 +666,6 @@ async function generatePostsForTopic(topicId) {
       const existsLogged = await AiLog.findOne({ topicId, action: /POST_CREATED|AUTO_POST_CREATED/, message: new RegExp(time) });
       if (existsScheduled || existsLogged) continue;
 
-      // Generate and validate post through QA pipeline
       const validatedPost = await generateAndValidatePost(
         topic.topicName,
         angle,
@@ -689,13 +679,9 @@ async function generatePostsForTopic(topicId) {
         continue;
       }
 
-      // Generate image (if needed)
       let rawMediaUrl = topic.includeMedia ? await generateImage(topic.topicName, topic.pageId, validatedPost.text) : null;
-      
-      // Create branded image/video
       const finalMediaUrl = await createBrandedImage(topicId, topic.pageId, rawMediaUrl, validatedPost.text);
 
-      // Create the scheduled post
       const post = await AiScheduledPost.create({
         topicId,
         pageId: topic.pageId,
@@ -746,7 +732,6 @@ async function createAutoTopicForPage(pageId) {
     return null;
   }
 
-  // Score the topic before creating
   const topicScore = qualityAssurance.scoreTopic(topicName, pageId);
   if (topicScore < 40) {
     await monitor(null, pageId, null, 'AUTO_TOPIC_SKIPPED', `Topic score too low (${topicScore}): ${topicName}`);
@@ -808,26 +793,17 @@ async function getTopicScore(topicName, pageId) {
 
 // ===================== EXPORTS =====================
 module.exports = {
-  // Core functions
   generatePostsForTopic,
   createAutoTopicForPage,
   generateAndValidatePost,
-  
-  // NEW: Manual topic functions with QA
   createManualTopicWithQA,
   generatePostsForManualTopic,
   regenerateTopicAngles,
-  
-  // Quality assurance helpers
   getPageMemory,
   getTopicScore,
-  
-  // Legacy exports for backward compatibility
   generateText,
   generateImage,
   generateCustomAngles,
-  
-  // Settings
   setAutoTopicCreationEnabled: (enabled) => { GLOBAL_AUTO_TOPIC_CREATION_ENABLED = enabled; },
   getAutoTopicCreationEnabled: () => GLOBAL_AUTO_TOPIC_CREATION_ENABLED
 };
