@@ -393,7 +393,7 @@ async function adaptiveRegenerate(originalPost, failureReason, suggestion, gener
     }
   }
   return newPost;
-}
+
 
 // ---------- 10. Main Pipeline with per‑page overrides from extraNotes ----------
 async function processContent({
