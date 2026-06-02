@@ -1,16 +1,14 @@
 // services/qualityAssurance.js
-// Enhanced Quality Assurance – now uses pageIntelligence memory & identity scoring
+// Enhanced Quality Assurance – no broken identityScore call
 // Passing threshold = 70 (can be overridden per page via extraNotes)
 
-const { identityScore, updatePageMemory: updateIntelligenceMemory, getPageMemory: getIntelligenceMemory } = require('./pageIntelligence');
+const { updatePageMemory: updateIntelligenceMemory, getPageMemory: getIntelligenceMemory } = require('./pageIntelligence');
 
 // ---------- Helper: Parse per‑page overrides from extraNotes ----------
 function parsePageOverrides(extraNotes = '') {
-  // Look for a block like: qa:{ threshold:80, avoid_phrases:["click here"], tone_keywords:["awesome","cool"], custom_hook_words:["secret","warning"] }
   const match = extraNotes.match(/qa:\s*\{([^}]+)\}/i);
   if (!match) return {};
   try {
-    // Safely evaluate the object literal (since it's from trusted input / admin)
     const obj = eval('({' + match[1] + '})');
     return {
       threshold: obj.threshold,
@@ -28,19 +26,15 @@ function parsePageOverrides(extraNotes = '') {
 }
 
 // ---------- 1. In-Memory Page Memory (delegated to pageIntelligence) ----------
-// We no longer maintain a separate pageMemory Map here.
-// Instead we call getIntelligenceMemory(pageId) and updateIntelligenceMemory(pageId, ...)
-
 function updatePageMemory(pageId, topic, post, qualityScore) {
-  // Forward to the shared memory from pageIntelligence
-  updateIntelligenceMemory(pageId, topic, post, qualityScore, null); // last param is hook, we don't have here
+  updateIntelligenceMemory(pageId, topic, post, qualityScore, null);
 }
 
 function getPageMemory(pageId) {
   return getIntelligenceMemory(pageId);
 }
 
-// ---------- 2. Keyword Families (same as before, but can be extended via extraNotes) ----------
+// ---------- 2. Keyword Families ----------
 const INTEREST_MAP = {
   cybersecurity: ['hacker', 'malware', 'ransomware', 'breach', 'security', 'phishing', 'cyberattack', 'vulnerability', 'patch', 'exploit'],
   football: ['premier league', 'arsenal', 'chelsea', 'man utd', 'goal', 'match', 'fifa', 'world cup', 'champions league', 'football'],
@@ -86,7 +80,7 @@ function pageFitScore(topic, pageProfile, postText = null) {
   return Math.min(100, Math.max(40, maxScore || 40));
 }
 
-// ---------- 3. Realism Penalty (can be adjusted via extraNotes) ----------
+// ---------- 3. Realism Penalty ----------
 function realismPenalty(post, overrides = {}) {
   let penalty = 0;
   const text = post.toLowerCase();
@@ -154,7 +148,7 @@ function stringSimilarity(a, b) {
   return intersection.size / union.size;
 }
 
-// ---------- 6. Duplicate Detection (uses shared memory recent posts) ----------
+// ---------- 6. Duplicate Detection ----------
 function fingerprint(text) {
   return text.toLowerCase().replace(/[^\w\s]/g, '').split(/\s+/).slice(0, 15).join(' ');
 }
@@ -179,7 +173,6 @@ function validatePost(post, overrides = {}) {
   if (text.length < 20) return { valid: false, reason: 'Too short', suggestion: 'Expand your post to at least 20 characters (about 4-5 words).' };
   if (text.length > 2200) return { valid: false, reason: 'Too long', suggestion: 'Shorten your post to under 2200 characters (Facebook limit).' };
   
-  // Base AI phrases (can be extended with overrides)
   let aiPhrases = [
     { regex: /\bhave you ever\b/i, phrase: '"Have you ever..."' },
     { regex: /\blet's explore\b/i, phrase: '"Let\'s explore..."' },
@@ -194,7 +187,6 @@ function validatePost(post, overrides = {}) {
     { regex: /\bin a rapidly evolving\b/i, phrase: '"In a rapidly evolving..."' },
     { regex: /\bthe key takeaway\b/i, phrase: '"The key takeaway..."' }
   ];
-  // Add custom avoid phrases from extraNotes
   if (overrides.avoidPhrases) {
     overrides.avoidPhrases.forEach(phrase => {
       const regex = new RegExp(`\\b${phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
@@ -207,13 +199,11 @@ function validatePost(post, overrides = {}) {
     }
   }
   
-  // Default jargon
   let corporate = [
     { regex: /\bleverage\b/i, word: 'leverage' },
     { regex: /\bsynergy\b/i, word: 'synergy' },
     { regex: /\btransformative\b/i, word: 'transformative' }
   ];
-  // Add custom forbidden jargon
   if (overrides.forbiddenJargon) {
     overrides.forbiddenJargon.forEach(word => {
       corporate.push({ regex: new RegExp(`\\b${word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i'), word });
@@ -250,7 +240,6 @@ function hasUnsupportedClaim(post, overrides = {}) {
   if (requireSource && /\b(studies show|experts agree|research shows)\b/i.test(text) && !/according to|source:/i.test(text)) {
     return { hasClaim: true, reason: 'Unsupported claim (source required)', suggestion: 'Either remove the claim or add a source (e.g., "According to [source]").' };
   }
-  // Default behaviour (without requireSource) – only flag if claim appears without source but we still suggest
   if (/\b(studies show|experts agree|research shows)\b/i.test(text) && !/according to|source:/i.test(text)) {
     return { hasClaim: true, reason: 'Unsupported claim', suggestion: 'Either remove the claim or add a source (e.g., "According to [source]").' };
   }
@@ -268,7 +257,6 @@ function validateTone(post, pageProfile, overrides = {}) {
     casual: ['hey', 'guys', 'y\'all', 'so', 'well', 'basically'],
     motivational: ['believe', 'achieve', 'dream', 'success', 'inspire']
   };
-  // Merge custom tone keywords from extraNotes
   let keywords = baseToneMap[tone] || [];
   if (overrides.toneKeywords && overrides.toneKeywords.length) {
     keywords = [...keywords, ...overrides.toneKeywords];
@@ -281,7 +269,7 @@ function validateTone(post, pageProfile, overrides = {}) {
   return { matches: true, reason: '', suggestion: '' };
 }
 
-// ---------- 8. Scoring Functions (with custom hook words from extraNotes) ----------
+// ---------- 8. Scoring Functions ----------
 function viralityScore(post, overrides = {}) {
   let score = 0;
   const text = post.toLowerCase();
@@ -289,7 +277,6 @@ function viralityScore(post, overrides = {}) {
   if (/why|how|what|reason|because|inside|secret/.test(text)) score += 20;
   if (/\?/.test(text) && !/like|share|comment/i.test(text)) score += 15;
   if (/\d+%|\d+ million|\d+ thousand/.test(text)) score += 20;
-  // Custom hook words from extraNotes
   if (overrides.customHookWords) {
     for (const word of overrides.customHookWords) {
       if (text.includes(word.toLowerCase())) score += 15;
@@ -312,7 +299,6 @@ function humanScore(post) {
 
 function hookScore(post, overrides = {}) {
   const hookWords = ['unexpected', 'warning', 'mistake', 'secret', 'surprising', 'caught', 'exposed', 'revealed'];
-  // Add custom hook words from extraNotes
   if (overrides.customHookWords) hookWords.push(...overrides.customHookWords);
   let score = 0;
   for (const w of hookWords) if (post.toLowerCase().includes(w)) score += 15;
@@ -352,7 +338,7 @@ function finalPostScore(post, topic, pageProfile, pageId = null, overrides = {})
   return { total: Math.round(finalScore), breakdown: { ...base, pageFit, aiStructure: aiStruct, realismPenalty: realism } };
 }
 
-// ---------- 9. Enhanced Adaptive Regeneration (now also checks identityScore) ----------
+// ---------- 9. Adaptive Regeneration (identity score removed to prevent crash) ----------
 async function adaptiveRegenerate(originalPost, failureReason, suggestion, generateFn, breakdown = null, pageProfile = null, pageId = null) {
   let detailedFeedback = `The following Facebook post was rejected because: ${failureReason}\n\nSuggested fix: ${suggestion}\n`;
   
@@ -382,20 +368,17 @@ async function adaptiveRegenerate(originalPost, failureReason, suggestion, gener
   
   detailedFeedback += `\nRewrite the post to fix these issues. Keep the core message but make it punchy, natural, and max 3 sentences. Return only the rewritten post.\n\nOriginal: "${originalPost}"`;
   
-  let newPost = await generateFn(detailedFeedback);
-  // After regeneration, optionally check identity score (if pageProfile and pageId exist)
- // if (pageProfile && pageId && newPost) {
- //   const idScore = await identityScore(newPost, pageProfile, pageProfile); // second arg expects DNA, but we can pass pageProfile as stub - adjust as needed
- //   if (idScore < 50) {
-      // Append a note to regenerate again with identity focus
-//      detailedFeedback += `\n\nAlso, this post doesn't sound like the page's authentic voice (identity score ${idScore}/100). Make it sound more like: authority ${pageProfile.authority || 50}, seriousness ${pageProfile.seriousness || 50}, humor ${pageProfile.humor || 20}.`;
-  //    newPost = await generateFn(detailedFeedback);
-    }
+  // Removed identityScore call because pageDNA is not built in this setup
+  // If you later integrate pageIntelligence, you can uncomment and fix:
+  // const { buildPageDNA, identityScore } = require('./pageIntelligence');
+  // const dna = await buildPageDNA(pageProfile);
+  // const idScore = await identityScore(newPost, dna, pageProfile);
   
+  const newPost = await generateFn(detailedFeedback);
   return newPost;
+}
 
-
-// ---------- 10. Main Pipeline with per‑page overrides from extraNotes ----------
+// ---------- 10. Main Pipeline with per‑page overrides ----------
 async function processContent({
   topic,
   post,
@@ -405,17 +388,14 @@ async function processContent({
   generateFn,
   maxRegenerations = 2
 }) {
-  // Extract per‑page overrides from extraNotes
   const overrides = parsePageOverrides(pageProfile?.extraNotes || '');
   const THRESHOLD = overrides.threshold !== undefined ? overrides.threshold : 70;
   
-  // 1. Topic scoring
   const tScore = scoreTopic(topic, pageId);
   if (tScore < 25) {
     return { pass: false, reason: `Topic score too low (${tScore})`, suggestion: 'Choose a more specific, trending, or curiosity-driven topic.' };
   }
 
-  // 2. Page fit
   const pFit = pageFitScore(topic, pageProfile, post);
   if (pFit < 20) {
     return { pass: false, reason: `Page fit too low (${pFit})`, suggestion: `Make the post more relevant to your audience interests: ${pageProfile?.audienceInterest?.join(', ') || 'unknown'}.` };
@@ -425,7 +405,6 @@ async function processContent({
   let failures = [];
 
   for (let attempt = 0; attempt <= maxRegenerations; attempt++) {
-    // Run all validations (with overrides)
     const pv = validatePost(currentPost, overrides);
     if (!pv.valid) {
       if (attempt === maxRegenerations) {
@@ -482,7 +461,6 @@ async function processContent({
       continue;
     }
 
-    // Final scoring using the per‑page threshold
     const scoring = finalPostScore(currentPost, topic, pageProfile, pageId, overrides);
     if (scoring.total >= THRESHOLD) {
       updatePageMemory(pageId, topic, currentPost, scoring.total);
@@ -497,7 +475,6 @@ async function processContent({
       };
     }
 
-    // Score too low – provide detailed feedback including breakdown
     const scoreReason = `Score ${scoring.total} below threshold (need ≥${THRESHOLD})`;
     let scoreSuggestion = '';
     if (scoring.total >= THRESHOLD - 10) {
@@ -528,12 +505,12 @@ async function processContent({
 
 module.exports = {
   processContent,
-  updatePageMemory,   // now calls the shared intelligence memory
-  getPageMemory,      // from intelligence
+  updatePageMemory,
+  getPageMemory,
   pageFitScore,
   realismPenalty,
   aiStructureScore,
   finalPostScore,
   scoreTopic,
-  parsePageOverrides  // exported for testing
+  parsePageOverrides
 };
