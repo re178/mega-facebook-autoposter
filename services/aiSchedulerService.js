@@ -462,6 +462,174 @@ async function createBrandedImage(topicId, pageId, rawMediaUrl, postText) {
   }
 }
 
+// ===================== ENHANCED: Create Manual Topic with QA =====================
+async function createManualTopicWithQA(pageId, topicName, startDate, endDate, times, postsPerDay, includeMedia, includeVideo) {
+  // 1. Score the topic before creation
+  const topicScore = qualityAssurance.scoreTopic(topicName, pageId);
+  if (topicScore < 20) {
+    await monitor(null, pageId, null, 'MANUAL_TOPIC_REJECTED', `Topic score too low (${topicScore}): ${topicName}`);
+    return { success: false, reason: `Topic score too low (${topicScore}). Choose a more specific or trending topic.` };
+  }
+
+  // 2. Check for similar topics
+  if (await isTopicTooSimilar(topicName, pageId)) {
+    await monitor(null, pageId, null, 'MANUAL_TOPIC_REJECTED', `Similar topic exists: ${topicName}`);
+    return { success: false, reason: `Similar topic already exists. Choose a different topic.` };
+  }
+
+  // 3. Generate custom angles for this topic (same as auto-topics)
+  const customAngles = await generateCustomAngles(topicName, pageId);
+  if (!customAngles || customAngles.length < 3) {
+    await monitor(null, pageId, null, 'MANUAL_TOPIC_WARNING', `Using default angles for: ${topicName}`);
+  }
+
+  // 4. Create the topic with custom angles
+  const newTopic = await AiTopic.create({
+    topicName,
+    pageId,
+    startDate: new Date(startDate),
+    endDate: new Date(endDate),
+    times: Array.isArray(times) ? times : [times],
+    postsPerDay: postsPerDay || 1,
+    includeMedia: includeMedia || false,
+    includeVideo: includeVideo || false,
+    customAngles: customAngles || null,
+    manualTopic: true
+  });
+
+  await monitor(newTopic._id, pageId, null, 'MANUAL_TOPIC_CREATED', 
+    `Topic: "${topicName}", Angles: ${customAngles?.join(', ') || 'defaults'}, Score: ${topicScore}`
+  );
+
+  return { success: true, topic: newTopic, topicScore, customAngles };
+}
+
+// ===================== ENHANCED: Generate Posts for Manual Topic =====================
+async function generatePostsForManualTopic(topicId, generateImmediately = false) {
+  const topic = await AiTopic.findById(topicId);
+  if (!topic) return { success: false, reason: 'Topic not found' };
+
+  // Get page profile for QA
+  const pageProfile = await PageProfile.findOne({ pageId: topic.pageId });
+  
+  // Get recent posts for duplicate detection
+  const recentPosts = await AiScheduledPost.find({ 
+    pageId: topic.pageId,
+    status: 'PENDING'
+  })
+    .sort({ scheduledTime: -1 })
+    .limit(10)
+    .select('text')
+    .lean();
+  const recentPostTexts = recentPosts.map(p => p.text).filter(Boolean);
+
+  // Determine angles to use
+  let anglesToUse;
+  if (topic.customAngles && topic.customAngles.length > 0) {
+    anglesToUse = topic.customAngles;
+  } else {
+    // Generate custom angles on the fly if missing
+    anglesToUse = await generateCustomAngles(topic.topicName, topic.pageId);
+    await AiTopic.findByIdAndUpdate(topicId, { customAngles: anglesToUse });
+  }
+
+  // Ensure we have enough angles
+  while (anglesToUse.length < 5) {
+    anglesToUse.push(DEFAULT_ANGLES[anglesToUse.length % DEFAULT_ANGLES.length]);
+  }
+
+  const start = moment.tz(topic.startDate, TIMEZONE);
+  const end = moment.tz(topic.endDate, TIMEZONE);
+  
+  let created = [];
+  let angleIndex = 0;
+  const totalPostsNeeded = Math.ceil(end.diff(start, 'days') + 1) * topic.postsPerDay;
+
+  for (let day = start.clone(); day.isSameOrBefore(end); day.add(1, 'day')) {
+    for (let i = 0; i < topic.postsPerDay; i++) {
+      if (angleIndex >= totalPostsNeeded) break;
+      
+      const angle = anglesToUse[angleIndex % anglesToUse.length];
+      const time = topic.times[i % topic.times.length];
+      const scheduled = moment.tz(`${day.format('YYYY-MM-DD')} ${time}`, TIMEZONE).toDate();
+
+      // Skip if already scheduled
+      const existsScheduled = await AiScheduledPost.findOne({ topicId, scheduledTime: scheduled });
+      if (existsScheduled) continue;
+
+      // Generate and validate post through QA pipeline
+      const validatedPost = await generateAndValidatePost(
+        topic.topicName,
+        angle,
+        topic.pageId,
+        pageProfile,
+        recentPostTexts
+      );
+      
+      if (!validatedPost) {
+        await monitor(topicId, topic.pageId, null, 'MANUAL_POST_FAILED', `Angle: ${angle} - Failed QA`);
+        continue;
+      }
+
+      // Generate image if needed
+      let rawMediaUrl = null;
+      if (topic.includeMedia) {
+        rawMediaUrl = await generateImage(topic.topicName, topic.pageId, validatedPost.text);
+      }
+      
+      // Create branded image/video
+      let finalMediaUrl = null;
+      if (rawMediaUrl || topic.includeVideo) {
+        finalMediaUrl = await createBrandedImage(topicId, topic.pageId, rawMediaUrl, validatedPost.text);
+      }
+
+      // Create the scheduled post
+      const post = await AiScheduledPost.create({
+        topicId,
+        pageId: topic.pageId,
+        text: validatedPost.text,
+        mediaUrl: finalMediaUrl,
+        scheduledTime: scheduled,
+        status: generateImmediately ? 'PUBLISHED' : 'PENDING',
+        meta: { 
+          angle,
+          qaScore: validatedPost.score,
+          qaBreakdown: validatedPost.breakdown,
+          generatedManually: true
+        }
+      });
+
+      created.push(post);
+      recentPostTexts.unshift(validatedPost.text);
+      recentPostTexts = recentPostTexts.slice(0, 10);
+      
+      await monitor(topicId, topic.pageId, post._id, 'MANUAL_POST_CREATED', 
+        `Angle: ${angle}, QA Score: ${validatedPost.score}, Scheduled: ${scheduled}`
+      );
+      
+      angleIndex++;
+    }
+  }
+
+  return { success: true, postsCreated: created.length, totalPosts: totalPostsNeeded, posts: created };
+}
+
+// ===================== ENHANCED: Regenerate Topic Angles =====================
+async function regenerateTopicAngles(topicId) {
+  const topic = await AiTopic.findById(topicId);
+  if (!topic) return { success: false, reason: 'Topic not found' };
+  
+  const newAngles = await generateCustomAngles(topic.topicName, topic.pageId);
+  
+  await AiTopic.findByIdAndUpdate(topicId, { customAngles: newAngles });
+  
+  // Delete existing posts for this topic and regenerate
+  await AiScheduledPost.deleteMany({ topicId });
+  const result = await generatePostsForManualTopic(topicId, false);
+  
+  return { success: true, angles: newAngles, postsRegenerated: result.postsCreated };
+}
+
 // ===================== UPDATED POST GENERATOR (with QA integration) =====================
 async function generatePostsForTopic(topicId) {
   const topic = await AiTopic.findById(topicId);
@@ -644,6 +812,11 @@ module.exports = {
   generatePostsForTopic,
   createAutoTopicForPage,
   generateAndValidatePost,
+  
+  // NEW: Manual topic functions with QA
+  createManualTopicWithQA,
+  generatePostsForManualTopic,
+  regenerateTopicAngles,
   
   // Quality assurance helpers
   getPageMemory,
