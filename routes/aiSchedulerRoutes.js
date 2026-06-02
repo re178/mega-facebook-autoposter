@@ -146,28 +146,39 @@ router.delete('/topic/:topicId', async (req, res) => {
 /* =========================================================
    POST GENERATION
 ========================================================= */
-
-const generatingTopics = new Set();
-
 router.post('/topic/:topicId/generate-now', async (req, res) => {
   try {
     const facebookPageId = await getFacebookPageIdFromTopic(req.params.topicId);
-    if (!facebookPageId || !(await canAccessPage(facebookPageId, req)))
+    if (!facebookPageId || !(await canAccessPage(facebookPageId, req))) {
       return res.status(403).json({ error: 'Access denied' });
+    }
 
-    if (generatingTopics.has(req.params.topicId))
+    if (generatingTopics.has(req.params.topicId)) {
       return res.status(429).json({ error: 'Generation already in progress for this topic' });
+    }
 
     generatingTopics.add(req.params.topicId);
+    console.log(`🚀 Starting generation for topic ${req.params.topicId}`);
+    
     const posts = await generatePostsForTopic(req.params.topicId, { immediate: true });
+    
     generatingTopics.delete(req.params.topicId);
-
+    console.log(`✅ Generated ${posts.length} posts for topic ${req.params.topicId}`);
+    
     const topic = await AiTopic.findById(req.params.topicId);
     await logAction({ pageId: topic.pageId, action: 'POSTS_GENERATED', message: `${posts.length} posts generated` });
     res.json(posts);
   } catch (err) {
     generatingTopics.delete(req.params.topicId);
-    handleError(res, err);
+    // CRITICAL: Log full error to console (this will appear in Render logs)
+    console.error('🔥 GENERATION ERROR:', err);
+    console.error('Stack trace:', err.stack);
+    // Send back the error details for debugging (remove later)
+    res.status(500).json({ 
+      error: err.message,
+      stack: err.stack,
+      topicId: req.params.topicId
+    });
   }
 });
 
