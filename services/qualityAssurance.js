@@ -1,5 +1,6 @@
-// services/qualityAssurance.js
+  // services/qualityAssurance.js
 // Enhanced with detailed feedback and suggestions for AI regeneration
+// Passing threshold = 70
 
 // ---------- 1. In-Memory Page Memory ----------
 const pageMemory = new Map();
@@ -310,18 +311,41 @@ function finalPostScore(post, topic, pageProfile, pageId = null) {
 }
 
 // ---------- 9. Enhanced Adaptive Regeneration with detailed feedback ----------
-async function adaptiveRegenerate(originalPost, failureReason, suggestion, generateFn) {
-  const prompt = `The following Facebook post was rejected because: ${failureReason}
-
-Suggested fix: ${suggestion}
-
-Rewrite the post to address these issues. Keep the core message, but make it natural, punchy, and max 3 sentences. Return only the rewritten post.
-
-Original: "${originalPost}"`;
-  return await generateFn(prompt);
+async function adaptiveRegenerate(originalPost, failureReason, suggestion, generateFn, breakdown = null) {
+  let detailedFeedback = `The following Facebook post was rejected because: ${failureReason}\n\nSuggested fix: ${suggestion}\n`;
+  
+  // If breakdown is available, add specific score guidance
+  if (breakdown) {
+    detailedFeedback += `\nDetailed scores (0-100, higher is better):
+- Human tone: ${breakdown.human} (needs ≥70)
+- Virality: ${breakdown.virality} (needs ≥50)
+- Hook strength: ${breakdown.hook} (needs ≥50)
+- Readability: ${breakdown.readability} (needs ≥70)
+- Originality: ${breakdown.originality} (needs ≥70)
+- Page relevance: ${breakdown.pageFit} (needs ≥50)\n`;
+    
+    // Build specific action items
+    const improvements = [];
+    if (breakdown.human < 70) improvements.push('- Remove all AI phrases, use contractions (don\'t, can\'t), add personality');
+    if (breakdown.virality < 50) improvements.push('- Add a surprising fact, a question, or a statistic (e.g., "83% of users...")');
+    if (breakdown.hook < 50) improvements.push('- Start with a strong hook: "Warning:", "Mistake:", "Unexpected:", or a bold claim');
+    if (breakdown.readability < 70) improvements.push('- Keep sentences between 8-20 words. Break long sentences.');
+    if (breakdown.originality < 70) improvements.push('- Avoid clichés like "at the end of the day", "think outside the box"');
+    if (breakdown.pageFit < 50) improvements.push(`- Make the post more relevant to ${pageProfile?.audienceInterest?.join(', ') || 'the audience'}`);
+    if (breakdown.aiStructure > 20) improvements.push('- Do not start with "In", "This", "The", "When", "If". Start with a strong statement.');
+    if (breakdown.realismPenalty > 10) improvements.push('- Use everyday language, slang, or an exclamation mark (!).');
+    
+    if (improvements.length > 0) {
+      detailedFeedback += `\nSpecific improvements needed:\n${improvements.join('\n')}\n`;
+    }
+  }
+  
+  detailedFeedback += `\nRewrite the post to fix these issues. Keep the core message but make it punchy, natural, and max 3 sentences. Return only the rewritten post.\n\nOriginal: "${originalPost}"`;
+  
+  return await generateFn(detailedFeedback);
 }
 
-// ---------- 10. Main Pipeline with detailed feedback collection ----------
+// ---------- 10. Main Pipeline with threshold = 70 ----------
 async function processContent({
   topic,
   post,
@@ -329,7 +353,7 @@ async function processContent({
   pageId,
   recentPosts = [],
   generateFn,
-  maxRegenerations = 2  // increased default to allow more chances
+  maxRegenerations = 2
 }) {
   // 1. Topic scoring
   const tScore = scoreTopic(topic, pageId);
@@ -347,7 +371,7 @@ async function processContent({
   let failures = [];
 
   for (let attempt = 0; attempt <= maxRegenerations; attempt++) {
-    // Run all validations and collect failures
+    // Run all validations
     const pv = validatePost(currentPost);
     if (!pv.valid) {
       if (attempt === maxRegenerations) {
@@ -404,9 +428,9 @@ async function processContent({
       continue;
     }
 
-    // Final scoring
+    // Final scoring - THRESHOLD = 70
     const scoring = finalPostScore(currentPost, topic, pageProfile, pageId);
-    if (scoring.total >= 65) {  // threshold lowered slightly
+    if (scoring.total >= 70) {
       updatePageMemory(pageId, topic, currentPost, scoring.total);
       return {
         pass: true,
@@ -419,11 +443,18 @@ async function processContent({
       };
     }
 
-    // Score too low – provide detailed feedback
-    const scoreReason = `Score ${scoring.total} below threshold (need ≥65)`;
-    let scoreSuggestion = 'Improve the post by:\n';
-    if (scoring.breakdown.human < 70) scoreSuggestion += '- Remove AI phrases and make it sound like a real person.\n';
-    if (scoring.breakdown.virality < 50) scoreSuggestion += '- Add a surprising twist, question, or statistic.\n';
+    // Score too low – provide detailed feedback including breakdown
+    const scoreReason = `Score ${scoring.total} below threshold (need ≥70)`;
+    let scoreSuggestion = '';
+    if (scoring.total >= 60) {
+      scoreSuggestion = 'The post is close! Fine‑tune these areas:\n';
+    } else if (scoring.total >= 50) {
+      scoreSuggestion = 'Needs moderate improvement:\n';
+    } else {
+      scoreSuggestion = 'Needs major rewrite:\n';
+    }
+    if (scoring.breakdown.human < 70) scoreSuggestion += '- Remove AI phrases, use contractions, add personality.\n';
+    if (scoring.breakdown.virality < 50) scoreSuggestion += '- Add a surprising fact, question, or statistic.\n';
     if (scoring.breakdown.hook < 50) scoreSuggestion += '- Start with a strong hook (warning, mistake, unexpected fact).\n';
     if (scoring.breakdown.readability < 70) scoreSuggestion += '- Keep sentences between 8-20 words.\n';
     if (scoring.breakdown.originality < 70) scoreSuggestion += '- Avoid clichés like "at the end of the day".\n';
@@ -432,11 +463,12 @@ async function processContent({
     if (scoring.breakdown.realismPenalty > 10) scoreSuggestion += '- Use contractions (don\'t, can\'t) and occasional slang.\n';
     
     if (attempt === maxRegenerations) {
-      return { pass: false, reason: scoreReason, suggestion: scoreSuggestion, lastScore: scoring.total, failures };
+      return { pass: false, reason: scoreReason, suggestion: scoreSuggestion, lastScore: scoring.total, failures, breakdown: scoring.breakdown };
     }
     
     failures.push({ type: 'score', reason: scoreReason, suggestion: scoreSuggestion });
-    currentPost = await adaptiveRegenerate(currentPost, scoreReason, scoreSuggestion, generateFn);
+    // Pass the breakdown to adaptiveRegenerate for even better guidance
+    currentPost = await adaptiveRegenerate(currentPost, scoreReason, scoreSuggestion, generateFn, scoring.breakdown);
     if (!currentPost) return { pass: false, reason: 'Regeneration failed', suggestion: 'AI provider issue.' };
   }
 }
@@ -450,4 +482,4 @@ module.exports = {
   aiStructureScore,
   finalPostScore,
   scoreTopic
-};
+};R
