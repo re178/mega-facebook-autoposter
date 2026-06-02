@@ -384,12 +384,12 @@ async function adaptiveRegenerate(originalPost, failureReason, suggestion, gener
   
   let newPost = await generateFn(detailedFeedback);
   // After regeneration, optionally check identity score (if pageProfile and pageId exist)
-  if (pageProfile && pageId && newPost) {
-    const idScore = await identityScore(newPost, pageProfile, pageProfile); // second arg expects DNA, but we can pass pageProfile as stub - adjust as needed
-    if (idScore < 50) {
+ // if (pageProfile && pageId && newPost) {
+ //   const idScore = await identityScore(newPost, pageProfile, pageProfile); // second arg expects DNA, but we can pass pageProfile as stub - adjust as needed
+ //   if (idScore < 50) {
       // Append a note to regenerate again with identity focus
-      detailedFeedback += `\n\nAlso, this post doesn't sound like the page's authentic voice (identity score ${idScore}/100). Make it sound more like: authority ${pageProfile.authority || 50}, seriousness ${pageProfile.seriousness || 50}, humor ${pageProfile.humor || 20}.`;
-      newPost = await generateFn(detailedFeedback);
+//      detailedFeedback += `\n\nAlso, this post doesn't sound like the page's authentic voice (identity score ${idScore}/100). Make it sound more like: authority ${pageProfile.authority || 50}, seriousness ${pageProfile.seriousness || 50}, humor ${pageProfile.humor || 20}.`;
+  //    newPost = await generateFn(detailedFeedback);
     }
   }
   return newPost;
