@@ -1,8 +1,8 @@
 // services/qualityAssurance.js
-// Enhanced Quality Assurance – no broken identityScore call
+// Enhanced Quality Assurance – now with full PI integration (accepts dna for identity scoring)
 // Passing threshold = 70 (can be overridden per page via extraNotes)
 
-const { updatePageMemory: updateIntelligenceMemory, getPageMemory: getIntelligenceMemory } = require('./pageIntelligence');
+const { identityScore, updatePageMemory: updateIntelligenceMemory, getPageMemory: getIntelligenceMemory } = require('./pageIntelligence');
 
 // ---------- Helper: Parse per‑page overrides from extraNotes ----------
 function parsePageOverrides(extraNotes = '') {
@@ -338,8 +338,8 @@ function finalPostScore(post, topic, pageProfile, pageId = null, overrides = {})
   return { total: Math.round(finalScore), breakdown: { ...base, pageFit, aiStructure: aiStruct, realismPenalty: realism } };
 }
 
-// ---------- 9. Adaptive Regeneration (identity score removed to prevent crash) ----------
-async function adaptiveRegenerate(originalPost, failureReason, suggestion, generateFn, breakdown = null, pageProfile = null, pageId = null) {
+// ---------- 9. Adaptive Regeneration (now uses DNA for identity scoring) ----------
+async function adaptiveRegenerate(originalPost, failureReason, suggestion, generateFn, breakdown = null, pageProfile = null, pageId = null, dna = null) {
   let detailedFeedback = `The following Facebook post was rejected because: ${failureReason}\n\nSuggested fix: ${suggestion}\n`;
   
   if (breakdown) {
@@ -368,17 +368,24 @@ async function adaptiveRegenerate(originalPost, failureReason, suggestion, gener
   
   detailedFeedback += `\nRewrite the post to fix these issues. Keep the core message but make it punchy, natural, and max 3 sentences. Return only the rewritten post.\n\nOriginal: "${originalPost}"`;
   
-  // Removed identityScore call because pageDNA is not built in this setup
-  // If you later integrate pageIntelligence, you can uncomment and fix:
-  // const { buildPageDNA, identityScore } = require('./pageIntelligence');
-  // const dna = await buildPageDNA(pageProfile);
-  // const idScore = await identityScore(newPost, dna, pageProfile);
+  let newPost = await generateFn(detailedFeedback);
   
-  const newPost = await generateFn(detailedFeedback);
+  // Identity scoring – only if dna is provided (from pageIntelligence)
+  if (dna && pageId && newPost) {
+    try {
+      const idScore = await identityScore(newPost, dna, pageProfile);
+      if (idScore < 50) {
+        detailedFeedback += `\n\nThis post doesn't sound like the page's identity (score ${idScore}/100). Make it more like: authority ${dna.authority}, humor ${dna.humor}, seriousness ${dna.seriousness}.`;
+        newPost = await generateFn(detailedFeedback);
+      }
+    } catch (err) {
+      console.warn('Identity scoring failed (ignored):', err.message);
+    }
+  }
   return newPost;
 }
 
-// ---------- 10. Main Pipeline with per‑page overrides ----------
+// ---------- 10. Main Pipeline with per‑page overrides and DNA ----------
 async function processContent({
   topic,
   post,
@@ -386,7 +393,8 @@ async function processContent({
   pageId,
   recentPosts = [],
   generateFn,
-  maxRegenerations = 2
+  maxRegenerations = 2,
+  dna = null   // <-- new parameter from pageIntelligence
 }) {
   const overrides = parsePageOverrides(pageProfile?.extraNotes || '');
   const THRESHOLD = overrides.threshold !== undefined ? overrides.threshold : 70;
@@ -411,7 +419,7 @@ async function processContent({
         return { pass: false, reason: pv.reason, suggestion: pv.suggestion, failures };
       }
       failures.push({ type: 'validation', reason: pv.reason, suggestion: pv.suggestion });
-      currentPost = await adaptiveRegenerate(currentPost, pv.reason, pv.suggestion, generateFn, null, pageProfile, pageId);
+      currentPost = await adaptiveRegenerate(currentPost, pv.reason, pv.suggestion, generateFn, null, pageProfile, pageId, dna);
       if (!currentPost) return { pass: false, reason: 'Regeneration failed', suggestion: 'AI provider issue.' };
       continue;
     }
@@ -422,7 +430,7 @@ async function processContent({
         return { pass: false, reason: comp.reason, suggestion: comp.suggestion, failures };
       }
       failures.push({ type: 'compliance', reason: comp.reason, suggestion: comp.suggestion });
-      currentPost = await adaptiveRegenerate(currentPost, comp.reason, comp.suggestion, generateFn, null, pageProfile, pageId);
+      currentPost = await adaptiveRegenerate(currentPost, comp.reason, comp.suggestion, generateFn, null, pageProfile, pageId, dna);
       if (!currentPost) return { pass: false, reason: 'Regeneration failed', suggestion: 'AI provider issue.' };
       continue;
     }
@@ -433,7 +441,7 @@ async function processContent({
         return { pass: false, reason: hal.reason, suggestion: hal.suggestion, failures };
       }
       failures.push({ type: 'claim', reason: hal.reason, suggestion: hal.suggestion });
-      currentPost = await adaptiveRegenerate(currentPost, hal.reason, hal.suggestion, generateFn, null, pageProfile, pageId);
+      currentPost = await adaptiveRegenerate(currentPost, hal.reason, hal.suggestion, generateFn, null, pageProfile, pageId, dna);
       if (!currentPost) return { pass: false, reason: 'Regeneration failed', suggestion: 'AI provider issue.' };
       continue;
     }
@@ -444,7 +452,7 @@ async function processContent({
         return { pass: false, reason: tone.reason, suggestion: tone.suggestion, failures };
       }
       failures.push({ type: 'tone', reason: tone.reason, suggestion: tone.suggestion });
-      currentPost = await adaptiveRegenerate(currentPost, tone.reason, tone.suggestion, generateFn, null, pageProfile, pageId);
+      currentPost = await adaptiveRegenerate(currentPost, tone.reason, tone.suggestion, generateFn, null, pageProfile, pageId, dna);
       if (!currentPost) return { pass: false, reason: 'Regeneration failed', suggestion: 'AI provider issue.' };
       continue;
     }
@@ -456,7 +464,7 @@ async function processContent({
         return { pass: false, reason: dupReason, suggestion: dupSuggestion, failures };
       }
       failures.push({ type: 'duplicate', reason: dupReason, suggestion: dupSuggestion });
-      currentPost = await adaptiveRegenerate(currentPost, dupReason, dupSuggestion, generateFn, null, pageProfile, pageId);
+      currentPost = await adaptiveRegenerate(currentPost, dupReason, dupSuggestion, generateFn, null, pageProfile, pageId, dna);
       if (!currentPost) return { pass: false, reason: 'Regeneration failed', suggestion: 'AI provider issue.' };
       continue;
     }
@@ -498,7 +506,7 @@ async function processContent({
     }
     
     failures.push({ type: 'score', reason: scoreReason, suggestion: scoreSuggestion });
-    currentPost = await adaptiveRegenerate(currentPost, scoreReason, scoreSuggestion, generateFn, scoring.breakdown, pageProfile, pageId);
+    currentPost = await adaptiveRegenerate(currentPost, scoreReason, scoreSuggestion, generateFn, scoring.breakdown, pageProfile, pageId, dna);
     if (!currentPost) return { pass: false, reason: 'Regeneration failed', suggestion: 'AI provider issue.' };
   }
 }
