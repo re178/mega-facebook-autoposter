@@ -204,7 +204,7 @@ function selectProvider(providers) {
   }) || null;
 }
 
-// ===================== TEXT GENERATION =====================
+// ===================== TEXT GENERATION (with QA integration) =====================
 async function generateText(topic, angle, pageId, textSeed = null, qualityFix = null) {
   try {
     const prompt = await buildPrompt({ topic, angle, pageId, textSeed, qualityFix });
@@ -222,45 +222,22 @@ async function generateText(topic, angle, pageId, textSeed = null, qualityFix = 
   }
 }
 
-// ===================== SELF-REVIEW FUNCTION =====================
-async function selfReviewAndImprove(postText, topic, angle, pageId) {
-  const selfReviewPrompt = `Review this Facebook post about "${topic}" (angle: ${angle}):
-
-"${postText}"
-
-Rate each (1-10): Hook, Human tone, Curiosity, Virality.
-If any score is below 7, rewrite the post to fix it. Keep max 2-3 sentences.
-Return ONLY the improved post.`;
-
-  const improved = await generateSmart(selfReviewPrompt);
-  if (improved && improved.length > 20) {
-    return cleanText(improved);
-  }
-  return postText;
-}
-
-// ===================== QA-ENHANCED POST GENERATION (FIXED FEEDBACK) =====================
+// ===================== QA-ENHANCED POST GENERATION =====================
 async function generateAndValidatePost(topic, angle, pageId, pageProfile, recentPosts = [], attempt = 0) {
   const maxAttempts = 3;
   
-  // 1. Generate raw text
   let rawText = await generateText(topic, angle, pageId);
   if (!rawText) return null;
   
-  // 2. Self-review to boost scores before QA
-  const improvedText = await selfReviewAndImprove(rawText, topic, angle, pageId);
-  if (improvedText) rawText = improvedText;
-  
-  // 3. Run QA with PROPER feedback callback (no regex extraction)
   const qaResult = await qualityAssurance.processContent({
     topic: topic,
     post: rawText,
     pageProfile: pageProfile,
     pageId: pageId,
     recentPosts: recentPosts,
-    generateFn: async (feedbackPrompt) => {
-      // Directly call AI with the full feedback from QA
-      return await generateSmart(feedbackPrompt);
+    generateFn: async (prompt) => {
+      // Send the full QA feedback directly to the AI (no regex extraction)
+      return await generateSmart(prompt);
     },
     maxRegenerations: 2
   });
@@ -274,7 +251,6 @@ async function generateAndValidatePost(topic, angle, pageId, pageProfile, recent
     };
   }
   
-  // Retry with a different angle if QA failed (and we have attempts left)
   if (attempt < maxAttempts) {
     await monitor(null, pageId, null, 'QA_FAILED_RETRY', `Attempt ${attempt + 1}: ${qaResult.reason}`);
     const modifiedAngle = `${angle} (different perspective)`;
@@ -500,7 +476,7 @@ async function createBrandedImage(topicId, pageId, rawMediaUrl, postText) {
   }
 }
 
-// ===================== CREATE MANUAL TOPIC WITH QA =====================
+// ===================== CREATE MANUAL TOPIC WITH QA (enhanced) =====================
 async function createManualTopicWithQA(pageId, topicName, startDate, endDate, times, postsPerDay, includeMedia, includeVideo) {
   const topicScore = qualityAssurance.scoreTopic(topicName, pageId);
   if (topicScore < 20) {
@@ -513,6 +489,7 @@ async function createManualTopicWithQA(pageId, topicName, startDate, endDate, ti
     return { success: false, reason: `Similar topic already exists. Choose a different topic.` };
   }
 
+  // Generate custom angles (pre-save hook will also do this, but we do it explicitly here)
   const customAngles = await generateCustomAngles(topicName, pageId);
   
   const newTopic = await AiTopic.create({
@@ -647,8 +624,8 @@ async function regenerateTopicAngles(topicId) {
   return { success: true, angles: newAngles, postsRegenerated: result.postsCreated };
 }
 
-// ===================== POST GENERATOR FOR ANY TOPIC =====================
-async function generatePostsForTopic(topicId) {
+// ===================== POST GENERATOR FOR ANY TOPIC (auto or manual) =====================
+async function generatePostsForTopic(topicId, options = {}) {
   const topic = await AiTopic.findById(topicId);
   if (!topic) return [];
 
@@ -804,7 +781,17 @@ async function createAutoTopicForPage(pageId) {
   return newTopic;
 }
 
-// ===================== HELPER FUNCTIONS =====================
+// ===================== HELPER FUNCTIONS FOR ROUTE =====================
+async function deleteTopicPosts(topicId) {
+  return await AiScheduledPost.deleteMany({ topicId });
+}
+
+async function createAiLog(pageId, postId, action, message) {
+  // Reuse the existing monitor function but with topicId = null
+  return monitor(null, pageId, postId, action, message);
+}
+
+// ===================== HELPER FUNCTIONS (existing) =====================
 async function getPageMemory(pageId) {
   return qualityAssurance.getPageMemory(pageId);
 }
@@ -815,17 +802,30 @@ async function getTopicScore(topicName, pageId) {
 
 // ===================== EXPORTS =====================
 module.exports = {
+  // Core functions
   generatePostsForTopic,
   createAutoTopicForPage,
   generateAndValidatePost,
+  
+  // Manual topic functions
   createManualTopicWithQA,
   generatePostsForManualTopic,
   regenerateTopicAngles,
+  
+  // Route helpers (new)
+  deleteTopicPosts,
+  createAiLog,
+  
+  // Quality assurance helpers
   getPageMemory,
   getTopicScore,
+  
+  // Legacy exports for backward compatibility
   generateText,
   generateImage,
   generateCustomAngles,
+  
+  // Settings
   setAutoTopicCreationEnabled: (enabled) => { GLOBAL_AUTO_TOPIC_CREATION_ENABLED = enabled; },
   getAutoTopicCreationEnabled: () => GLOBAL_AUTO_TOPIC_CREATION_ENABLED
 };
