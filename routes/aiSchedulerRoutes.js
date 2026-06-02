@@ -148,6 +148,7 @@ router.delete('/topic/:topicId', async (req, res) => {
    POST GENERATION
 ========================================================= */
 router.post('/topic/:topicId/generate-now', async (req, res) => {
+  console.log(`[DEBUG] Generate request for topic ${req.params.topicId}`);
   try {
     const facebookPageId = await getFacebookPageIdFromTopic(req.params.topicId);
     if (!facebookPageId || !(await canAccessPage(facebookPageId, req))) {
@@ -155,34 +156,33 @@ router.post('/topic/:topicId/generate-now', async (req, res) => {
     }
 
     if (generatingTopics.has(req.params.topicId)) {
-      return res.status(429).json({ error: 'Generation already in progress for this topic' });
+      return res.status(429).json({ error: 'Generation already in progress' });
     }
 
     generatingTopics.add(req.params.topicId);
-    console.log(`🚀 Starting generation for topic ${req.params.topicId}`);
+    console.log(`[DEBUG] Calling generatePostsForTopic...`);
     
     const posts = await generatePostsForTopic(req.params.topicId, { immediate: true });
     
     generatingTopics.delete(req.params.topicId);
-    console.log(`✅ Generated ${posts.length} posts for topic ${req.params.topicId}`);
+    console.log(`[DEBUG] Generation successful, ${posts.length} posts created`);
     
     const topic = await AiTopic.findById(req.params.topicId);
     await logAction({ pageId: topic.pageId, action: 'POSTS_GENERATED', message: `${posts.length} posts generated` });
     res.json(posts);
   } catch (err) {
     generatingTopics.delete(req.params.topicId);
-    // CRITICAL: Log full error to console (this will appear in Render logs)
-    console.error('🔥 GENERATION ERROR:', err);
+    // FULL ERROR DETAILS
+    console.error('🔥🔥🔥 GENERATION FAILED 🔥🔥🔥');
+    console.error('Error message:', err.message);
     console.error('Stack trace:', err.stack);
-    // Send back the error details for debugging (remove later)
+    console.error('Full error object:', err);
     res.status(500).json({ 
       error: err.message,
-      stack: err.stack,
-      topicId: req.params.topicId
+      stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
     });
   }
 });
-
 // Delete all topic posts
 router.delete('/topic/:topicId/posts', async (req, res) => {
   try {
