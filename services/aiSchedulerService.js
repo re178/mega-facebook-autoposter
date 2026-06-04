@@ -428,7 +428,7 @@ async function generatePostsForManualTopic(topicId, generateImmediately = false)
       if (rawMediaUrl || topic.includeVideo) finalMediaUrl = await createBrandedImage(topicId, topic.pageId, rawMediaUrl, validatedPost.text);
       const post = await AiScheduledPost.create({
         topicId, pageId: topic.pageId, text: validatedPost.text, mediaUrl: finalMediaUrl,
-        scheduledTime: scheduled, status: generateImmediately ? 'PUBLISHED' : 'PENDING',
+        scheduledTime: scheduled, status: generateImmediately ? 'PENDING' : 'PENDING',
         meta: { angle, qaScore: validatedPost.score, qaBreakdown: validatedPost.breakdown, generatedManually: true }
       });
       created.push(post);
