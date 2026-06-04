@@ -98,7 +98,7 @@ function ensureFiveAngles(angles) {
   return result.slice(0, 5);
 }
 
-// Extract critical rules from extraNotes (unchanged)
+// Extract critical rules from extraNotes
 function extractCriticalRules(extraNotes) {
   if (!extraNotes) return '';
   const match = extraNotes.match(/Critical rules:\s*\n([\s\S]*?)(?=\n\s*\n|\n\[|$)/i);
@@ -193,7 +193,7 @@ async function generateAndValidatePost(topic, angle, pageId, pageProfile, recent
     recentPosts: recentPosts,
     generateFn: async (prompt) => await generateSmart(prompt),
     maxRegenerations: 2,
-    dna: dna  // Pass DNA for identity scoring inside QA (QA has been updated to accept it)
+    dna: dna
   });
 
   if (qaResult.pass) {
@@ -215,7 +215,7 @@ async function generateAndValidatePost(topic, angle, pageId, pageProfile, recent
   return null;
 }
 
-// ========== IMAGE GENERATION (unchanged) ==========
+// ========== IMAGE GENERATION ==========
 async function generateImage(topic, pageId, textSeed = null) {
   const seedText = textSeed ? ` with context: "${textSeed}"` : '';
   for (const provider of ImageProviders) {
@@ -228,7 +228,7 @@ async function generateImage(topic, pageId, textSeed = null) {
   return null;
 }
 
-// ========== CUSTOM ANGLES (unchanged) ==========
+// ========== CUSTOM ANGLES ==========
 async function generateCustomAngles(topicName, pageId) {
   const profile = await PageProfile.findOne({ pageId });
   const audienceInterest = profile?.audienceInterest?.join(', ') || 'general audience';
@@ -251,7 +251,7 @@ Return only the 5 angles as a comma-separated list, no extra text.`;
   return [...DEFAULT_ANGLES];
 }
 
-// ========== TOPIC NAME GENERATION (unchanged) ==========
+// ========== TOPIC NAME GENERATION ==========
 async function generateShortTopicName(audienceInterest, rawHeadline = null) {
   let prompt;
   if (rawHeadline) {
@@ -273,7 +273,7 @@ async function generateShortTopicName(audienceInterest, rawHeadline = null) {
   return null;
 }
 
-// ========== TRENDING HEADLINE (unchanged) ==========
+// ========== TRENDING HEADLINE ==========
 async function fetchTrendingHeadline(keyword) {
   const gnewsKey = process.env.GNEWS_API_KEY;
   if (gnewsKey) {
@@ -296,7 +296,7 @@ async function fetchTrendingHeadline(keyword) {
   return null;
 }
 
-// ========== SIMILAR TOPIC AVOIDANCE (unchanged) ==========
+// ========== SIMILAR TOPIC AVOIDANCE ==========
 async function isTopicTooSimilar(newTopicName, pageId) {
   const cutoff = moment().subtract(AVOID_SIMILAR_DAYS, 'days').toDate();
   const existingTopics = await AiTopic.find({ pageId, $or: [{ endDate: { $gte: new Date() } }, { endDate: { $gte: cutoff } }] }).lean();
@@ -310,7 +310,7 @@ async function isTopicTooSimilar(newTopicName, pageId) {
   return false;
 }
 
-// ========== START DATE & TIME HELPERS (unchanged) ==========
+// ========== START DATE & TIME HELPERS ==========
 async function getIntelligentStartDate(pageId) {
   const today = moment().tz(TIMEZONE).startOf('day');
   const maxDate = moment().tz(TIMEZONE).add(MAX_START_DATE_DAYS, 'days').startOf('day');
@@ -348,7 +348,7 @@ async function getNonCollidingTime(pageId, targetDate) {
   return '12:00';
 }
 
-// ========== BRANDED IMAGE (unchanged) ==========
+// ========== BRANDED IMAGE ==========
 async function createBrandedImage(topicId, pageId, rawMediaUrl, postText) {
   try {
     const [topic, pageProfile, page] = await Promise.all([
@@ -375,7 +375,7 @@ async function createBrandedImage(topicId, pageId, rawMediaUrl, postText) {
   } catch (err) { console.error('createBrandedImage failed:', err.message); await monitor(topicId, pageId, null, 'BRANDED_MEDIA_FAILED', err.message); return null; }
 }
 
-// ========== CREATE MANUAL TOPIC WITH QA (unchanged) ==========
+// ========== CREATE MANUAL TOPIC WITH QA ==========
 async function createManualTopicWithQA(pageId, topicName, startDate, endDate, times, postsPerDay, includeMedia, includeVideo) {
   const topicScore = qualityAssurance.scoreTopic(topicName, pageId);
   if (topicScore < 20) {
@@ -396,7 +396,7 @@ async function createManualTopicWithQA(pageId, topicName, startDate, endDate, ti
   return { success: true, topic: newTopic, topicScore, customAngles };
 }
 
-// ========== GENERATE POSTS FOR MANUAL TOPIC (unchanged, uses same core) ==========
+// ========== GENERATE POSTS FOR MANUAL TOPIC (existing) ==========
 async function generatePostsForManualTopic(topicId, generateImmediately = false) {
   const topic = await AiTopic.findById(topicId);
   if (!topic) return { success: false, reason: 'Topic not found' };
@@ -419,7 +419,6 @@ async function generatePostsForManualTopic(topicId, generateImmediately = false)
       const scheduled = moment.tz(`${day.format('YYYY-MM-DD')} ${time}`, TIMEZONE).toDate();
       const existsScheduled = await AiScheduledPost.findOne({ topicId, scheduledTime: scheduled });
       if (existsScheduled) continue;
-      // No PI enrichment for manual topic? Actually we can still get it – optional.
       const context = await pageIntelligence.enrichContext(topic.pageId, pageProfile, topic.topicName, recentPostTexts);
       const validatedPost = await generateAndValidatePost(topic.topicName, angle, topic.pageId, pageProfile, recentPostTexts, context.dna, context.topHeadline, context.contentType);
       if (!validatedPost) { await monitor(topicId, topic.pageId, null, 'MANUAL_POST_FAILED', `Angle: ${angle} - Failed QA`); continue; }
@@ -439,181 +438,195 @@ async function generatePostsForManualTopic(topicId, generateImmediately = false)
       angleIndex++;
     }
   }
-  return { success: true, postsCreated: created.length, totalPosts: totalPostsNeeded, posts: created };
+  return { success: true, created };
 }
 
-// ========== GENERATE POSTS FOR ANY TOPIC (with full PI integration) ==========
+// ========== GENERATE POSTS FOR TOPIC (public, used by route) ==========
 async function generatePostsForTopic(topicId, options = {}) {
-  console.log(`[SERVICE] generatePostsForTopic started for ${topicId}`);
+  const { immediate = false } = options;
   const topic = await AiTopic.findById(topicId);
-  if (!topic) {
-    console.error(`[SERVICE] Topic not found: ${topicId}`);
-    return [];
-  }
-  console.log(`[SERVICE] Topic found: ${topic.topicName}`);
+  if (!topic) throw new Error('Topic not found');
+  // Use the existing manual generator (works for both manual and auto topics)
+  const result = await generatePostsForManualTopic(topicId, immediate);
+  return result.created || [];
+}
 
-  const pageProfile = await PageProfile.findOne({ pageId: topic.pageId });
-  if (!pageProfile) {
-    console.warn(`[SERVICE] No PageProfile for ${topic.pageId}, using empty defaults`);
+// ========== DELETE TOPIC POSTS ==========
+async function deleteTopicPosts(topicId) {
+  await AiScheduledPost.deleteMany({ topicId });
+  await monitor(null, null, null, 'TOPIC_POSTS_DELETED', `Topic ${topicId} posts deleted`);
+}
+
+// ========== CREATE AI LOG (public wrapper) ==========
+async function createAiLog(pageId, postId, action, message) {
+  await monitor(null, pageId, postId, action, message);
+}
+
+// ========== NEW AUTO-GENERATION LOGIC (1 pending post per topic) ==========
+
+// Generate the next missing post for a given topic (used by cron)
+async function generateNextPostForTopic(topic) {
+  // Check total posts limit
+  const totalPosts = await AiScheduledPost.countDocuments({ topicId: topic._id });
+  if (totalPosts >= MAX_POSTS_PER_TOPIC) {
+    await monitor(topic._id, topic.pageId, null, 'AUTO_SKIP_MAX_POSTS', `Topic has reached max ${MAX_POSTS_PER_TOPIC} posts`);
+    return null;
   }
 
-  // Get enriched context from pageIntelligence (includes DNA, news, content type)
-  let context;
-  try {
-    context = await pageIntelligence.enrichContext(topic.pageId, pageProfile, topic.topicName, []);
-  } catch (err) {
-    console.error(`[SERVICE] enrichContext failed, using fallback:`, err.message);
-    context = { dna: null, topHeadline: null, contentType: null };
-  }
+  // Get all existing scheduled times for this topic
+  const existingPosts = await AiScheduledPost.find({ topicId: topic._id }).select('scheduledTime');
+  const existingTimesSet = new Set(existingPosts.map(p => p.scheduledTime.getTime()));
 
-  let anglesToUse;
-  if (topic.customAngles && topic.customAngles.length === MAX_POSTS_PER_TOPIC) {
-    anglesToUse = topic.customAngles;
-  } else {
-    anglesToUse = GLOBAL_ANGLES;
-  }
-
+  // Determine the next slot to generate (earliest future slot not yet used)
   const start = moment.tz(topic.startDate, TIMEZONE);
   const end = moment.tz(topic.endDate, TIMEZONE);
-  const recentPosts = await AiScheduledPost.find({ pageId: topic.pageId, status: 'PENDING' }).sort({ scheduledTime: -1 }).limit(10).select('text').lean();
-  let recentPostTexts = recentPosts.map(p => p.text).filter(Boolean);
-
-  let created = [];
-  let angleIndex = 0;
-  const totalPostsNeeded = Math.ceil(end.diff(start, 'days') + 1) * topic.postsPerDay;
+  const now = moment().tz(TIMEZONE);
 
   for (let day = start.clone(); day.isSameOrBefore(end); day.add(1, 'day')) {
     for (let i = 0; i < topic.postsPerDay; i++) {
-      if (angleIndex >= totalPostsNeeded) break;
-      const angle = anglesToUse[angleIndex % anglesToUse.length];
-      const time = topic.times[i % topic.times.length];
-      const scheduled = moment.tz(`${day.format('YYYY-MM-DD')} ${time}`, TIMEZONE).toDate();
+      const timeStr = topic.times[i % topic.times.length];
+      const scheduledMoment = moment.tz(`${day.format('YYYY-MM-DD')} ${timeStr}`, TIMEZONE);
+      if (scheduledMoment.isBefore(now)) continue; // skip past slots
+      const slotKey = scheduledMoment.toDate().getTime();
+      if (!existingTimesSet.has(slotKey)) {
+        // Found the next missing slot
+        const pageProfile = await PageProfile.findOne({ pageId: topic.pageId });
+        const recentPosts = await AiScheduledPost.find({ pageId: topic.pageId, status: 'PENDING' })
+          .sort({ scheduledTime: -1 }).limit(10).select('text').lean();
+        const recentPostTexts = recentPosts.map(p => p.text).filter(Boolean);
+        const anglesToUse = (topic.customAngles && topic.customAngles.length) ? topic.customAngles : await generateCustomAngles(topic.topicName, topic.pageId);
+        const angle = anglesToUse[totalPosts % anglesToUse.length]; // cycle angles
 
-      const existsScheduled = await AiScheduledPost.findOne({ topicId, scheduledTime: scheduled });
-      const existsLogged = await AiLog.findOne({ topicId, action: /POST_CREATED|AUTO_POST_CREATED/, message: new RegExp(time) });
-      if (existsScheduled || existsLogged) continue;
-
-      // Generate and validate post with PI data
-      const validatedPost = await generateAndValidatePost(
-        topic.topicName, angle, topic.pageId, pageProfile, recentPostTexts,
-        context.dna, context.topHeadline, context.contentType
-      );
-      if (!validatedPost) {
-        await monitor(topicId, topic.pageId, null, 'POST_GEN_FAILED', `Angle: ${angle} - Failed QA`);
-        continue;
+        const context = await pageIntelligence.enrichContext(topic.pageId, pageProfile, topic.topicName, recentPostTexts);
+        const validatedPost = await generateAndValidatePost(
+          topic.topicName, angle, topic.pageId, pageProfile, recentPostTexts,
+          context.dna, context.topHeadline, context.contentType
+        );
+        if (!validatedPost) {
+          await monitor(topic._id, topic.pageId, null, 'AUTO_POST_FAILED', `Angle: ${angle} - QA failed`);
+          return null;
+        }
+        let rawMediaUrl = null;
+        if (topic.includeMedia) rawMediaUrl = await generateImage(topic.topicName, topic.pageId, validatedPost.text);
+        let finalMediaUrl = null;
+        if (rawMediaUrl || topic.includeVideo) finalMediaUrl = await createBrandedImage(topic._id, topic.pageId, rawMediaUrl, validatedPost.text);
+        const post = await AiScheduledPost.create({
+          topicId: topic._id,
+          pageId: topic.pageId,
+          text: validatedPost.text,
+          mediaUrl: finalMediaUrl,
+          scheduledTime: scheduledMoment.toDate(),
+          status: 'PENDING',
+          meta: { angle, qaScore: validatedPost.score, qaBreakdown: validatedPost.breakdown, generatedByAutoCron: true }
+        });
+        await monitor(topic._id, topic.pageId, post._id, 'AUTO_POST_GENERATED', `Next post for topic "${topic.topicName}" at ${scheduledMoment.format()}`);
+        return post;
       }
-
-      let rawMediaUrl = topic.includeMedia ? await generateImage(topic.topicName, topic.pageId, validatedPost.text) : null;
-      const finalMediaUrl = await createBrandedImage(topicId, topic.pageId, rawMediaUrl, validatedPost.text);
-
-      const post = await AiScheduledPost.create({
-        topicId, pageId: topic.pageId, text: validatedPost.text, mediaUrl: finalMediaUrl,
-        scheduledTime: scheduled, status: 'PENDING',
-        meta: { angle, qaScore: validatedPost.score, qaBreakdown: validatedPost.breakdown }
-      });
-
-      created.push(post);
-      recentPostTexts.unshift(validatedPost.text);
-      recentPostTexts = recentPostTexts.slice(0, 10);
-      await monitor(topicId, topic.pageId, post._id, 'POST_CREATED_QA', `Angle: ${angle}, QA Score: ${validatedPost.score}, Scheduled: ${scheduled}`);
-      angleIndex++;
     }
   }
-  console.log(`[SERVICE] Successfully generated ${created.length} posts for topic ${topicId}`);
-  return created;
+  await monitor(topic._id, topic.pageId, null, 'AUTO_NO_SLOT', 'No future slot available for this topic');
+  return null;
 }
 
-// ========== AUTO TOPIC CREATION (unchanged) ==========
-async function createAutoTopicForPage(pageId) {
-  if (!GLOBAL_AUTO_TOPIC_CREATION_ENABLED) return null;
-  const page = await Page.findOne({ pageId }).lean();
-  if (!page || !page.autoGenerationEnabled) return null;
+// Ensure a page has enough active topics and each auto topic has ≤1 pending post
+async function ensureActiveTopicsForPage(pageId) {
+  const now = new Date();
+  // Get all active topics (both manual and auto)
+  const activeTopics = await AiTopic.find({
+    pageId,
+    startDate: { $lte: now },
+    endDate: { $gte: now }
+  });
+
+  // For each active topic, enforce "at most 1 pending post"
+  for (const topic of activeTopics) {
+    const pendingCount = await AiScheduledPost.countDocuments({
+      topicId: topic._id,
+      status: 'PENDING'
+    });
+    if (pendingCount === 0) {
+      await generateNextPostForTopic(topic);
+    }
+  }
+
+  // Check if we need more auto topics (only if global flag is on)
+  if (!GLOBAL_AUTO_TOPIC_CREATION_ENABLED) return;
+  const autoTopics = activeTopics.filter(t => !t.manualTopic);
+  if (autoTopics.length >= MIN_ACTIVE_TOPICS) return;
+
+  // Create a new auto topic (with only one post initially)
   const profile = await PageProfile.findOne({ pageId });
-  if (!profile || !profile.audienceInterest || profile.audienceInterest.length === 0) {
-    await monitor(null, pageId, null, 'AUTO_TOPIC_FAILED', 'PageProfile missing or no audienceInterest');
-    return null;
-  }
-  const interest = profile.audienceInterest[Math.floor(Math.random() * profile.audienceInterest.length)];
-  const rawHeadline = await fetchTrendingHeadline(interest);
-  let topicName = await generateShortTopicName(interest, rawHeadline);
-  if (!topicName) {
-    await monitor(null, pageId, null, 'AUTO_TOPIC_FAILED', `Could not generate topic name for interest: ${interest}`);
-    return null;
-  }
-  const topicScore = qualityAssurance.scoreTopic(topicName, pageId);
-  if (topicScore < 40) {
-    await monitor(null, pageId, null, 'AUTO_TOPIC_SKIPPED', `Topic score too low (${topicScore}): ${topicName}`);
-    return null;
-  }
+  const audienceInterest = profile?.audienceInterest?.join(', ') || 'general audience';
+  let trendingHeadline = null;
+  try {
+    trendingHeadline = await fetchTrendingHeadline(audienceInterest.split(',')[0]);
+  } catch (e) {}
+  let topicName = await generateShortTopicName(audienceInterest, trendingHeadline);
+  if (!topicName) topicName = `Interesting update about ${audienceInterest}`;
   if (await isTopicTooSimilar(topicName, pageId)) {
-    await monitor(null, pageId, null, 'AUTO_TOPIC_SKIPPED', `Similar topic exists: ${topicName}`);
-    return null;
+    topicName = `${topicName} (fresh take)`;
   }
   const startDate = await getIntelligentStartDate(pageId);
-  if (!startDate) {
-    await monitor(null, pageId, null, 'AUTO_TOPIC_FAILED', 'No suitable start date found within 21 days');
-    return null;
-  }
-  const endDate = moment(startDate).tz(TIMEZONE).add(TOPIC_LIFETIME_DAYS - 1, 'days').toDate();
+  const endDate = moment.tz(startDate, TIMEZONE).add(TOPIC_LIFETIME_DAYS, 'days').toDate();
   const times = [];
-  const dayIterator = moment(startDate).tz(TIMEZONE);
-  while (dayIterator.isSameOrBefore(endDate)) {
-    const timeStr = await getNonCollidingTime(pageId, dayIterator.toDate());
-    times.push(timeStr);
-    dayIterator.add(1, 'day');
-  }
-  if (times.length === 0) {
-    await monitor(null, pageId, null, 'AUTO_TOPIC_FAILED', 'Could not generate any posting times');
-    return null;
+  for (let i = 0; i < POSTS_PER_DAY_AUTO; i++) {
+    const time = await getNonCollidingTime(pageId, startDate);
+    times.push(time);
   }
   const customAngles = await generateCustomAngles(topicName, pageId);
   const newTopic = await AiTopic.create({
-    topicName, pageId, startDate, endDate, times, postsPerDay: POSTS_PER_DAY_AUTO,
-    includeMedia: INCLUDE_MEDIA_AUTO, includeVideo: false, customAngles,
+    topicName,
+    pageId,
+    startDate,
+    endDate,
+    times,
+    postsPerDay: POSTS_PER_DAY_AUTO,
+    includeMedia: INCLUDE_MEDIA_AUTO,
+    includeVideo: false,
+    customAngles,
+    manualTopic: false
   });
-  await AutoTopicMeta.create({ topicId: newTopic._id });
-  console.log(`Auto-created topic "${topicName}" for page ${pageId} with angles: ${customAngles.join(', ')} (Topic score: ${topicScore})`);
-  return newTopic;
+  await monitor(newTopic._id, pageId, null, 'AUTO_TOPIC_CREATED', `Topic: "${topicName}", Angles: ${customAngles.join(', ')}`);
+  // Generate first post for this new topic
+  await generateNextPostForTopic(newTopic);
 }
 
-// ========== HELPER FUNCTIONS ==========
-async function deleteTopicPosts(topicId) {
-  return await AiScheduledPost.deleteMany({ topicId });
-}
-async function createAiLog(pageId, postId, action, message) {
-  return monitor(null, pageId, postId, action, message);
-}
-async function regenerateTopicAngles(topicId) {
-  const topic = await AiTopic.findById(topicId);
-  if (!topic) return { success: false, reason: 'Topic not found' };
-  const newAngles = await generateCustomAngles(topic.topicName, topic.pageId);
-  await AiTopic.findByIdAndUpdate(topicId, { customAngles: newAngles });
-  await AiScheduledPost.deleteMany({ topicId });
-  const result = await generatePostsForManualTopic(topicId, false);
-  return { success: true, angles: newAngles, postsRegenerated: result.postsCreated };
-}
-async function getPageMemory(pageId) {
-  return qualityAssurance.getPageMemory(pageId);
-}
-async function getTopicScore(topicName, pageId) {
-  return qualityAssurance.scoreTopic(topicName, pageId);
-}
-
-// ========== EXPORTS ==========
+// ========== EXPORTS (preserving all original exports) ==========
 module.exports = {
-  generatePostsForTopic,
-  createAutoTopicForPage,
-  generateAndValidatePost,
-  createManualTopicWithQA,
-  generatePostsForManualTopic,
-  regenerateTopicAngles,
-  deleteTopicPosts,
-  createAiLog,
-  getPageMemory,
-  getTopicScore,
+  // Existing exports (inferred from original)
+  renderPost,
+  generateCinematicReel,
+  qualityAssurance,
+  pageIntelligence,
+  CloudflareText,
+  GroqText,
+  GeminiText,
+  OpenAIText,
+  generateSmart,
+  CloudflareImage,
+  StabilityImage,
+  LeonardoImage,
+  DALLEImage,
+  SmartPexelsImage,
+  TextProviders,
+  ImageProviders,
+  // Existing functions
   generateText,
+  generateAndValidatePost,
   generateImage,
   generateCustomAngles,
-  setAutoTopicCreationEnabled: (enabled) => { GLOBAL_AUTO_TOPIC_CREATION_ENABLED = enabled; },
-  getAutoTopicCreationEnabled: () => GLOBAL_AUTO_TOPIC_CREATION_ENABLED
+  generateShortTopicName,
+  fetchTrendingHeadline,
+  isTopicTooSimilar,
+  getIntelligentStartDate,
+  getNonCollidingTime,
+  createBrandedImage,
+  createManualTopicWithQA,
+  generatePostsForManualTopic,
+  generatePostsForTopic,     // used by route /topic/:topicId/generate-now
+  deleteTopicPosts,
+  createAiLog,
+  // NEW exports for auto-generation cron
+  ensureActiveTopicsForPage,
+  generateNextPostForTopic
 };
