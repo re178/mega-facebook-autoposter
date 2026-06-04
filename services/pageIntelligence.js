@@ -15,37 +15,102 @@ const audienceState = new Map();
 const eventCache = new Map();
 const pageContentTypeIndex = new Map();
 
-// ---------- Parse pi: overrides ----------
+// ---------- SAFE Parse pi: overrides (no eval crash, handles malformed braces) ----------
 function parsePageIntelligenceOverrides(extraNotes = '') {
-  const match = extraNotes.match(/pi:\s*\{([^}]+)\}/i);
-  if (!match) return {};
-  try {
-    const obj = eval('({' + match[1] + '})');
-    return {
-      authority: obj.authority,
-      curiosity: obj.curiosity,
-      seriousness: obj.seriousness,
-      optimism: obj.optimism,
-      emotionality: obj.emotionality,
-      humor: obj.humor,
-      voiceStyle: obj.voiceStyle,
-      primaryTopics: obj.primaryTopics,
-      secondaryTopics: obj.secondaryTopics,
-      contentTypes: obj.contentTypes,
-      categoryOverrides: obj.categoryOverrides,
-      newsRefreshMinutes: obj.newsRefreshMinutes,
-      disableNews: obj.disableNews,
-      topicTrendWords: obj.topicTrendWords,
-      topicCuriosityWords: obj.topicCuriosityWords,
-      topicGenericPenaltyWords: obj.topicGenericPenaltyWords
-    };
-  } catch (e) {
-    console.warn('Failed to parse pi overrides:', e);
+  // Find the start of pi: block
+  const startMatch = extraNotes.match(/pi:\s*\{/i);
+  if (!startMatch) return {};
+
+  const startIndex = startMatch.index + startMatch[0].length - 1; // position of '{'
+  let braceCount = 0;
+  let endIndex = -1;
+  // Find the matching closing brace
+  for (let i = startIndex; i < extraNotes.length; i++) {
+    if (extraNotes[i] === '{') braceCount++;
+    else if (extraNotes[i] === '}') {
+      braceCount--;
+      if (braceCount === 0) {
+        endIndex = i;
+        break;
+      }
+    }
+  }
+  if (endIndex === -1) {
+    console.warn('pi: block has unmatched braces – ignoring');
     return {};
   }
+
+  // Extract the content inside the braces
+  const content = extraNotes.substring(startIndex + 1, endIndex);
+  if (!content.trim()) return {};
+
+  // Attempt to evaluate safely
+  const tryEval = (str) => {
+    try {
+      // Wrap in parentheses to make it a valid object literal
+      const evaluated = eval('(' + str + ')');
+      if (evaluated && typeof evaluated === 'object') return evaluated;
+    } catch (e) {
+      return null;
+    }
+    return null;
+  };
+
+  // First attempt: original content
+  let obj = tryEval('{' + content + '}');
+  if (obj) return sanitizeOverrides(obj);
+
+  // Second attempt: fix trailing commas (common syntax error)
+  let fixed = content.replace(/,\s*}/g, '}').replace(/,\s*,/g, ',');
+  obj = tryEval('{' + fixed + '}');
+  if (obj) return sanitizeOverrides(obj);
+
+  // Third attempt: remove unbalanced parentheses (e.g., extra ')')
+  fixed = content.replace(/[()]/g, ''); // remove all parentheses – they are not needed for object keys/values normally
+  obj = tryEval('{' + fixed + '}');
+  if (obj) return sanitizeOverrides(obj);
+
+  // Fourth attempt: try JSON‑like parsing by adding quotes to keys and string values
+  try {
+    // Very basic: assume keys are identifiers, values are numbers/booleans/strings (without quotes)
+    // Convert to valid JSON
+    let jsonStr = '{' + content + '}';
+    jsonStr = jsonStr.replace(/([{,]\s*)([a-zA-Z_][a-zA-Z0-9_]*)\s*:/g, '$1"$2":');
+    // Add quotes to unquoted string values (simple heuristic)
+    jsonStr = jsonStr.replace(/:\s*([a-zA-Z_][a-zA-Z0-9_]*)(?=[,}])/g, ':"$1"');
+    jsonStr = jsonStr.replace(/:\s*'([^']*)'/g, ':"$1"');
+    const parsed = JSON.parse(jsonStr);
+    if (parsed) return sanitizeOverrides(parsed);
+  } catch (e) {
+    // fall through
+  }
+
+  console.warn('Failed to parse pi overrides – content:', content);
+  return {};
 }
 
-// ---------- Build DNA ----------
+function sanitizeOverrides(obj) {
+  return {
+    authority: typeof obj.authority === 'number' ? obj.authority : undefined,
+    curiosity: typeof obj.curiosity === 'number' ? obj.curiosity : undefined,
+    seriousness: typeof obj.seriousness === 'number' ? obj.seriousness : undefined,
+    optimism: typeof obj.optimism === 'number' ? obj.optimism : undefined,
+    emotionality: typeof obj.emotionality === 'number' ? obj.emotionality : undefined,
+    humor: typeof obj.humor === 'number' ? obj.humor : undefined,
+    voiceStyle: typeof obj.voiceStyle === 'string' ? obj.voiceStyle : undefined,
+    primaryTopics: Array.isArray(obj.primaryTopics) ? obj.primaryTopics : undefined,
+    secondaryTopics: Array.isArray(obj.secondaryTopics) ? obj.secondaryTopics : undefined,
+    contentTypes: Array.isArray(obj.contentTypes) ? obj.contentTypes : undefined,
+    categoryOverrides: typeof obj.categoryOverrides === 'object' ? obj.categoryOverrides : undefined,
+    newsRefreshMinutes: typeof obj.newsRefreshMinutes === 'number' ? obj.newsRefreshMinutes : undefined,
+    disableNews: typeof obj.disableNews === 'boolean' ? obj.disableNews : undefined,
+    topicTrendWords: Array.isArray(obj.topicTrendWords) ? obj.topicTrendWords : undefined,
+    topicCuriosityWords: Array.isArray(obj.topicCuriosityWords) ? obj.topicCuriosityWords : undefined,
+    topicGenericPenaltyWords: Array.isArray(obj.topicGenericPenaltyWords) ? obj.topicGenericPenaltyWords : undefined
+  };
+}
+
+// ---------- Build DNA (unchanged except using new parser) ----------
 async function buildPageDNA(pageProfile, recentPosts = []) {
   const interests = pageProfile?.audienceInterest || [];
   const extraNotes = pageProfile?.extraNotes || '';
@@ -95,7 +160,7 @@ async function buildPageDNA(pageProfile, recentPosts = []) {
   };
 }
 
-// ---------- News with refresh ----------
+// ---------- News with refresh (unchanged) ----------
 async function refreshGlobalNewsCache(overrides = {}) {
   const refreshMinutes = overrides.newsRefreshMinutes !== undefined ? overrides.newsRefreshMinutes : 30;
   if (globalNewsCache.lastUpdated && moment().diff(globalNewsCache.lastUpdated, 'minutes') < refreshMinutes) {
@@ -150,7 +215,7 @@ async function getNewsForPage(pageProfile) {
   }).slice(0, 5);
 }
 
-// ---------- Content type rotation ----------
+// ---------- Content type rotation (unchanged) ----------
 const defaultContentTypes = ['observation', 'analysis', 'reaction', 'warning', 'reflection', 'community', 'opportunity', 'myth_busting'];
 
 function getNextContentType(pageId, pageProfile) {
@@ -176,7 +241,7 @@ Return JSON: { significance: "short phrase", urgency: "low/medium/high", lifespa
   }
 }
 
-// ---------- Audience state ----------
+// ---------- Audience state (unchanged) ----------
 async function buildAudienceState(pageProfile) {
   const interests = pageProfile?.audienceInterest || [];
   if (!interests.length) return { goals: [], fears: [], frustrations: [], aspirations: [] };
@@ -193,7 +258,7 @@ List 3 goals, 3 fears, 3 frustrations, 3 aspirations. Return as JSON: {"goals":[
   return state;
 }
 
-// ---------- Page memory ----------
+// ---------- Page memory (unchanged) ----------
 function updatePageMemory(pageId, topic, post, score, hook = null, eventId = null) {
   if (!pageMemory.has(pageId)) {
     pageMemory.set(pageId, {
@@ -221,7 +286,7 @@ function getPageMemory(pageId) {
   return pageMemory.get(pageId) || null;
 }
 
-// ---------- Identity score ----------
+// ---------- Identity score (unchanged) ----------
 async function identityScore(post, pageDNA, pageProfile) {
   const prompt = `Does this Facebook post sound like it comes from a page with:
 - Authority: ${pageDNA.authority}/100
@@ -238,7 +303,7 @@ Return only a number 0-100 indicating how well it matches the page identity.`;
   return Math.min(100, Math.max(0, score));
 }
 
-// ---------- Main orchestrator ----------
+// ---------- Main orchestrator (unchanged) ----------
 async function enrichContext(pageId, pageProfile, topic, recentPosts = []) {
   let dna = pageDNA.get(pageId);
   if (!dna) {
