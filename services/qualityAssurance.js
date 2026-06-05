@@ -1,23 +1,114 @@
 // services/qualityAssurance.js
-// Enhanced Quality Assurance – now with full PI integration (accepts dna for identity scoring)
-// Passing threshold = 70 (can be overridden per page via extraNotes)
+// Fully parameterized Quality Assurance – every tunable value can be overridden via qa: {...} in extraNotes
+// Default threshold = 70 (can be overridden per page)
 
 const { identityScore, updatePageMemory: updateIntelligenceMemory, getPageMemory: getIntelligenceMemory } = require('./pageIntelligence');
 
-// ---------- Helper: Parse per‑page overrides from extraNotes ----------
+// ---------- Helper: Parse per‑page overrides from extraNotes (now supports all parameters) ----------
 function parsePageOverrides(extraNotes = '') {
   const match = extraNotes.match(/qa:\s*\{([^}]+)\}/i);
   if (!match) return {};
+
   try {
     const obj = eval('({' + match[1] + '})');
+    // Return all possible overrides with defaults applied later in each function
     return {
+      // Thresholds & limits
       threshold: obj.threshold,
+      topicScoreMin: obj.topic_score_min,
+      pageFitMin: obj.page_fit_min,
+      identityScoreMin: obj.identity_score_min,
+      maxRegenerations: obj.max_regenerations,
+      duplicateThreshold: obj.duplicate_threshold,
+
+      // Post validation
+      minLength: obj.min_length,
+      maxLength: obj.max_length,
       avoidPhrases: obj.avoid_phrases || [],
-      toneKeywords: obj.tone_keywords || [],
-      customHookWords: obj.custom_hook_words || [],
       forbiddenJargon: obj.forbidden_jargon || [],
       maxHashtags: obj.max_hashtags,
-      requireSource: obj.require_source || false
+      requireSource: obj.require_source || false,
+
+      // Tone validation
+      toneKeywords: obj.tone_keywords || {},
+
+      // Virality & hook
+      customHookWords: obj.custom_hook_words || [],
+      viralityContrastWords: obj.virality_contrast_words,
+      viralityCuriosityWords: obj.virality_curiosity_words,
+      viralityQuestionBonus: obj.virality_question_bonus,
+      viralityStatBonus: obj.virality_stat_bonus,
+
+      // Human score
+      humanAIPhrases: obj.human_ai_phrases,
+      humanFirstPersonBonus: obj.human_first_person_bonus,
+      humanExclamationBonus: obj.human_exclamation_bonus,
+
+      // Hook score
+      hookDefaultWords: obj.hook_default_words,
+      hookCapitalBonus: obj.hook_capital_bonus,
+
+      // Readability
+      readabilityIdealMin: obj.readability_ideal_min,
+      readabilityIdealMax: obj.readability_ideal_max,
+      readabilityAcceptableMin: obj.readability_acceptable_min,
+      readabilityAcceptableMax: obj.readability_acceptable_max,
+      readabilityPerfectScore: obj.readability_perfect_score,
+      readabilityAcceptableScore: obj.readability_acceptable_score,
+      readabilityLowScore: obj.readability_low_score,
+
+      // Originality
+      originalityCliches: obj.originality_cliches,
+      originalityPenaltyPerCliché: obj.originality_penalty_per_cliche,
+
+      // Realism penalty
+      realismUniformSentencePenalty: obj.realism_uniform_sentence_penalty,
+      realismContractionSlangBonus: obj.realism_contraction_slang_bonus,
+      realismMaxPenalty: obj.realism_max_penalty,
+
+      // AI structure score
+      aiStructureStartingWords: obj.ai_structure_starting_words,
+      aiStructureUniformVarianceThreshold: obj.ai_structure_uniform_variance_threshold,
+      aiStructureUniformPenalty: obj.ai_structure_uniform_penalty,
+      aiStructureSlightVariancePenalty: obj.ai_structure_slight_variance_penalty,
+      aiStructureNoVarietyPenalty: obj.ai_structure_no_variety_penalty,
+      aiStructureEndsWithPeriodPenalty: obj.ai_structure_ends_with_period_penalty,
+      aiStructureMaxScore: obj.ai_structure_max_score,
+
+      // Final score weights
+      weights: {
+        human: obj.weight_human,
+        virality: obj.weight_virality,
+        hook: obj.weight_hook,
+        readability: obj.weight_readability,
+        originality: obj.weight_originality,
+        pageFit: obj.weight_page_fit,
+        viralityExtra: obj.weight_virality_extra,
+        realism: obj.weight_realism,
+        aiStructure: obj.weight_ai_structure
+      },
+
+      // Topic scoring
+      topicSpecificityBonus: obj.topic_specificity_bonus,
+      topicTrendBonus: obj.topic_trend_bonus,
+      topicCuriosityBonus: obj.topic_curiosity_bonus,
+      topicGenericPenalty: obj.topic_generic_penalty,
+      topicRepeatPenalty: obj.topic_repeat_penalty,
+      topicTrendWords: obj.topic_trend_words,
+      topicCuriosityWords: obj.topic_curiosity_words,
+      topicGenericWords: obj.topic_generic_words,
+
+      // Page fit
+      pageFitKeywordMap: obj.page_fit_keyword_map,
+      pageFitExactMatchBonus: obj.page_fit_exact_match_bonus,
+      pageFitPartialMatchBase: obj.page_fit_partial_match_base,
+      pageFitPostFallbackScore: obj.page_fit_post_fallback_score,
+
+      // Identity scoring
+      identityScoreWeights: obj.identity_score_weights,
+
+      // Duplicate fingerprint length
+      fingerprintWordCount: obj.fingerprint_word_count
     };
   } catch (e) {
     console.warn('Failed to parse qa overrides from extraNotes:', e);
@@ -25,7 +116,12 @@ function parsePageOverrides(extraNotes = '') {
   }
 }
 
-// ---------- 1. In-Memory Page Memory (delegated to pageIntelligence) ----------
+// ---------- Helper: merge overrides with defaults ----------
+function getParam(overrides, key, defaultValue) {
+  return overrides[key] !== undefined ? overrides[key] : defaultValue;
+}
+
+// ---------- 1. In-Memory Page Memory (unchanged) ----------
 function updatePageMemory(pageId, topic, post, qualityScore) {
   updateIntelligenceMemory(pageId, topic, post, qualityScore, null);
 }
@@ -34,8 +130,8 @@ function getPageMemory(pageId) {
   return getIntelligenceMemory(pageId);
 }
 
-// ---------- 2. Keyword Families ----------
-const INTEREST_MAP = {
+// ---------- 2. Keyword Families (now overridable) ----------
+const DEFAULT_INTEREST_MAP = {
   cybersecurity: ['hacker', 'malware', 'ransomware', 'breach', 'security', 'phishing', 'cyberattack', 'vulnerability', 'patch', 'exploit'],
   football: ['premier league', 'arsenal', 'chelsea', 'man utd', 'goal', 'match', 'fifa', 'world cup', 'champions league', 'football'],
   finance: ['money', 'stocks', 'investing', 'inflation', 'bank', 'savings', 'crypto', 'bitcoin', 'trading', 'budget'],
@@ -44,17 +140,23 @@ const INTEREST_MAP = {
   marketing: ['social media', 'facebook ads', 'instagram', 'seo', 'content', 'email', 'conversion', 'traffic', 'audience']
 };
 
-function pageFitScore(topic, pageProfile, postText = null) {
+function pageFitScore(topic, pageProfile, postText = null, overrides = {}) {
   if (!pageProfile?.audienceInterest?.length) return 70;
   const topicLower = topic.toLowerCase();
   let maxScore = 0;
+
+  const interestMap = overrides.pageFitKeywordMap || DEFAULT_INTEREST_MAP;
+  const exactMatchBonus = getParam(overrides, 'pageFitExactMatchBonus', 40);
+  const partialMatchBase = getParam(overrides, 'pageFitPartialMatchBase', 30);
+  const postFallbackScore = getParam(overrides, 'pageFitPostFallbackScore', 50);
+
   for (const interest of pageProfile.audienceInterest) {
     const interestKey = interest.toLowerCase();
-    const keywords = INTEREST_MAP[interestKey] || [interestKey];
+    const keywords = interestMap[interestKey] || [interestKey];
     for (const kw of keywords) {
       if (topicLower.includes(kw)) {
-        maxScore = Math.max(maxScore, 30);
-        if (topicLower.includes(interestKey)) maxScore = Math.min(100, maxScore + 40);
+        maxScore = Math.max(maxScore, partialMatchBase);
+        if (topicLower.includes(interestKey)) maxScore = Math.min(100, maxScore + exactMatchBonus);
       }
     }
     const regex = new RegExp(`\\b${interestKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
@@ -65,10 +167,10 @@ function pageFitScore(topic, pageProfile, postText = null) {
     for (const interest of pageProfile.audienceInterest) {
       const interestKey = interest.toLowerCase();
       if (postLower.includes(interestKey)) {
-        maxScore = Math.max(maxScore, 50);
+        maxScore = Math.max(maxScore, postFallbackScore);
         break;
       }
-      const keywords = INTEREST_MAP[interestKey] || [];
+      const keywords = interestMap[interestKey] || [];
       for (const kw of keywords) {
         if (postLower.includes(kw)) {
           maxScore = Math.max(maxScore, 40);
@@ -80,61 +182,86 @@ function pageFitScore(topic, pageProfile, postText = null) {
   return Math.min(100, Math.max(40, maxScore || 40));
 }
 
-// ---------- 3. Realism Penalty ----------
+// ---------- 3. Realism Penalty (fully overridable) ----------
 function realismPenalty(post, overrides = {}) {
   let penalty = 0;
   const text = post.toLowerCase();
+
+  const uniformSentencePenalty = getParam(overrides, 'realismUniformSentencePenalty', 15);
+  const contractionSlangBonus = getParam(overrides, 'realismContractionSlangBonus', 10);
+  const maxPenalty = getParam(overrides, 'realismMaxPenalty', 30);
+
   if (/^\w+\s+\w+\s+\w+\s+\w+\s+\w+$/.test(text)) penalty += 10;
   const sentences = post.split(/[.!?]+/).filter(s => s.trim().length > 0);
   if (sentences.length >= 3) {
     const lengths = sentences.map(s => s.trim().split(/\s+/).length);
     const avg = lengths.reduce((a,b) => a+b,0) / lengths.length;
     const variance = Math.max(...lengths) - Math.min(...lengths);
-    if (variance < 3 && avg < 8) penalty += 15;
+    if (variance < 3 && avg < 8) penalty += uniformSentencePenalty;
   }
   const hasContraction = /\b(don't|can't|won't|i'm|you're|it's|that's)\b/i.test(text);
   const hasSlang = /\b(guy|stuff|thing|yeah|nah|lol|kinda|gonna|wanna)\b/i.test(text);
-  if (!hasContraction && !hasSlang) penalty += 10;
-  return Math.min(30, penalty);
+  if (!hasContraction && !hasSlang) penalty += contractionSlangBonus;
+  return Math.min(maxPenalty, penalty);
 }
 
-// ---------- 4. AI Structure Detector ----------
-function aiStructureScore(post) {
+// ---------- 4. AI Structure Detector (fully overridable) ----------
+function aiStructureScore(post, overrides = {}) {
   let score = 0;
   const text = post.trim();
-  if (/^(in|this|the|a|an|when|if|as|for|with)/i.test(text)) score += 10;
+
+  const startingWords = overrides.aiStructureStartingWords || ['in', 'this', 'the', 'a', 'an', 'when', 'if', 'as', 'for', 'with'];
+  if (startingWords.some(word => new RegExp(`^${word}\\b`, 'i').test(text))) score += 10;
+
   const sentences = post.split(/[.!?]+/).filter(s => s.trim().length > 0);
+  const uniformVarianceThreshold = getParam(overrides, 'aiStructureUniformVarianceThreshold', 3);
+  const uniformPenalty = getParam(overrides, 'aiStructureUniformPenalty', 20);
+  const slightVariancePenalty = getParam(overrides, 'aiStructureSlightVariancePenalty', 10);
+  const noVarietyPenalty = getParam(overrides, 'aiStructureNoVarietyPenalty', 5);
+  const endsWithPeriodPenalty = getParam(overrides, 'aiStructureEndsWithPeriodPenalty', 5);
+  const maxScore = getParam(overrides, 'aiStructureMaxScore', 40);
+
   if (sentences.length >= 2) {
     const lengths = sentences.map(s => s.trim().split(/\s+/).length);
     const variance = Math.max(...lengths) - Math.min(...lengths);
-    if (variance < 3) score += 20;
-    else if (variance < 5) score += 10;
+    if (variance < uniformVarianceThreshold) score += uniformPenalty;
+    else if (variance < 5) score += slightVariancePenalty;
   }
   const hasVariety = /[—;…\-–]/.test(post);
-  if (!hasVariety) score += 5;
+  if (!hasVariety) score += noVarietyPenalty;
   const endsWithPeriod = /\.$/.test(post.trim());
-  if (endsWithPeriod) score += 5;
-  return Math.min(40, score);
+  if (endsWithPeriod) score += endsWithPeriodPenalty;
+  return Math.min(maxScore, score);
 }
 
-// ---------- 5. Topic Scoring (uses shared memory) ----------
-function scoreTopic(topic, pageId = null) {
+// ---------- 5. Topic Scoring (fully overridable) ----------
+function scoreTopic(topic, pageId = null, overrides = {}) {
   let score = 50;
   const lower = topic.toLowerCase();
-  if (/\d{4}/.test(topic)) score += 10;
-  if (/[A-Z][a-z]+ [A-Z][a-z]+/.test(topic)) score += 15;
-  if (topic.split(/\s+/).length > 5) score += 10;
-  const trendWords = ['new', 'breaking', 'alert', 'update', '2025', 'latest', 'today', 'now'];
-  for (const w of trendWords) if (lower.includes(w)) score += 8;
-  const curiosity = ['why', 'how', 'what', 'inside', 'behind', 'truth', 'secret', 'mistake'];
-  for (const w of curiosity) if (lower.includes(w)) score += 8;
-  const generic = ['benefits', 'ways to', 'how to', 'tips', 'guide', 'overview', 'introduction'];
-  for (const g of generic) if (lower.includes(g)) score -= 20;
+
+  const specificityBonus = getParam(overrides, 'topicSpecificityBonus', 10);
+  const trendBonus = getParam(overrides, 'topicTrendBonus', 8);
+  const curiosityBonus = getParam(overrides, 'topicCuriosityBonus', 8);
+  const genericPenalty = getParam(overrides, 'topicGenericPenalty', 20);
+  const repeatPenalty = getParam(overrides, 'topicRepeatPenalty', 40);
+
+  const trendWords = overrides.topicTrendWords || ['new', 'breaking', 'alert', 'update', '2025', 'latest', 'today', 'now'];
+  const curiosityWords = overrides.topicCuriosityWords || ['why', 'how', 'what', 'inside', 'behind', 'truth', 'secret', 'mistake'];
+  const genericWords = overrides.topicGenericWords || ['benefits', 'ways to', 'how to', 'tips', 'guide', 'overview', 'introduction'];
+
+  if (/\d{4}/.test(topic)) score += specificityBonus;
+  if (/[A-Z][a-z]+ [A-Z][a-z]+/.test(topic)) score += specificityBonus + 5;
+  if (topic.split(/\s+/).length > 5) score += specificityBonus;
+
+  for (const w of trendWords) if (lower.includes(w)) score += trendBonus;
+  for (const w of curiosityWords) if (lower.includes(w)) score += curiosityBonus;
+  for (const g of genericWords) if (lower.includes(g)) score -= genericPenalty;
+
   if (pageId) {
     const mem = getPageMemory(pageId);
     if (mem && mem.lastTopics && mem.lastTopics.length) {
       const isRepeat = mem.lastTopics.some(t => stringSimilarity(topic, t) > 0.6);
-      if (isRepeat) score -= 40;
+      if (isRepeat) score -= repeatPenalty;
     }
   }
   return Math.min(100, Math.max(0, score));
@@ -148,14 +275,14 @@ function stringSimilarity(a, b) {
   return intersection.size / union.size;
 }
 
-// ---------- 6. Duplicate Detection ----------
-function fingerprint(text) {
-  return text.toLowerCase().replace(/[^\w\s]/g, '').split(/\s+/).slice(0, 15).join(' ');
+// ---------- 6. Duplicate Detection (overridable) ----------
+function fingerprint(text, wordCount = 15) {
+  return text.toLowerCase().replace(/[^\w\s]/g, '').split(/\s+/).slice(0, wordCount).join(' ');
 }
-function isDuplicate(newPost, recentPosts, threshold = 0.85) {
-  const newFp = fingerprint(newPost);
+function isDuplicate(newPost, recentPosts, threshold = 0.85, fingerprintWordCount = 15) {
+  const newFp = fingerprint(newPost, fingerprintWordCount);
   for (const old of recentPosts) {
-    const oldFp = fingerprint(old);
+    const oldFp = fingerprint(old, fingerprintWordCount);
     if (newFp === oldFp) return true;
     const longer = newFp.length > oldFp.length ? newFp : oldFp;
     const shorter = newFp.length > oldFp.length ? oldFp : newFp;
@@ -166,14 +293,18 @@ function isDuplicate(newPost, recentPosts, threshold = 0.85) {
   return false;
 }
 
-// ---------- 7. Validation Functions with per‑page overrides ----------
+// ---------- 7. Validation Functions with full overrides ----------
 function validatePost(post, overrides = {}) {
   const text = post?.trim();
-  if (!text) return { valid: false, reason: 'Empty', suggestion: 'Write a post with at least 20 characters.' };
-  if (text.length < 20) return { valid: false, reason: 'Too short', suggestion: 'Expand your post to at least 20 characters (about 4-5 words).' };
-  if (text.length > 2200) return { valid: false, reason: 'Too long', suggestion: 'Shorten your post to under 2200 characters (Facebook limit).' };
-  
-  let aiPhrases = [
+  const minLen = getParam(overrides, 'minLength', 20);
+  const maxLen = getParam(overrides, 'maxLength', 2200);
+  const maxHashtags = getParam(overrides, 'maxHashtags', 3);
+
+  if (!text) return { valid: false, reason: 'Empty', suggestion: `Write a post with at least ${minLen} characters.` };
+  if (text.length < minLen) return { valid: false, reason: 'Too short', suggestion: `Expand your post to at least ${minLen} characters (about 4-5 words).` };
+  if (text.length > maxLen) return { valid: false, reason: 'Too long', suggestion: `Shorten your post to under ${maxLen} characters (Facebook limit).` };
+
+  let aiPhrases = overrides.humanAIPhrases || [
     { regex: /\bhave you ever\b/i, phrase: '"Have you ever..."' },
     { regex: /\blet's explore\b/i, phrase: '"Let\'s explore..."' },
     { regex: /\bin today's world\b/i, phrase: '"In today\'s world..."' },
@@ -198,24 +329,18 @@ function validatePost(post, overrides = {}) {
       return { valid: false, reason: `AI phrase: ${p.phrase}`, suggestion: `Remove "${p.phrase}" and start directly with your point. Be conversational.` };
     }
   }
-  
-  let corporate = [
+
+  let jargon = overrides.forbiddenJargon || [
     { regex: /\bleverage\b/i, word: 'leverage' },
     { regex: /\bsynergy\b/i, word: 'synergy' },
     { regex: /\btransformative\b/i, word: 'transformative' }
   ];
-  if (overrides.forbiddenJargon) {
-    overrides.forbiddenJargon.forEach(word => {
-      corporate.push({ regex: new RegExp(`\\b${word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i'), word });
-    });
-  }
-  for (const c of corporate) {
+  for (const c of jargon) {
     if (c.regex.test(text)) {
       return { valid: false, reason: `Jargon: "${c.word}"`, suggestion: `Replace "${c.word}" with simpler, everyday language.` };
     }
   }
-  
-  const maxHashtags = overrides.maxHashtags !== undefined ? overrides.maxHashtags : 3;
+
   const hashtagCount = (text.match(/#\w+/g) || []).length;
   if (hashtagCount > maxHashtags) {
     return { valid: false, reason: `Too many hashtags (${hashtagCount} > ${maxHashtags})`, suggestion: `Use at most ${maxHashtags} hashtags on Facebook. Better yet, use none.` };
@@ -250,17 +375,15 @@ function validateTone(post, pageProfile, overrides = {}) {
   if (!pageProfile?.tone) return { matches: true, reason: '', suggestion: '' };
   const tone = pageProfile.tone.toLowerCase();
   const text = post.toLowerCase();
-  const baseToneMap = {
+
+  const defaultToneMap = {
     funny: ['lol', 'hilarious', 'crazy', '😂', '🤣', 'silly', 'oops'],
     serious: ['critical', 'warning', 'danger', 'urgent', 'must'],
     professional: ['according to', 'analysis', 'report', 'data'],
     casual: ['hey', 'guys', 'y\'all', 'so', 'well', 'basically'],
     motivational: ['believe', 'achieve', 'dream', 'success', 'inspire']
   };
-  let keywords = baseToneMap[tone] || [];
-  if (overrides.toneKeywords && overrides.toneKeywords.length) {
-    keywords = [...keywords, ...overrides.toneKeywords];
-  }
+  let keywords = (overrides.toneKeywords && overrides.toneKeywords[tone]) ? overrides.toneKeywords[tone] : (defaultToneMap[tone] || []);
   if (keywords.length === 0) return { matches: true, reason: '', suggestion: '' };
   const match = keywords.some(kw => text.includes(kw));
   if (!match && tone !== 'professional') {
@@ -269,79 +392,114 @@ function validateTone(post, pageProfile, overrides = {}) {
   return { matches: true, reason: '', suggestion: '' };
 }
 
-// ---------- 8. Scoring Functions ----------
+// ---------- 8. Scoring Functions (fully overridable) ----------
 function viralityScore(post, overrides = {}) {
   let score = 0;
   const text = post.toLowerCase();
-  if (/but|however|yet|actually|surprisingly|unexpectedly/.test(text)) score += 25;
-  if (/why|how|what|reason|because|inside|secret/.test(text)) score += 20;
-  if (/\?/.test(text) && !/like|share|comment/i.test(text)) score += 15;
-  if (/\d+%|\d+ million|\d+ thousand/.test(text)) score += 20;
+
+  const contrastWords = overrides.viralityContrastWords || ['but', 'however', 'yet', 'actually', 'surprisingly', 'unexpectedly'];
+  const curiosityWords = overrides.viralityCuriosityWords || ['why', 'how', 'what', 'reason', 'because', 'inside', 'secret'];
+  const questionBonus = getParam(overrides, 'viralityQuestionBonus', 15);
+  const statBonus = getParam(overrides, 'viralityStatBonus', 20);
+  const customHookBonus = 15; // per custom hook word
+
+  for (const w of contrastWords) if (text.includes(w)) { score += 25; break; }
+  for (const w of curiosityWords) if (text.includes(w)) { score += 20; break; }
+  if (/\?/.test(text) && !/like|share|comment/i.test(text)) score += questionBonus;
+  if (/\d+%|\d+ million|\d+ thousand/.test(text)) score += statBonus;
   if (overrides.customHookWords) {
     for (const word of overrides.customHookWords) {
-      if (text.includes(word.toLowerCase())) score += 15;
+      if (text.includes(word.toLowerCase())) score += customHookBonus;
     }
   }
   return Math.min(100, score);
 }
 
-function humanScore(post) {
+function humanScore(post, overrides = {}) {
   let score = 100;
-  const markers = [
+  const aiMarkers = overrides.humanAIPhrases ? overrides.humanAIPhrases.map(p => p.regex) : [
     /\bhave you ever\b/i, /\blet's explore\b/i, /\bin today's world\b/i, /\bit's important to\b/i,
     /\bin conclusion\b/i, /\bhere are\b/i, /\bone thing people don't realize\b/i
   ];
-  for (const m of markers) if (m.test(post)) score -= 15;
-  if (/\b(i|we) (think|believe|feel)\b/i.test(post)) score += 10;
-  if (/!/.test(post)) score += 5;
+  for (const m of aiMarkers) if (m.test(post)) score -= 15;
+  const firstPersonBonus = getParam(overrides, 'humanFirstPersonBonus', 10);
+  const exclamationBonus = getParam(overrides, 'humanExclamationBonus', 5);
+  if (/\b(i|we) (think|believe|feel)\b/i.test(post)) score += firstPersonBonus;
+  if (/!/.test(post)) score += exclamationBonus;
   return Math.min(100, Math.max(0, score));
 }
 
 function hookScore(post, overrides = {}) {
-  const hookWords = ['unexpected', 'warning', 'mistake', 'secret', 'surprising', 'caught', 'exposed', 'revealed'];
+  const defaultHookWords = ['unexpected', 'warning', 'mistake', 'secret', 'surprising', 'caught', 'exposed', 'revealed'];
+  const hookWords = overrides.hookDefaultWords || defaultHookWords;
   if (overrides.customHookWords) hookWords.push(...overrides.customHookWords);
   let score = 0;
   for (const w of hookWords) if (post.toLowerCase().includes(w)) score += 15;
-  if (/^[A-Z]/.test(post.trim())) score += 10;
+  const capitalBonus = getParam(overrides, 'hookCapitalBonus', 10);
+  if (/^[A-Z]/.test(post.trim())) score += capitalBonus;
   return Math.min(100, score);
 }
 
-function readabilityScore(post) {
+function readabilityScore(post, overrides = {}) {
   const sentences = post.split(/[.!?]+/).filter(s => s.trim().length > 0);
   if (sentences.length === 0) return 50;
   const avgWords = sentences.reduce((sum, s) => sum + s.trim().split(/\s+/).length, 0) / sentences.length;
-  if (avgWords >= 8 && avgWords <= 20) return 100;
-  if (avgWords >= 5 && avgWords <= 25) return 70;
-  return 40;
+  const idealMin = getParam(overrides, 'readabilityIdealMin', 8);
+  const idealMax = getParam(overrides, 'readabilityIdealMax', 20);
+  const acceptableMin = getParam(overrides, 'readabilityAcceptableMin', 5);
+  const acceptableMax = getParam(overrides, 'readabilityAcceptableMax', 25);
+  const perfectScore = getParam(overrides, 'readabilityPerfectScore', 100);
+  const acceptableScore = getParam(overrides, 'readabilityAcceptableScore', 70);
+  const lowScore = getParam(overrides, 'readabilityLowScore', 40);
+  if (avgWords >= idealMin && avgWords <= idealMax) return perfectScore;
+  if (avgWords >= acceptableMin && avgWords <= acceptableMax) return acceptableScore;
+  return lowScore;
 }
 
-function originalityScore(post) {
-  const cliches = [/\bin the end\b/i, /\bat the end of the day\b/i, /\bthink outside the box\b/i];
-  let penalty = cliches.filter(c => c.test(post.toLowerCase())).length * 20;
+function originalityScore(post, overrides = {}) {
+  const defaultCliches = [/\bin the end\b/i, /\bat the end of the day\b/i, /\bthink outside the box\b/i];
+  const cliches = overrides.originalityCliches || defaultCliches;
+  const penaltyPerCliché = getParam(overrides, 'originalityPenaltyPerCliché', 20);
+  let penalty = cliches.filter(c => c.test(post.toLowerCase())).length * penaltyPerCliché;
   return Math.max(0, 100 - penalty);
 }
 
 function finalPostScore(post, topic, pageProfile, pageId = null, overrides = {}) {
-  const base = {
-    human: humanScore(post),
-    virality: viralityScore(post, overrides),
-    hook: hookScore(post, overrides),
-    readability: readabilityScore(post),
-    originality: originalityScore(post)
-  };
-  const rawScore = (base.human * 0.3 + base.virality * 0.25 + base.hook * 0.2 + base.readability * 0.15 + base.originality * 0.1);
-  const pageFit = pageFitScore(topic, pageProfile, post);
-  const aiStruct = aiStructureScore(post);
+  const human = humanScore(post, overrides);
+  const virality = viralityScore(post, overrides);
+  const hook = hookScore(post, overrides);
+  const readability = readabilityScore(post, overrides);
+  const originality = originalityScore(post, overrides);
+  const pageFit = pageFitScore(topic, pageProfile, post, overrides);
+  const aiStruct = aiStructureScore(post, overrides);
   const realism = realismPenalty(post, overrides);
-  let finalScore = (rawScore * 0.7) + (pageFit * 0.15) + (base.virality * 0.15) - realism - aiStruct;
+
+  const weights = {
+    human: getParam(overrides.weights, 'human', 0.3),
+    virality: getParam(overrides.weights, 'virality', 0.25),
+    hook: getParam(overrides.weights, 'hook', 0.2),
+    readability: getParam(overrides.weights, 'readability', 0.15),
+    originality: getParam(overrides.weights, 'originality', 0.1),
+    pageFit: getParam(overrides.weights, 'pageFit', 0.15),
+    viralityExtra: getParam(overrides.weights, 'viralityExtra', 0.15),
+    realism: getParam(overrides.weights, 'realism', 1),   // subtraction
+    aiStructure: getParam(overrides.weights, 'aiStructure', 1) // subtraction
+  };
+
+  const rawScore = (human * weights.human +
+                    virality * weights.virality +
+                    hook * weights.hook +
+                    readability * weights.readability +
+                    originality * weights.originality);
+  let finalScore = (rawScore * 0.7) + (pageFit * weights.pageFit) + (virality * weights.viralityExtra) - (realism * weights.realism) - (aiStruct * weights.aiStructure);
   finalScore = Math.min(100, Math.max(0, finalScore));
-  return { total: Math.round(finalScore), breakdown: { ...base, pageFit, aiStructure: aiStruct, realismPenalty: realism } };
+  return { total: Math.round(finalScore), breakdown: { human, virality, hook, readability, originality, pageFit, aiStructure: aiStruct, realismPenalty: realism } };
 }
 
-// ---------- 9. Adaptive Regeneration (now uses DNA for identity scoring) ----------
-async function adaptiveRegenerate(originalPost, failureReason, suggestion, generateFn, breakdown = null, pageProfile = null, pageId = null, dna = null) {
+// ---------- 9. Adaptive Regeneration (now uses overrides for suggestions) ----------
+async function adaptiveRegenerate(originalPost, failureReason, suggestion, generateFn, breakdown = null, pageProfile = null, pageId = null, dna = null, overrides = {}) {
   let detailedFeedback = `The following Facebook post was rejected because: ${failureReason}\n\nSuggested fix: ${suggestion}\n`;
-  
+  const threshold = getParam(overrides, 'threshold', 70);
   if (breakdown) {
     detailedFeedback += `\nDetailed scores (0-100, higher is better):
 - Human tone: ${breakdown.human} (needs ≥70)
@@ -350,7 +508,6 @@ async function adaptiveRegenerate(originalPost, failureReason, suggestion, gener
 - Readability: ${breakdown.readability} (needs ≥70)
 - Originality: ${breakdown.originality} (needs ≥70)
 - Page relevance: ${breakdown.pageFit} (needs ≥50)\n`;
-    
     const improvements = [];
     if (breakdown.human < 70) improvements.push('- Remove all AI phrases, use contractions (don\'t, can\'t), add personality');
     if (breakdown.virality < 50) improvements.push('- Add a surprising fact, a question, or a statistic (e.g., "83% of users...")');
@@ -360,21 +517,15 @@ async function adaptiveRegenerate(originalPost, failureReason, suggestion, gener
     if (breakdown.pageFit < 50) improvements.push(`- Make the post more relevant to ${pageProfile?.audienceInterest?.join(', ') || 'the audience'}`);
     if (breakdown.aiStructure > 20) improvements.push('- Do not start with "In", "This", "The", "When", "If". Start with a strong statement.');
     if (breakdown.realismPenalty > 10) improvements.push('- Use everyday language, slang, or an exclamation mark (!).');
-    
-    if (improvements.length > 0) {
-      detailedFeedback += `\nSpecific improvements needed:\n${improvements.join('\n')}\n`;
-    }
+    if (improvements.length > 0) detailedFeedback += `\nSpecific improvements needed:\n${improvements.join('\n')}\n`;
   }
-  
   detailedFeedback += `\nRewrite the post to fix these issues. Keep the core message but make it punchy, natural, and max 3 sentences. Return only the rewritten post.\n\nOriginal: "${originalPost}"`;
-  
   let newPost = await generateFn(detailedFeedback);
-  
-  // Identity scoring – only if dna is provided (from pageIntelligence)
-  if (dna && pageId && newPost) {
+  const identityMin = getParam(overrides, 'identityScoreMin', 50);
+  if (dna && pageId && newPost && identityMin > 0) {
     try {
       const idScore = await identityScore(newPost, dna, pageProfile);
-      if (idScore < 50) {
+      if (idScore < identityMin) {
         detailedFeedback += `\n\nThis post doesn't sound like the page's identity (score ${idScore}/100). Make it more like: authority ${dna.authority}, humor ${dna.humor}, seriousness ${dna.seriousness}.`;
         newPost = await generateFn(detailedFeedback);
       }
@@ -385,7 +536,7 @@ async function adaptiveRegenerate(originalPost, failureReason, suggestion, gener
   return newPost;
 }
 
-// ---------- 10. Main Pipeline with per‑page overrides and DNA ----------
+// ---------- 10. Main Pipeline with full overrides ----------
 async function processContent({
   topic,
   post,
@@ -394,77 +545,72 @@ async function processContent({
   recentPosts = [],
   generateFn,
   maxRegenerations = 2,
-  dna = null   // <-- new parameter from pageIntelligence
+  dna = null
 }) {
   const overrides = parsePageOverrides(pageProfile?.extraNotes || '');
-  const THRESHOLD = overrides.threshold !== undefined ? overrides.threshold : 70;
-  
-  const tScore = scoreTopic(topic, pageId);
-  if (tScore < 25) {
+  const THRESHOLD = getParam(overrides, 'threshold', 70);
+  const MAX_REGENS = getParam(overrides, 'maxRegenerations', maxRegenerations);
+  const TOPIC_MIN = getParam(overrides, 'topicScoreMin', 25);
+  const PAGE_FIT_MIN = getParam(overrides, 'pageFitMin', 20);
+  const DUPLICATE_THRESHOLD = getParam(overrides, 'duplicateThreshold', 0.85);
+  const FINGERPRINT_WORD_COUNT = getParam(overrides, 'fingerprintWordCount', 15);
+
+  let tScore = scoreTopic(topic, pageId, overrides);
+  if (tScore < TOPIC_MIN) {
     return { pass: false, reason: `Topic score too low (${tScore})`, suggestion: 'Choose a more specific, trending, or curiosity-driven topic.' };
   }
 
-  const pFit = pageFitScore(topic, pageProfile, post);
-  if (pFit < 20) {
+  let pFit = pageFitScore(topic, pageProfile, post, overrides);
+  if (pFit < PAGE_FIT_MIN) {
     return { pass: false, reason: `Page fit too low (${pFit})`, suggestion: `Make the post more relevant to your audience interests: ${pageProfile?.audienceInterest?.join(', ') || 'unknown'}.` };
   }
 
   let currentPost = post;
   let failures = [];
 
-  for (let attempt = 0; attempt <= maxRegenerations; attempt++) {
+  for (let attempt = 0; attempt <= MAX_REGENS; attempt++) {
     const pv = validatePost(currentPost, overrides);
     if (!pv.valid) {
-      if (attempt === maxRegenerations) {
-        return { pass: false, reason: pv.reason, suggestion: pv.suggestion, failures };
-      }
+      if (attempt === MAX_REGENS) return { pass: false, reason: pv.reason, suggestion: pv.suggestion, failures };
       failures.push({ type: 'validation', reason: pv.reason, suggestion: pv.suggestion });
-      currentPost = await adaptiveRegenerate(currentPost, pv.reason, pv.suggestion, generateFn, null, pageProfile, pageId, dna);
+      currentPost = await adaptiveRegenerate(currentPost, pv.reason, pv.suggestion, generateFn, null, pageProfile, pageId, dna, overrides);
       if (!currentPost) return { pass: false, reason: 'Regeneration failed', suggestion: 'AI provider issue.' };
       continue;
     }
 
     const comp = facebookCompliance(currentPost);
     if (!comp.compliant) {
-      if (attempt === maxRegenerations) {
-        return { pass: false, reason: comp.reason, suggestion: comp.suggestion, failures };
-      }
+      if (attempt === MAX_REGENS) return { pass: false, reason: comp.reason, suggestion: comp.suggestion, failures };
       failures.push({ type: 'compliance', reason: comp.reason, suggestion: comp.suggestion });
-      currentPost = await adaptiveRegenerate(currentPost, comp.reason, comp.suggestion, generateFn, null, pageProfile, pageId, dna);
+      currentPost = await adaptiveRegenerate(currentPost, comp.reason, comp.suggestion, generateFn, null, pageProfile, pageId, dna, overrides);
       if (!currentPost) return { pass: false, reason: 'Regeneration failed', suggestion: 'AI provider issue.' };
       continue;
     }
 
     const hal = hasUnsupportedClaim(currentPost, overrides);
     if (hal.hasClaim) {
-      if (attempt === maxRegenerations) {
-        return { pass: false, reason: hal.reason, suggestion: hal.suggestion, failures };
-      }
+      if (attempt === MAX_REGENS) return { pass: false, reason: hal.reason, suggestion: hal.suggestion, failures };
       failures.push({ type: 'claim', reason: hal.reason, suggestion: hal.suggestion });
-      currentPost = await adaptiveRegenerate(currentPost, hal.reason, hal.suggestion, generateFn, null, pageProfile, pageId, dna);
+      currentPost = await adaptiveRegenerate(currentPost, hal.reason, hal.suggestion, generateFn, null, pageProfile, pageId, dna, overrides);
       if (!currentPost) return { pass: false, reason: 'Regeneration failed', suggestion: 'AI provider issue.' };
       continue;
     }
 
     const tone = validateTone(currentPost, pageProfile, overrides);
     if (!tone.matches) {
-      if (attempt === maxRegenerations) {
-        return { pass: false, reason: tone.reason, suggestion: tone.suggestion, failures };
-      }
+      if (attempt === MAX_REGENS) return { pass: false, reason: tone.reason, suggestion: tone.suggestion, failures };
       failures.push({ type: 'tone', reason: tone.reason, suggestion: tone.suggestion });
-      currentPost = await adaptiveRegenerate(currentPost, tone.reason, tone.suggestion, generateFn, null, pageProfile, pageId, dna);
+      currentPost = await adaptiveRegenerate(currentPost, tone.reason, tone.suggestion, generateFn, null, pageProfile, pageId, dna, overrides);
       if (!currentPost) return { pass: false, reason: 'Regeneration failed', suggestion: 'AI provider issue.' };
       continue;
     }
 
-    if (recentPosts.length && isDuplicate(currentPost, recentPosts)) {
+    if (recentPosts.length && isDuplicate(currentPost, recentPosts, DUPLICATE_THRESHOLD, FINGERPRINT_WORD_COUNT)) {
       const dupReason = 'Duplicate post content';
       const dupSuggestion = 'Completely rephrase the post. Use different words, sentence structure, and examples.';
-      if (attempt === maxRegenerations) {
-        return { pass: false, reason: dupReason, suggestion: dupSuggestion, failures };
-      }
+      if (attempt === MAX_REGENS) return { pass: false, reason: dupReason, suggestion: dupSuggestion, failures };
       failures.push({ type: 'duplicate', reason: dupReason, suggestion: dupSuggestion });
-      currentPost = await adaptiveRegenerate(currentPost, dupReason, dupSuggestion, generateFn, null, pageProfile, pageId, dna);
+      currentPost = await adaptiveRegenerate(currentPost, dupReason, dupSuggestion, generateFn, null, pageProfile, pageId, dna, overrides);
       if (!currentPost) return { pass: false, reason: 'Regeneration failed', suggestion: 'AI provider issue.' };
       continue;
     }
@@ -485,13 +631,9 @@ async function processContent({
 
     const scoreReason = `Score ${scoring.total} below threshold (need ≥${THRESHOLD})`;
     let scoreSuggestion = '';
-    if (scoring.total >= THRESHOLD - 10) {
-      scoreSuggestion = 'The post is close! Fine‑tune these areas:\n';
-    } else if (scoring.total >= THRESHOLD - 20) {
-      scoreSuggestion = 'Needs moderate improvement:\n';
-    } else {
-      scoreSuggestion = 'Needs major rewrite:\n';
-    }
+    if (scoring.total >= THRESHOLD - 10) scoreSuggestion = 'The post is close! Fine‑tune these areas:\n';
+    else if (scoring.total >= THRESHOLD - 20) scoreSuggestion = 'Needs moderate improvement:\n';
+    else scoreSuggestion = 'Needs major rewrite:\n';
     if (scoring.breakdown.human < 70) scoreSuggestion += '- Remove AI phrases, use contractions, add personality.\n';
     if (scoring.breakdown.virality < 50) scoreSuggestion += '- Add a surprising fact, question, or statistic.\n';
     if (scoring.breakdown.hook < 50) scoreSuggestion += '- Start with a strong hook (warning, mistake, unexpected fact).\n';
@@ -500,13 +642,12 @@ async function processContent({
     if (scoring.breakdown.pageFit < 50) scoreSuggestion += `- Make it more relevant to ${pageProfile?.audienceInterest?.join(', ') || 'your audience'}.\n`;
     if (scoring.breakdown.aiStructure > 20) scoreSuggestion += '- Avoid starting with generic words like "In", "This", "The".\n';
     if (scoring.breakdown.realismPenalty > 10) scoreSuggestion += '- Use contractions (don\'t, can\'t) and occasional slang.\n';
-    
-    if (attempt === maxRegenerations) {
+
+    if (attempt === MAX_REGENS) {
       return { pass: false, reason: scoreReason, suggestion: scoreSuggestion, lastScore: scoring.total, failures, breakdown: scoring.breakdown };
     }
-    
     failures.push({ type: 'score', reason: scoreReason, suggestion: scoreSuggestion });
-    currentPost = await adaptiveRegenerate(currentPost, scoreReason, scoreSuggestion, generateFn, scoring.breakdown, pageProfile, pageId, dna);
+    currentPost = await adaptiveRegenerate(currentPost, scoreReason, scoreSuggestion, generateFn, scoring.breakdown, pageProfile, pageId, dna, overrides);
     if (!currentPost) return { pass: false, reason: 'Regeneration failed', suggestion: 'AI provider issue.' };
   }
 }
