@@ -318,7 +318,7 @@ mongoose
             console.error('❌ Auto Maintenance error:', err.message);
         }
         
-         require('./schedulers/autoGeneration');
+         require('./services/autoGeneration');
 
         // Start server
         app.listen(PORT, () => {
