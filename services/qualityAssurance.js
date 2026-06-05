@@ -1,54 +1,35 @@
-// services/qualityAssurance.js
-// Fully parameterized Quality Assurance – every tunable value can be overridden via qa: {...} in extraNotes
-// Default threshold = 70 (can be overridden per page)
-
+// services/qualityAssurance.js - Fully parameterized with safe getParam
 const { identityScore, updatePageMemory: updateIntelligenceMemory, getPageMemory: getIntelligenceMemory } = require('./pageIntelligence');
 
-// ---------- Helper: Parse per‑page overrides from extraNotes (now supports all parameters) ----------
 function parsePageOverrides(extraNotes = '') {
   const match = extraNotes.match(/qa:\s*\{([^}]+)\}/i);
   if (!match) return {};
-
   try {
     const obj = eval('({' + match[1] + '})');
-    // Return all possible overrides with defaults applied later in each function
     return {
-      // Thresholds & limits
       threshold: obj.threshold,
       topicScoreMin: obj.topic_score_min,
       pageFitMin: obj.page_fit_min,
       identityScoreMin: obj.identity_score_min,
       maxRegenerations: obj.max_regenerations,
       duplicateThreshold: obj.duplicate_threshold,
-
-      // Post validation
       minLength: obj.min_length,
       maxLength: obj.max_length,
       avoidPhrases: obj.avoid_phrases || [],
       forbiddenJargon: obj.forbidden_jargon || [],
       maxHashtags: obj.max_hashtags,
       requireSource: obj.require_source || false,
-
-      // Tone validation
       toneKeywords: obj.tone_keywords || {},
-
-      // Virality & hook
       customHookWords: obj.custom_hook_words || [],
       viralityContrastWords: obj.virality_contrast_words,
       viralityCuriosityWords: obj.virality_curiosity_words,
       viralityQuestionBonus: obj.virality_question_bonus,
       viralityStatBonus: obj.virality_stat_bonus,
-
-      // Human score
       humanAIPhrases: obj.human_ai_phrases,
       humanFirstPersonBonus: obj.human_first_person_bonus,
       humanExclamationBonus: obj.human_exclamation_bonus,
-
-      // Hook score
       hookDefaultWords: obj.hook_default_words,
       hookCapitalBonus: obj.hook_capital_bonus,
-
-      // Readability
       readabilityIdealMin: obj.readability_ideal_min,
       readabilityIdealMax: obj.readability_ideal_max,
       readabilityAcceptableMin: obj.readability_acceptable_min,
@@ -56,17 +37,11 @@ function parsePageOverrides(extraNotes = '') {
       readabilityPerfectScore: obj.readability_perfect_score,
       readabilityAcceptableScore: obj.readability_acceptable_score,
       readabilityLowScore: obj.readability_low_score,
-
-      // Originality
       originalityCliches: obj.originality_cliches,
       originalityPenaltyPerCliché: obj.originality_penalty_per_cliche,
-
-      // Realism penalty
       realismUniformSentencePenalty: obj.realism_uniform_sentence_penalty,
       realismContractionSlangBonus: obj.realism_contraction_slang_bonus,
       realismMaxPenalty: obj.realism_max_penalty,
-
-      // AI structure score
       aiStructureStartingWords: obj.ai_structure_starting_words,
       aiStructureUniformVarianceThreshold: obj.ai_structure_uniform_variance_threshold,
       aiStructureUniformPenalty: obj.ai_structure_uniform_penalty,
@@ -74,21 +49,7 @@ function parsePageOverrides(extraNotes = '') {
       aiStructureNoVarietyPenalty: obj.ai_structure_no_variety_penalty,
       aiStructureEndsWithPeriodPenalty: obj.ai_structure_ends_with_period_penalty,
       aiStructureMaxScore: obj.ai_structure_max_score,
-
-      // Final score weights
-      weights: {
-        human: obj.weight_human,
-        virality: obj.weight_virality,
-        hook: obj.weight_hook,
-        readability: obj.weight_readability,
-        originality: obj.weight_originality,
-        pageFit: obj.weight_page_fit,
-        viralityExtra: obj.weight_virality_extra,
-        realism: obj.weight_realism,
-        aiStructure: obj.weight_ai_structure
-      },
-
-      // Topic scoring
+      weights: obj.weights,
       topicSpecificityBonus: obj.topic_specificity_bonus,
       topicTrendBonus: obj.topic_trend_bonus,
       topicCuriosityBonus: obj.topic_curiosity_bonus,
@@ -97,17 +58,11 @@ function parsePageOverrides(extraNotes = '') {
       topicTrendWords: obj.topic_trend_words,
       topicCuriosityWords: obj.topic_curiosity_words,
       topicGenericWords: obj.topic_generic_words,
-
-      // Page fit
       pageFitKeywordMap: obj.page_fit_keyword_map,
       pageFitExactMatchBonus: obj.page_fit_exact_match_bonus,
       pageFitPartialMatchBase: obj.page_fit_partial_match_base,
       pageFitPostFallbackScore: obj.page_fit_post_fallback_score,
-
-      // Identity scoring
       identityScoreWeights: obj.identity_score_weights,
-
-      // Duplicate fingerprint length
       fingerprintWordCount: obj.fingerprint_word_count
     };
   } catch (e) {
@@ -116,12 +71,12 @@ function parsePageOverrides(extraNotes = '') {
   }
 }
 
-// ---------- Helper: merge overrides with defaults ----------
+// SAFE getParam - handles null/undefined first argument
 function getParam(overrides, key, defaultValue) {
+  if (overrides == null) return defaultValue;
   return overrides[key] !== undefined ? overrides[key] : defaultValue;
 }
 
-// ---------- 1. In-Memory Page Memory (unchanged) ----------
 function updatePageMemory(pageId, topic, post, qualityScore) {
   updateIntelligenceMemory(pageId, topic, post, qualityScore, null);
 }
@@ -130,7 +85,6 @@ function getPageMemory(pageId) {
   return getIntelligenceMemory(pageId);
 }
 
-// ---------- 2. Keyword Families (now overridable) ----------
 const DEFAULT_INTEREST_MAP = {
   cybersecurity: ['hacker', 'malware', 'ransomware', 'breach', 'security', 'phishing', 'cyberattack', 'vulnerability', 'patch', 'exploit'],
   football: ['premier league', 'arsenal', 'chelsea', 'man utd', 'goal', 'match', 'fifa', 'world cup', 'champions league', 'football'],
@@ -144,12 +98,10 @@ function pageFitScore(topic, pageProfile, postText = null, overrides = {}) {
   if (!pageProfile?.audienceInterest?.length) return 70;
   const topicLower = topic.toLowerCase();
   let maxScore = 0;
-
   const interestMap = overrides.pageFitKeywordMap || DEFAULT_INTEREST_MAP;
   const exactMatchBonus = getParam(overrides, 'pageFitExactMatchBonus', 40);
   const partialMatchBase = getParam(overrides, 'pageFitPartialMatchBase', 30);
   const postFallbackScore = getParam(overrides, 'pageFitPostFallbackScore', 50);
-
   for (const interest of pageProfile.audienceInterest) {
     const interestKey = interest.toLowerCase();
     const keywords = interestMap[interestKey] || [interestKey];
@@ -182,15 +134,12 @@ function pageFitScore(topic, pageProfile, postText = null, overrides = {}) {
   return Math.min(100, Math.max(40, maxScore || 40));
 }
 
-// ---------- 3. Realism Penalty (fully overridable) ----------
 function realismPenalty(post, overrides = {}) {
   let penalty = 0;
   const text = post.toLowerCase();
-
   const uniformSentencePenalty = getParam(overrides, 'realismUniformSentencePenalty', 15);
   const contractionSlangBonus = getParam(overrides, 'realismContractionSlangBonus', 10);
   const maxPenalty = getParam(overrides, 'realismMaxPenalty', 30);
-
   if (/^\w+\s+\w+\s+\w+\s+\w+\s+\w+$/.test(text)) penalty += 10;
   const sentences = post.split(/[.!?]+/).filter(s => s.trim().length > 0);
   if (sentences.length >= 3) {
@@ -205,14 +154,11 @@ function realismPenalty(post, overrides = {}) {
   return Math.min(maxPenalty, penalty);
 }
 
-// ---------- 4. AI Structure Detector (fully overridable) ----------
 function aiStructureScore(post, overrides = {}) {
   let score = 0;
   const text = post.trim();
-
   const startingWords = overrides.aiStructureStartingWords || ['in', 'this', 'the', 'a', 'an', 'when', 'if', 'as', 'for', 'with'];
   if (startingWords.some(word => new RegExp(`^${word}\\b`, 'i').test(text))) score += 10;
-
   const sentences = post.split(/[.!?]+/).filter(s => s.trim().length > 0);
   const uniformVarianceThreshold = getParam(overrides, 'aiStructureUniformVarianceThreshold', 3);
   const uniformPenalty = getParam(overrides, 'aiStructureUniformPenalty', 20);
@@ -220,7 +166,6 @@ function aiStructureScore(post, overrides = {}) {
   const noVarietyPenalty = getParam(overrides, 'aiStructureNoVarietyPenalty', 5);
   const endsWithPeriodPenalty = getParam(overrides, 'aiStructureEndsWithPeriodPenalty', 5);
   const maxScore = getParam(overrides, 'aiStructureMaxScore', 40);
-
   if (sentences.length >= 2) {
     const lengths = sentences.map(s => s.trim().split(/\s+/).length);
     const variance = Math.max(...lengths) - Math.min(...lengths);
@@ -234,29 +179,23 @@ function aiStructureScore(post, overrides = {}) {
   return Math.min(maxScore, score);
 }
 
-// ---------- 5. Topic Scoring (fully overridable) ----------
 function scoreTopic(topic, pageId = null, overrides = {}) {
   let score = 50;
   const lower = topic.toLowerCase();
-
   const specificityBonus = getParam(overrides, 'topicSpecificityBonus', 10);
   const trendBonus = getParam(overrides, 'topicTrendBonus', 8);
   const curiosityBonus = getParam(overrides, 'topicCuriosityBonus', 8);
   const genericPenalty = getParam(overrides, 'topicGenericPenalty', 20);
   const repeatPenalty = getParam(overrides, 'topicRepeatPenalty', 40);
-
   const trendWords = overrides.topicTrendWords || ['new', 'breaking', 'alert', 'update', '2025', 'latest', 'today', 'now'];
   const curiosityWords = overrides.topicCuriosityWords || ['why', 'how', 'what', 'inside', 'behind', 'truth', 'secret', 'mistake'];
   const genericWords = overrides.topicGenericWords || ['benefits', 'ways to', 'how to', 'tips', 'guide', 'overview', 'introduction'];
-
   if (/\d{4}/.test(topic)) score += specificityBonus;
   if (/[A-Z][a-z]+ [A-Z][a-z]+/.test(topic)) score += specificityBonus + 5;
   if (topic.split(/\s+/).length > 5) score += specificityBonus;
-
   for (const w of trendWords) if (lower.includes(w)) score += trendBonus;
   for (const w of curiosityWords) if (lower.includes(w)) score += curiosityBonus;
   for (const g of genericWords) if (lower.includes(g)) score -= genericPenalty;
-
   if (pageId) {
     const mem = getPageMemory(pageId);
     if (mem && mem.lastTopics && mem.lastTopics.length) {
@@ -275,10 +214,10 @@ function stringSimilarity(a, b) {
   return intersection.size / union.size;
 }
 
-// ---------- 6. Duplicate Detection (overridable) ----------
 function fingerprint(text, wordCount = 15) {
   return text.toLowerCase().replace(/[^\w\s]/g, '').split(/\s+/).slice(0, wordCount).join(' ');
 }
+
 function isDuplicate(newPost, recentPosts, threshold = 0.85, fingerprintWordCount = 15) {
   const newFp = fingerprint(newPost, fingerprintWordCount);
   for (const old of recentPosts) {
@@ -293,17 +232,14 @@ function isDuplicate(newPost, recentPosts, threshold = 0.85, fingerprintWordCoun
   return false;
 }
 
-// ---------- 7. Validation Functions with full overrides ----------
 function validatePost(post, overrides = {}) {
   const text = post?.trim();
   const minLen = getParam(overrides, 'minLength', 20);
   const maxLen = getParam(overrides, 'maxLength', 2200);
   const maxHashtags = getParam(overrides, 'maxHashtags', 3);
-
   if (!text) return { valid: false, reason: 'Empty', suggestion: `Write a post with at least ${minLen} characters.` };
   if (text.length < minLen) return { valid: false, reason: 'Too short', suggestion: `Expand your post to at least ${minLen} characters (about 4-5 words).` };
   if (text.length > maxLen) return { valid: false, reason: 'Too long', suggestion: `Shorten your post to under ${maxLen} characters (Facebook limit).` };
-
   let aiPhrases = overrides.humanAIPhrases || [
     { regex: /\bhave you ever\b/i, phrase: '"Have you ever..."' },
     { regex: /\blet's explore\b/i, phrase: '"Let\'s explore..."' },
@@ -329,7 +265,6 @@ function validatePost(post, overrides = {}) {
       return { valid: false, reason: `AI phrase: ${p.phrase}`, suggestion: `Remove "${p.phrase}" and start directly with your point. Be conversational.` };
     }
   }
-
   let jargon = overrides.forbiddenJargon || [
     { regex: /\bleverage\b/i, word: 'leverage' },
     { regex: /\bsynergy\b/i, word: 'synergy' },
@@ -340,7 +275,6 @@ function validatePost(post, overrides = {}) {
       return { valid: false, reason: `Jargon: "${c.word}"`, suggestion: `Replace "${c.word}" with simpler, everyday language.` };
     }
   }
-
   const hashtagCount = (text.match(/#\w+/g) || []).length;
   if (hashtagCount > maxHashtags) {
     return { valid: false, reason: `Too many hashtags (${hashtagCount} > ${maxHashtags})`, suggestion: `Use at most ${maxHashtags} hashtags on Facebook. Better yet, use none.` };
@@ -375,7 +309,6 @@ function validateTone(post, pageProfile, overrides = {}) {
   if (!pageProfile?.tone) return { matches: true, reason: '', suggestion: '' };
   const tone = pageProfile.tone.toLowerCase();
   const text = post.toLowerCase();
-
   const defaultToneMap = {
     funny: ['lol', 'hilarious', 'crazy', '😂', '🤣', 'silly', 'oops'],
     serious: ['critical', 'warning', 'danger', 'urgent', 'must'],
@@ -392,24 +325,20 @@ function validateTone(post, pageProfile, overrides = {}) {
   return { matches: true, reason: '', suggestion: '' };
 }
 
-// ---------- 8. Scoring Functions (fully overridable) ----------
 function viralityScore(post, overrides = {}) {
   let score = 0;
   const text = post.toLowerCase();
-
   const contrastWords = overrides.viralityContrastWords || ['but', 'however', 'yet', 'actually', 'surprisingly', 'unexpectedly'];
   const curiosityWords = overrides.viralityCuriosityWords || ['why', 'how', 'what', 'reason', 'because', 'inside', 'secret'];
   const questionBonus = getParam(overrides, 'viralityQuestionBonus', 15);
   const statBonus = getParam(overrides, 'viralityStatBonus', 20);
-  const customHookBonus = 15; // per custom hook word
-
   for (const w of contrastWords) if (text.includes(w)) { score += 25; break; }
   for (const w of curiosityWords) if (text.includes(w)) { score += 20; break; }
   if (/\?/.test(text) && !/like|share|comment/i.test(text)) score += questionBonus;
   if (/\d+%|\d+ million|\d+ thousand/.test(text)) score += statBonus;
   if (overrides.customHookWords) {
     for (const word of overrides.customHookWords) {
-      if (text.includes(word.toLowerCase())) score += customHookBonus;
+      if (text.includes(word.toLowerCase())) score += 15;
     }
   }
   return Math.min(100, score);
@@ -474,16 +403,17 @@ function finalPostScore(post, topic, pageProfile, pageId = null, overrides = {})
   const aiStruct = aiStructureScore(post, overrides);
   const realism = realismPenalty(post, overrides);
 
+  const weightsObj = overrides.weights || {};
   const weights = {
-    human: getParam(overrides.weights, 'human', 0.3),
-    virality: getParam(overrides.weights, 'virality', 0.25),
-    hook: getParam(overrides.weights, 'hook', 0.2),
-    readability: getParam(overrides.weights, 'readability', 0.15),
-    originality: getParam(overrides.weights, 'originality', 0.1),
-    pageFit: getParam(overrides.weights, 'pageFit', 0.15),
-    viralityExtra: getParam(overrides.weights, 'viralityExtra', 0.15),
-    realism: getParam(overrides.weights, 'realism', 1),   // subtraction
-    aiStructure: getParam(overrides.weights, 'aiStructure', 1) // subtraction
+    human: getParam(weightsObj, 'human', 0.3),
+    virality: getParam(weightsObj, 'virality', 0.25),
+    hook: getParam(weightsObj, 'hook', 0.2),
+    readability: getParam(weightsObj, 'readability', 0.15),
+    originality: getParam(weightsObj, 'originality', 0.1),
+    pageFit: getParam(weightsObj, 'pageFit', 0.15),
+    viralityExtra: getParam(weightsObj, 'viralityExtra', 0.15),
+    realism: getParam(weightsObj, 'realism', 1),
+    aiStructure: getParam(weightsObj, 'aiStructure', 1)
   };
 
   const rawScore = (human * weights.human +
@@ -496,7 +426,6 @@ function finalPostScore(post, topic, pageProfile, pageId = null, overrides = {})
   return { total: Math.round(finalScore), breakdown: { human, virality, hook, readability, originality, pageFit, aiStructure: aiStruct, realismPenalty: realism } };
 }
 
-// ---------- 9. Adaptive Regeneration (now uses overrides for suggestions) ----------
 async function adaptiveRegenerate(originalPost, failureReason, suggestion, generateFn, breakdown = null, pageProfile = null, pageId = null, dna = null, overrides = {}) {
   let detailedFeedback = `The following Facebook post was rejected because: ${failureReason}\n\nSuggested fix: ${suggestion}\n`;
   const threshold = getParam(overrides, 'threshold', 70);
@@ -536,7 +465,6 @@ async function adaptiveRegenerate(originalPost, failureReason, suggestion, gener
   return newPost;
 }
 
-// ---------- 10. Main Pipeline with full overrides ----------
 async function processContent({
   topic,
   post,
