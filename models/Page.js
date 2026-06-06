@@ -92,6 +92,11 @@ const PageSchema = new mongoose.Schema({
         default: true
     },
 
+   autoGenerationEnabled: {
+    type: Boolean,
+    default: false
+    },
+
     createdAt: {
         type: Date,
         default: Date.now
