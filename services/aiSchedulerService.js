@@ -375,8 +375,19 @@ async function createBrandedImage(topicId, pageId, rawMediaUrl, postText) {
   } catch (err) { console.error('createBrandedImage failed:', err.message); await monitor(topicId, pageId, null, 'BRANDED_MEDIA_FAILED', err.message); return null; }
 }
 
-// ========== CREATE MANUAL TOPIC WITH QA ==========
+// ========== CREATE MANUAL TOPIC WITH QA (with MAX_ACTIVE_TOPICS enforcement) ==========
 async function createManualTopicWithQA(pageId, topicName, startDate, endDate, times, postsPerDay, includeMedia, includeVideo) {
+  // FIX 3: Enforce maximum active topics for manual creation
+  const activeTopicsCount = await AiTopic.countDocuments({
+    pageId,
+    startDate: { $lte: new Date() },
+    endDate: { $gte: new Date() }
+  });
+  if (activeTopicsCount >= MAX_ACTIVE_TOPICS) {
+    await monitor(null, pageId, null, 'MANUAL_TOPIC_REJECTED_MAX_ACTIVE', `Already have ${activeTopicsCount} active topics (max ${MAX_ACTIVE_TOPICS})`);
+    return { success: false, reason: `Maximum active topics (${MAX_ACTIVE_TOPICS}) reached. Please end some topics first.` };
+  }
+
   const topicScore = qualityAssurance.scoreTopic(topicName, pageId);
   if (topicScore < 20) {
     await monitor(null, pageId, null, 'MANUAL_TOPIC_REJECTED', `Topic score too low (${topicScore}): ${topicName}`);
@@ -446,7 +457,6 @@ async function generatePostsForTopic(topicId, options = {}) {
   const { immediate = false } = options;
   const topic = await AiTopic.findById(topicId);
   if (!topic) throw new Error('Topic not found');
-  // Use the existing manual generator (works for both manual and auto topics)
   const result = await generatePostsForManualTopic(topicId, immediate);
   return result.created || [];
 }
@@ -462,11 +472,21 @@ async function createAiLog(pageId, postId, action, message) {
   await monitor(null, pageId, postId, action, message);
 }
 
-// ========== NEW AUTO-GENERATION LOGIC (1 pending post per topic) ==========
+// ========== AUTO-GENERATION LOGIC ==========
 
 // Generate the next missing post for a given topic (used by cron)
 async function generateNextPostForTopic(topic) {
-  // Check total posts limit
+  // FIX 2: Enforce global pending posts limit per page
+  const totalPendingForPage = await AiScheduledPost.countDocuments({
+    pageId: topic.pageId,
+    status: 'PENDING'
+  });
+  if (totalPendingForPage >= MAX_SCHEDULED_POSTS) {
+    await monitor(topic._id, topic.pageId, null, 'AUTO_SKIP_MAX_SCHEDULED', `Page already has ${totalPendingForPage} pending posts (max ${MAX_SCHEDULED_POSTS})`);
+    return null;
+  }
+
+  // Check total posts limit per topic
   const totalPosts = await AiScheduledPost.countDocuments({ topicId: topic._id });
   if (totalPosts >= MAX_POSTS_PER_TOPIC) {
     await monitor(topic._id, topic.pageId, null, 'AUTO_SKIP_MAX_POSTS', `Topic has reached max ${MAX_POSTS_PER_TOPIC} posts`);
@@ -554,6 +574,12 @@ async function ensureActiveTopicsForPage(pageId) {
   const autoTopics = activeTopics.filter(t => !t.manualTopic);
   if (autoTopics.length >= MIN_ACTIVE_TOPICS) return;
 
+  // FIX 1: Enforce maximum active topics (auto + manual) before creating a new auto topic
+  if (activeTopics.length >= MAX_ACTIVE_TOPICS) {
+    await monitor(null, pageId, null, 'AUTO_SKIP_MAX_ACTIVE_TOPICS', `Already have ${activeTopics.length} active topics (max ${MAX_ACTIVE_TOPICS})`);
+    return;
+  }
+
   // Create a new auto topic (with only one post initially)
   const profile = await PageProfile.findOne({ pageId });
   const audienceInterest = profile?.audienceInterest?.join(', ') || 'general audience';
@@ -591,9 +617,8 @@ async function ensureActiveTopicsForPage(pageId) {
   await generateNextPostForTopic(newTopic);
 }
 
-// ========== EXPORTS (preserving all original exports) ==========
+// ========== EXPORTS ==========
 module.exports = {
-  // Existing exports (inferred from original)
   renderPost,
   generateCinematicReel,
   qualityAssurance,
@@ -610,7 +635,6 @@ module.exports = {
   SmartPexelsImage,
   TextProviders,
   ImageProviders,
-  // Existing functions
   generateText,
   generateAndValidatePost,
   generateImage,
@@ -623,10 +647,9 @@ module.exports = {
   createBrandedImage,
   createManualTopicWithQA,
   generatePostsForManualTopic,
-  generatePostsForTopic,     // used by route /topic/:topicId/generate-now
+  generatePostsForTopic,
   deleteTopicPosts,
   createAiLog,
-  // NEW exports for auto-generation cron
   ensureActiveTopicsForPage,
   generateNextPostForTopic
 };
