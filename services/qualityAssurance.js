@@ -1,11 +1,35 @@
 // services/qualityAssurance.js - Fully parameterized with safe getParam
 const { identityScore, updatePageMemory: updateIntelligenceMemory, getPageMemory: getIntelligenceMemory } = require('./pageIntelligence');
 
+// ==================== SAFE PARSING OF extraNotes ====================
 function parsePageOverrides(extraNotes = '') {
-  const match = extraNotes.match(/qa:\s*\{([^}]+)\}/i);
-  if (!match) return {};
   try {
-    const obj = eval('({' + match[1] + '})');
+    const startIdx = extraNotes.search(/qa:\s*\{/i);
+    if (startIdx === -1) return {};
+
+    // Find matching closing brace (handles nested objects)
+    let braceCount = 0;
+    let objStart = extraNotes.indexOf('{', startIdx);
+    if (objStart === -1) return {};
+
+    let objEnd = objStart;
+    for (let i = objStart; i < extraNotes.length; i++) {
+      if (extraNotes[i] === '{') braceCount++;
+      else if (extraNotes[i] === '}') {
+        braceCount--;
+        if (braceCount === 0) {
+          objEnd = i;
+          break;
+        }
+      }
+    }
+    if (braceCount !== 0) return {}; // unmatched braces
+
+    const objStr = extraNotes.substring(objStart, objEnd + 1);
+    // Use Function constructor (safer than eval, still parses JS object literals)
+    const parser = new Function('return (' + objStr + ')');
+    const obj = parser();
+
     return {
       threshold: obj.threshold,
       topicScoreMin: obj.topic_score_min,
@@ -66,9 +90,28 @@ function parsePageOverrides(extraNotes = '') {
       fingerprintWordCount: obj.fingerprint_word_count
     };
   } catch (e) {
-    console.warn('Failed to parse qa overrides from extraNotes:', e);
+    console.warn('Failed to parse qa overrides from extraNotes:', e.message, '\nContent snippet:', extraNotes?.substring(0, 200));
     return {};
   }
+}
+
+// ==================== POST CLEANING (removes AI artifacts) ====================
+function cleanPostResponse(rawResponse) {
+  if (!rawResponse || typeof rawResponse !== 'string') return '';
+  let cleaned = rawResponse.trim();
+  // Remove common AI prefixes like "Here is the rewritten post:" and variations
+  cleaned = cleaned.replace(/^(here\s+is\s+(the\s+)?rewritten\s+post:?\s*)/i, '');
+  cleaned = cleaned.replace(/^(here's\s+(the\s+)?rewritten\s+post:?\s*)/i, '');
+  cleaned = cleaned.replace(/^(rewritten\s+post:?\s*)/i, '');
+  cleaned = cleaned.replace(/^(response:?\s*)/i, '');
+  // Remove surrounding quotes (single or double) that wrap the whole string
+  if ((cleaned.startsWith('"') && cleaned.endsWith('"')) ||
+      (cleaned.startsWith("'") && cleaned.endsWith("'"))) {
+    cleaned = cleaned.slice(1, -1);
+  }
+  // Remove extra whitespace and line breaks
+  cleaned = cleaned.replace(/\s+/g, ' ').trim();
+  return cleaned;
 }
 
 // SAFE getParam - handles null/undefined first argument
@@ -140,7 +183,7 @@ function realismPenalty(post, overrides = {}) {
   const uniformSentencePenalty = getParam(overrides, 'realismUniformSentencePenalty', 15);
   const contractionSlangBonus = getParam(overrides, 'realismContractionSlangBonus', 10);
   const maxPenalty = getParam(overrides, 'realismMaxPenalty', 30);
-  if (/^\w+\s+\w+\s+\w+\s+\w+\s+\w+$/.test(text)) penalty += 10;
+  // Removed the useless regex /^\w+\s+\w+\s+\w+\s+\w+\s+\w+$/
   const sentences = post.split(/[.!?]+/).filter(s => s.trim().length > 0);
   if (sentences.length >= 3) {
     const lengths = sentences.map(s => s.trim().split(/\s+/).length);
@@ -218,16 +261,15 @@ function fingerprint(text, wordCount = 15) {
   return text.toLowerCase().replace(/[^\w\s]/g, '').split(/\s+/).slice(0, wordCount).join(' ');
 }
 
+// FIXED duplicate detection using Jaccard similarity on words
 function isDuplicate(newPost, recentPosts, threshold = 0.85, fingerprintWordCount = 15) {
-  const newFp = fingerprint(newPost, fingerprintWordCount);
+  const newWords = new Set(newPost.toLowerCase().match(/\b\w+\b/g) || []);
   for (const old of recentPosts) {
-    const oldFp = fingerprint(old, fingerprintWordCount);
-    if (newFp === oldFp) return true;
-    const longer = newFp.length > oldFp.length ? newFp : oldFp;
-    const shorter = newFp.length > oldFp.length ? oldFp : newFp;
-    if (longer.length === 0) continue;
-    const sim = (longer.length - Math.abs(longer.length - shorter.length)) / longer.length;
-    if (sim >= threshold) return true;
+    const oldWords = new Set(old.toLowerCase().match(/\b\w+\b/g) || []);
+    const intersection = new Set([...newWords].filter(w => oldWords.has(w)));
+    const union = new Set([...newWords, ...oldWords]);
+    const similarity = intersection.size / union.size;
+    if (similarity >= threshold) return true;
   }
   return false;
 }
@@ -426,6 +468,7 @@ function finalPostScore(post, topic, pageProfile, pageId = null, overrides = {})
   return { total: Math.round(finalScore), breakdown: { human, virality, hook, readability, originality, pageFit, aiStructure: aiStruct, realismPenalty: realism } };
 }
 
+// FIXED adaptiveRegenerate with post cleaning
 async function adaptiveRegenerate(originalPost, failureReason, suggestion, generateFn, breakdown = null, pageProfile = null, pageId = null, dna = null, overrides = {}) {
   let detailedFeedback = `The following Facebook post was rejected because: ${failureReason}\n\nSuggested fix: ${suggestion}\n`;
   const threshold = getParam(overrides, 'threshold', 70);
@@ -450,6 +493,8 @@ async function adaptiveRegenerate(originalPost, failureReason, suggestion, gener
   }
   detailedFeedback += `\nRewrite the post to fix these issues. Keep the core message but make it punchy, natural, and max 3 sentences. Return only the rewritten post.\n\nOriginal: "${originalPost}"`;
   let newPost = await generateFn(detailedFeedback);
+  // Clean the AI response to remove artifacts
+  newPost = cleanPostResponse(newPost);
   const identityMin = getParam(overrides, 'identityScoreMin', 50);
   if (dna && pageId && newPost && identityMin > 0) {
     try {
@@ -457,6 +502,7 @@ async function adaptiveRegenerate(originalPost, failureReason, suggestion, gener
       if (idScore < identityMin) {
         detailedFeedback += `\n\nThis post doesn't sound like the page's identity (score ${idScore}/100). Make it more like: authority ${dna.authority}, humor ${dna.humor}, seriousness ${dna.seriousness}.`;
         newPost = await generateFn(detailedFeedback);
+        newPost = cleanPostResponse(newPost);
       }
     } catch (err) {
       console.warn('Identity scoring failed (ignored):', err.message);
@@ -483,17 +529,19 @@ async function processContent({
   const DUPLICATE_THRESHOLD = getParam(overrides, 'duplicateThreshold', 0.85);
   const FINGERPRINT_WORD_COUNT = getParam(overrides, 'fingerprintWordCount', 15);
 
+  // Clean the initial post as well (in case it already contains artifacts)
+  let currentPost = cleanPostResponse(post);
+
   let tScore = scoreTopic(topic, pageId, overrides);
   if (tScore < TOPIC_MIN) {
     return { pass: false, reason: `Topic score too low (${tScore})`, suggestion: 'Choose a more specific, trending, or curiosity-driven topic.' };
   }
 
-  let pFit = pageFitScore(topic, pageProfile, post, overrides);
+  let pFit = pageFitScore(topic, pageProfile, currentPost, overrides);
   if (pFit < PAGE_FIT_MIN) {
     return { pass: false, reason: `Page fit too low (${pFit})`, suggestion: `Make the post more relevant to your audience interests: ${pageProfile?.audienceInterest?.join(', ') || 'unknown'}.` };
   }
 
-  let currentPost = post;
   let failures = [];
 
   for (let attempt = 0; attempt <= MAX_REGENS; attempt++) {
@@ -589,5 +637,6 @@ module.exports = {
   aiStructureScore,
   finalPostScore,
   scoreTopic,
-  parsePageOverrides
+  parsePageOverrides,
+  cleanPostResponse   // exported for external use if needed
 };
