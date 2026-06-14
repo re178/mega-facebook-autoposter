@@ -2,9 +2,42 @@ const axios = require('axios');
 const OpenAI = require('openai');
 
 /* =========================================================
+   DEBUG LOGGER (Step 1)
+========================================================= */
+function logProviderDebug(provider, data) {
+  // WARNING: Do NOT log API keys or tokens. Data is for diagnostics only.
+  console.log(`
+=================================================
+PROVIDER DEBUG: ${provider}
+=================================================
+${JSON.stringify(data, null, 2)}
+=================================================
+`);
+}
+
+/* =========================================================
+   ENVIRONMENT VERIFICATION (Step 4)
+========================================================= */
+function verifyEnvironment() {
+  console.log('===== PROVIDER CONFIG =====');
+  const envStatus = {
+    OPENAI: !!process.env.OPENAI_API_KEY,
+    OPENAI_LEN: process.env.OPENAI_API_KEY?.length,
+    GROQ: !!process.env.GROQ_API_KEY,
+    GROQ_LEN: process.env.GROQ_API_KEY?.length,
+    GEMINI: !!process.env.GEMINI_API_KEY,
+    GEMINI_LEN: process.env.GEMINI_API_KEY?.length,
+    OPENROUTER: !!process.env.OPENROUTER_API_KEY,
+    OPENROUTER_LEN: process.env.OPENROUTER_API_KEY?.length,
+    CLOUDFLARE_TOKEN: !!process.env.CLOUDFLARE_API_TOKEN,
+    CLOUDFLARE_ACCOUNT: process.env.CLOUDFLARE_ACCOUNT_ID
+  };
+  console.table(envStatus);
+}
+
+/* =========================================================
    PROVIDER STATE & CONCURRENCY CONTROL
 ========================================================= */
-
 const providerConfig = {
   Groq:        { maxConcurrent: 5, cooldownMs: 60000, failureThreshold: 5, circuitBreakerMs: 300000 },
   Gemini:      { maxConcurrent: 3, cooldownMs: 60000, failureThreshold: 5, circuitBreakerMs: 300000 },
@@ -22,15 +55,24 @@ for (const name of Object.keys(providerConfig)) {
   };
 }
 
+// Health tracking (Step 5)
+const providerHealth = {
+  Groq: {},
+  Gemini: {},
+  OpenRouter: {},
+  Cloudflare: {},
+  OpenAI: {}
+};
+
 const GLOBAL_MAX_CONCURRENT = 20;
 const MAX_QUEUE_SIZE = 500;
 let globalActive = 0;
-const requestQueue = [];             // each item: { resolve, reject, prompt }
+const requestQueue = []; // each item: { resolve, reject, prompt }
 
 // Helper to run a queued request (after being taken from queue)
 async function runQueuedRequest(item) {
   const start = Date.now();
-  console.log(`[QUEUE] Starting request (queue length left: ${requestQueue.length}, active: ${globalActive})`);
+  console.log(`[QUEUE] Starting request (queue left: ${requestQueue.length}, active: ${globalActive})`);
   try {
     const result = await runGenerateSmart(item.prompt);
     console.log(`[QUEUE] Request succeeded in ${Date.now() - start}ms`);
@@ -41,11 +83,11 @@ async function runQueuedRequest(item) {
   } finally {
     globalActive--;
     console.log(`[QUEUE] Request finished, active now: ${globalActive}`);
-    processQueue();  // trigger next request
+    processQueue(); // trigger next request
   }
 }
 
-// Safe queue processor – only one call active at a time via the event loop
+// Fixed queue processor (no race condition)
 function processQueue() {
   if (globalActive >= GLOBAL_MAX_CONCURRENT) {
     console.log(`[QUEUE] Skip processing, active ${globalActive} >= max ${GLOBAL_MAX_CONCURRENT}`);
@@ -58,26 +100,25 @@ function processQueue() {
 
   const next = requestQueue.shift();
   globalActive++;
-  console.log(`[QUEUE] Dequeued request, active now: ${globalActive}, queue left: ${requestQueue.length}`);
+  console.log(`[QUEUE] Dequeued request, active: ${globalActive}, queue left: ${requestQueue.length}`);
   // Fire and forget – runQueuedRequest handles finally and recursion
   runQueuedRequest(next);
 }
 
-// Always queue – no direct execution (fixes race condition)
 async function runWithQueue(prompt) {
   if (requestQueue.length >= MAX_QUEUE_SIZE) {
     console.error(`[QUEUE] Rejected: queue full (${MAX_QUEUE_SIZE})`);
     throw new Error(`Request queue full (${MAX_QUEUE_SIZE}). Try again later.`);
   }
 
-  console.log(`[QUEUE] Enqueuing new request, current queue size: ${requestQueue.length}`);
+  console.log(`[QUEUE] Enqueuing request, queue size: ${requestQueue.length}`);
   return new Promise((resolve, reject) => {
     requestQueue.push({ resolve, reject, prompt });
-    processQueue();  // try to start immediately if possible
+    processQueue();
   });
 }
 
-// Enhanced rate‑limit detection (fixes Bug 7)
+// Rate‑limit detection
 function isRateLimitError(err) {
   if (!err) return false;
   const status = err.response?.status;
@@ -115,6 +156,15 @@ function updateProviderState(providerName, success, isRateLimit = false) {
       console.log(`[STATE] ${providerName} circuit breaker open until ${new Date(state.cooldownUntil).toISOString()}`);
     }
   }
+
+  // Update health record (Step 5)
+  providerHealth[providerName] = {
+    lastAttempt: new Date().toISOString(),
+    lastSuccess: success ? new Date().toISOString() : (providerHealth[providerName]?.lastSuccess || null),
+    lastFailure: !success ? new Date().toISOString() : (providerHealth[providerName]?.lastFailure || null),
+    failures: state.failures,
+    activeRequests: state.activeRequests
+  };
 }
 
 function isProviderAvailable(providerName) {
@@ -160,9 +210,8 @@ async function callProviderWithConcurrency(Provider, prompt) {
 }
 
 /* =========================================================
-   ORIGINAL HELPERS (UNCHANGED)
+   ORIGINAL HELPERS
 ========================================================= */
-
 function safeText(text) {
   if (!text || typeof text !== 'string') return '';
   return text.trim();
@@ -190,72 +239,125 @@ function analyzePrompt(prompt) {
 }
 
 /* =========================================================
-   PROVIDER CLASSES (UPDATED INTERNALLY)
+   PROVIDER CLASSES (with full logging, Steps 2 & 3)
 ========================================================= */
 
 class OpenAIText {
   static get name() { return 'OpenAI'; }
   static async generate(prompt) {
-    const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-    const res = await client.responses.create({
-      model: 'gpt-4.1-mini',
-      input: [
-        { role: 'system', content: isScenePlanPrompt(prompt) ? 'Output ONLY valid JSON.' : 'You write human-like Facebook posts.' },
-        { role: 'user', content: prompt }
-      ],
-      max_tokens: isScenePlanPrompt(prompt) ? 800 : 200
+    logProviderDebug('OpenAI Request', {
+      endpoint: 'https://api.openai.com/v1/responses',
+      keyExists: !!process.env.OPENAI_API_KEY,
+      keyLength: process.env.OPENAI_API_KEY?.length,
+      promptLength: prompt.length,
+      timestamp: new Date().toISOString()
     });
-    // FIX BUG 1: correct OpenAI response extraction
-    const text = res.output_text || res.output?.[0]?.content?.[0]?.text || '';
-    if (!text) {
-      console.warn('[OpenAI] Empty response – falling back to safeText');
+    try {
+      const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+      const res = await client.responses.create({
+        model: 'gpt-4.1-mini',
+        input: [
+          { role: 'system', content: isScenePlanPrompt(prompt) ? 'Output ONLY valid JSON.' : 'You write human-like Facebook posts.' },
+          { role: 'user', content: prompt }
+        ],
+        max_tokens: isScenePlanPrompt(prompt) ? 800 : 200
+      });
+      const text = res.output_text || res.output?.[0]?.content?.[0]?.text || '';
+      if (!text) {
+        console.warn('[OpenAI] Empty response – falling back to safeText');
+      }
+      return safeText(text);
+    } catch (err) {
+      logProviderDebug('OpenAI Error', {
+        status: err.response?.status,
+        statusText: err.response?.statusText,
+        data: err.response?.data,
+        headers: err.response?.headers,
+        message: err.message
+      });
+      throw err;
     }
-    return safeText(text);
   }
 }
 
 class GroqText {
   static get name() { return 'Groq'; }
   static async generate(prompt) {
-    // FIX BUG 2: use more stable / higher quality model
     const model = 'llama-3.3-70b-versatile';
-    console.log(`[Groq] Using model: ${model}`);
-    const res = await axios.post(
-      'https://api.groq.com/openai/v1/chat/completions',
-      {
-        model: model,
-        messages: [
-          { role: 'system', content: isScenePlanPrompt(prompt) ? 'Return ONLY valid JSON.' : 'You are a fast assistant.' },
-          { role: 'user', content: prompt }
-        ],
-        max_tokens: isScenePlanPrompt(prompt) ? 800 : 200
-      },
-      {
-        headers: { Authorization: `Bearer ${process.env.GROQ_API_KEY}`, 'Content-Type': 'application/json' },
-        timeout: 15000
-      }
-    );
-    return safeText(res.data?.choices?.[0]?.message?.content);
+    logProviderDebug('Groq Request', {
+      endpoint: 'https://api.groq.com/openai/v1/chat/completions',
+      model,
+      keyExists: !!process.env.GROQ_API_KEY,
+      keyLength: process.env.GROQ_API_KEY?.length,
+      promptLength: prompt.length,
+      timestamp: new Date().toISOString()
+    });
+    try {
+      const res = await axios.post(
+        'https://api.groq.com/openai/v1/chat/completions',
+        {
+          model: model,
+          messages: [
+            { role: 'system', content: isScenePlanPrompt(prompt) ? 'Return ONLY valid JSON.' : 'You are a fast assistant.' },
+            { role: 'user', content: prompt }
+          ],
+          max_tokens: isScenePlanPrompt(prompt) ? 800 : 200
+        },
+        {
+          headers: { Authorization: `Bearer ${process.env.GROQ_API_KEY}`, 'Content-Type': 'application/json' },
+          timeout: 15000
+        }
+      );
+      return safeText(res.data?.choices?.[0]?.message?.content);
+    } catch (err) {
+      logProviderDebug('Groq Error', {
+        status: err.response?.status,
+        statusText: err.response?.statusText,
+        data: err.response?.data,
+        headers: err.response?.headers,
+        message: err.message
+      });
+      throw err;
+    }
   }
 }
 
 class GeminiText {
   static get name() { return 'Gemini'; }
   static async generate(prompt) {
-    const res = await axios.post(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
-      { contents: [{ parts: [{ text: prompt }] }] },
-      { timeout: 20000 }
-    );
-    // FIX BUG 3: explicit empty response check
-    if (!res.data?.candidates?.length) {
-      throw new Error('Gemini returned empty response (no candidates)');
+    const model = 'gemini-2.0-flash';  // Fixed from 1.5 to 2.0 (Step 8)
+    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GEMINI_API_KEY}`;
+    logProviderDebug('Gemini Request', {
+      endpoint,
+      keyExists: !!process.env.GEMINI_API_KEY,
+      keyLength: process.env.GEMINI_API_KEY?.length,
+      promptLength: prompt.length,
+      timestamp: new Date().toISOString()
+    });
+    try {
+      const res = await axios.post(
+        endpoint,
+        { contents: [{ parts: [{ text: prompt }] }] },
+        { timeout: 20000 }
+      );
+      if (!res.data?.candidates?.length) {
+        throw new Error('Gemini returned empty response (no candidates)');
+      }
+      const text = res.data.candidates[0]?.content?.parts?.[0]?.text;
+      if (!text) {
+        throw new Error('Gemini returned empty text candidate');
+      }
+      return safeText(text);
+    } catch (err) {
+      logProviderDebug('Gemini Error', {
+        status: err.response?.status,
+        statusText: err.response?.statusText,
+        data: err.response?.data,
+        headers: err.response?.headers,
+        message: err.message
+      });
+      throw err;
     }
-    const text = res.data.candidates[0]?.content?.parts?.[0]?.text;
-    if (!text) {
-      throw new Error('Gemini returned empty text candidate');
-    }
-    return safeText(text);
   }
 }
 
@@ -263,53 +365,89 @@ class CloudflareText {
   static get name() { return 'Cloudflare'; }
   static async generate(prompt) {
     const isPlan = isScenePlanPrompt(prompt);
-    // FIX BUG 4: use stable model name
-    const model = '@cf/meta/llama-3.1-8b-instruct';
-    console.log(`[Cloudflare] Using model: ${model}`);
-    const res = await axios.post(
-      `https://api.cloudflare.com/client/v4/accounts/${process.env.CLOUDFLARE_ACCOUNT_ID}/ai/run/${model}`,
-      {
-        messages: [
-          { role: 'system', content: isPlan ? 'Return ONLY JSON.' : 'Write clean Facebook posts only.' },
-          { role: 'user', content: prompt }
-        ],
-        max_tokens: isPlan ? 800 : 200
-      },
-      {
-        headers: { Authorization: `Bearer ${process.env.CLOUDFLARE_API_TOKEN}`, 'Content-Type': 'application/json' },
-        timeout: 20000
-      }
-    );
-    return safeText(res.data?.result?.response);
+    // Updated to fp8 variant (Step 9)
+    const model = '@cf/meta/llama-3.1-8b-instruct-fp8';
+    const endpoint = `https://api.cloudflare.com/client/v4/accounts/${process.env.CLOUDFLARE_ACCOUNT_ID}/ai/run/${model}`;
+    logProviderDebug('Cloudflare Request', {
+      endpoint,
+      model,
+      tokenExists: !!process.env.CLOUDFLARE_API_TOKEN,
+      accountId: process.env.CLOUDFLARE_ACCOUNT_ID,
+      promptLength: prompt.length,
+      timestamp: new Date().toISOString()
+    });
+    try {
+      const res = await axios.post(
+        endpoint,
+        {
+          messages: [
+            { role: 'system', content: isPlan ? 'Return ONLY JSON.' : 'Write clean Facebook posts only.' },
+            { role: 'user', content: prompt }
+          ],
+          max_tokens: isPlan ? 800 : 200
+        },
+        {
+          headers: { Authorization: `Bearer ${process.env.CLOUDFLARE_API_TOKEN}`, 'Content-Type': 'application/json' },
+          timeout: 20000
+        }
+      );
+      return safeText(res.data?.result?.response);
+    } catch (err) {
+      logProviderDebug('Cloudflare Error', {
+        status: err.response?.status,
+        statusText: err.response?.statusText,
+        data: err.response?.data,
+        headers: err.response?.headers,
+        message: err.message
+      });
+      throw err;
+    }
   }
 }
 
 class OpenRouterText {
   static get name() { return 'OpenRouter'; }
   static async generate(prompt) {
-    const res = await axios.post(
-      'https://openrouter.ai/api/v1/chat/completions',
-      {
-        model: 'meta-llama/llama-3.1-8b-instruct',
-        messages: [
-          { role: 'system', content: isScenePlanPrompt(prompt) ? 'Return ONLY JSON.' : 'You are a helpful assistant.' },
-          { role: 'user', content: prompt }
-        ],
-        max_tokens: isScenePlanPrompt(prompt) ? 800 : 200
-      },
-      {
-        headers: { Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`, 'Content-Type': 'application/json' },
-        timeout: 15000
-      }
-    );
-    return safeText(res.data?.choices?.[0]?.message?.content);
+    logProviderDebug('OpenRouter Request', {
+      endpoint: 'https://openrouter.ai/api/v1/chat/completions',
+      keyExists: !!process.env.OPENROUTER_API_KEY,
+      keyLength: process.env.OPENROUTER_API_KEY?.length,
+      promptLength: prompt.length,
+      timestamp: new Date().toISOString()
+    });
+    try {
+      const res = await axios.post(
+        'https://openrouter.ai/api/v1/chat/completions',
+        {
+          model: 'meta-llama/llama-3.1-8b-instruct',
+          messages: [
+            { role: 'system', content: isScenePlanPrompt(prompt) ? 'Return ONLY JSON.' : 'You are a helpful assistant.' },
+            { role: 'user', content: prompt }
+          ],
+          max_tokens: isScenePlanPrompt(prompt) ? 800 : 200
+        },
+        {
+          headers: { Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`, 'Content-Type': 'application/json' },
+          timeout: 15000
+        }
+      );
+      return safeText(res.data?.choices?.[0]?.message?.content);
+    } catch (err) {
+      logProviderDebug('OpenRouter Error', {
+        status: err.response?.status,
+        statusText: err.response?.statusText,
+        data: err.response?.data,
+        headers: err.response?.headers,
+        message: err.message
+      });
+      throw err;
+    }
   }
 }
 
 /* =========================================================
-   ROUTER (ORDERING LOGIC FIXED)
+   ROUTER (ORDERING LOGIC)
 ========================================================= */
-
 const allProviders = [
   GroqText,
   GeminiText,
@@ -320,10 +458,7 @@ const allProviders = [
 
 function getOrderedProviders(prompt) {
   const analysis = analyzePrompt(prompt);
-  // FIX BUG 6: clear, duplicate-free ordering
   let ordered = [...allProviders];
-  
-  // Remove Groq temporarily if we want to reorder it to front
   if (analysis.isFastNeeded) {
     ordered = ordered.filter(p => p.name !== GroqText.name);
     ordered.unshift(GroqText);
@@ -332,8 +467,7 @@ function getOrderedProviders(prompt) {
     ordered = ordered.filter(p => p.name !== CloudflareText.name);
     ordered.unshift(CloudflareText);
   }
-  
-  // Final dedupe (safe, though our logic already avoids duplicates)
+  // Deduplicate
   const unique = [];
   const seen = new Set();
   for (const p of ordered) {
@@ -366,19 +500,85 @@ async function runGenerateSmart(prompt) {
 }
 
 /* =========================================================
-   PUBLIC API (IDENTICAL SIGNATURE)
+   PUBLIC API
 ========================================================= */
-
 async function generateSmart(prompt) {
   console.log(`[PUBLIC] generateSmart called, prompt length: ${prompt.length}`);
   return runWithQueue(prompt);
 }
 
+/* =========================================================
+   HEALTH MONITORING (Step 5) – with safe interval cleanup
+========================================================= */
+function printHealth() {
+  console.log('\n--- Provider Health (last known) ---');
+  console.table(providerHealth);
+}
+
+// Store interval ID to allow cleanup (avoids memory leaks on hot reload)
+let healthIntervalId = null;
+function startHealthMonitoring(intervalMs = 60000) {
+  if (healthIntervalId) clearInterval(healthIntervalId);
+  healthIntervalId = setInterval(printHealth, intervalMs);
+  // Ensure interval doesn't keep process alive if nothing else is running (Node.js event loop)
+  healthIntervalId.unref();
+}
+function stopHealthMonitoring() {
+  if (healthIntervalId) {
+    clearInterval(healthIntervalId);
+    healthIntervalId = null;
+  }
+}
+
+/* =========================================================
+   PROVIDER TEST FUNCTION (Step 10 – can be used in route)
+========================================================= */
+async function testAllProviders() {
+  const testPrompt = 'Reply with exactly "OK" and nothing else.';
+  const results = {};
+  const providers = [
+    { name: 'OpenAI', class: OpenAIText },
+    { name: 'Groq', class: GroqText },
+    { name: 'Gemini', class: GeminiText },
+    { name: 'OpenRouter', class: OpenRouterText },
+    { name: 'Cloudflare', class: CloudflareText }
+  ];
+  for (const provider of providers) {
+    try {
+      const result = await provider.class.generate(testPrompt);
+      results[provider.name] = (result === 'OK') ? 'PASS' : `FAIL (unexpected: "${result}")`;
+    } catch (err) {
+      results[provider.name] = `FAIL (${err.response?.status || err.message})`;
+    }
+  }
+  console.table(results);
+  return results;
+}
+
+/* =========================================================
+   INITIALIZATION (Runs when module loads)
+========================================================= */
+verifyEnvironment();
+startHealthMonitoring();  // starts logging every minute
+
+// Optional: allow graceful shutdown (for testing environments)
+process.on('SIGINT', () => {
+  console.log('Stopping health monitoring...');
+  stopHealthMonitoring();
+  process.exit();
+});
+
+/* =========================================================
+   EXPORTS
+========================================================= */
 module.exports = {
   OpenAIText,
   GroqText,
   GeminiText,
   CloudflareText,
   OpenRouterText,
-  generateSmart
+  generateSmart,
+  testAllProviders,       // expose for manual/route testing
+  stopHealthMonitoring,   // in case you need to stop it later
+  providerHealth          // optionally inspect current health
 };
