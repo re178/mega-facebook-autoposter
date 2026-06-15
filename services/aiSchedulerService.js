@@ -100,20 +100,21 @@ function ensureFiveAngles(angles) {
 
 // Extract critical rules from extraNotes
 function extractCriticalRules(extraNotes) {
-  if (!extraNotes) return '';
-  const match = extraNotes.match(/Critical rules:\s*\n([\s\S]*?)(?=\n\s*\n|\n\[|$)/i);
+  if (!extraNotes || typeof extraNotes !== 'string') return '';
+  let cleaned = extraNotes.replace(/pi:\s*\{[\s\S]*?\}/gi, '');
+  cleaned = cleaned.replace(/qa:\s*\{[\s\S]*?\}/gi, '');
+  const match = cleaned.match(/CRITICAL RULES:\s*\n([\s\S]*?)(?=\n\s*\n|\n\[|$)/i);
   if (!match) return '';
   let rules = match[1].trim();
-  rules = rules.replace(/^\[.*$/gm, '').trim();
+  rules = rules.replace(/\[.*?\]/g, '').trim();
   return rules;
 }
 
-// ========== ENHANCED PROMPT BUILDER with PI integration ==========
+// ========== IMPROVED PROMPT BUILDER with PI/QA integration ==========
 async function buildPrompt({ topic, angle, pageId, textSeed, qualityFix = null, dna = null, topHeadline = null, contentType = null }) {
   const profile = await PageProfile.findOne({ pageId });
   let extraNotes = profile?.extraNotes || '';
 
-  // ----- Safely parse pi: and qa: overrides (non‑breaking) -----
   let piOverrides = {}, qaOverrides = {};
   try {
     piOverrides = pageIntelligence.parsePageIntelligenceOverrides(extraNotes);
@@ -122,7 +123,6 @@ async function buildPrompt({ topic, angle, pageId, textSeed, qualityFix = null, 
     console.warn('Override parsing failed, using defaults', e.message);
   }
 
-  // ----- Extract CRITICAL RULES (basic text, ignoring pi/qa blocks) -----
   let criticalRules = extractCriticalRules(extraNotes);
   if (!criticalRules) {
     criticalRules = `- Maximum 2 sentences total.
@@ -133,14 +133,12 @@ async function buildPrompt({ topic, angle, pageId, textSeed, qualityFix = null, 
 - Keep language punchy and conversational.`;
   }
 
-  // ----- Forbidden openings from qa: block (or fallback) -----
   const avoidPhrases = Array.isArray(qaOverrides.avoidPhrases) ? qaOverrides.avoidPhrases : [
     "Did you know", "Have you ever", "Are you ready", "I've been thinking",
     "Sometimes I", "Here is the rewritten post", "I was thinking", "Today I felt",
     "In today's world", "Let's explore", "It's important to"
   ];
 
-  // ----- Primary topics from pi: block or profile -----
   const primaryTopics = piOverrides.primaryTopics || profile?.audienceInterest || [];
   const voiceStyle = piOverrides.voiceStyle || profile?.voice || 'conversational';
   const authority = piOverrides.authority || 50;
@@ -150,7 +148,6 @@ async function buildPrompt({ topic, angle, pageId, textSeed, qualityFix = null, 
   const seedText = textSeed ? ` Reference previous text: "${textSeed}"` : '';
   const qualityFixText = qualityFix ? `\n\nIMPORTANT FIXES NEEDED: ${qualityFix}\nRewrite the post fixing these issues while keeping the same core message.` : '';
 
-  // ----- PI guidance (already existed, but now includes overrides) -----
   let piGuidance = '';
   if (dna) {
     piGuidance = `\nPage Personality:
@@ -163,7 +160,6 @@ async function buildPrompt({ topic, angle, pageId, textSeed, qualityFix = null, 
 - Primary topics: ${dna.primaryTopics.join(', ')}
 `;
   } else {
-    // Fallback using overrides
     piGuidance = `\nPage Personality:
 - Authority: ${authority}/100
 - Humor: ${humor}/100
@@ -179,8 +175,7 @@ async function buildPrompt({ topic, angle, pageId, textSeed, qualityFix = null, 
     piGuidance += `\nSuggested content type: ${contentType} (e.g., warning, analysis, myth‑busting). Write accordingly.\n`;
   }
 
-  // ----- Build the final prompt with hard constraints -----
-  const prompt = `
+  return `
 YOU ARE A SOCIAL MEDIA POST WRITER. FOLLOW THESE RULES EXACTLY – THEY OVERRIDE ALL OTHER INSTRUCTIONS.
 
 CRITICAL RULES:
@@ -206,8 +201,8 @@ ${qualityFixText}
 
 Return ONLY the post text, with no extra quotes, explanations, or markdown.
 `;
-  return prompt;
 }
+
 // ========== TEXT GENERATION with PI context ==========
 async function generateText(topic, angle, pageId, textSeed = null, qualityFix = null, dna = null, topHeadline = null, contentType = null) {
   try {
@@ -273,15 +268,27 @@ async function generateImage(topic, pageId, textSeed = null) {
   return null;
 }
 
-// ========== CUSTOM ANGLES ==========
+// ========== IMPROVED CUSTOM ANGLES (with repetition avoidance) ==========
 async function generateCustomAngles(topicName, pageId) {
   const profile = await PageProfile.findOne({ pageId });
-  const audienceInterest = profile?.audienceInterest?.join(', ') || 'general audience';
-  const prompt = `Generate exactly 5 unique "angles" for Facebook posts about the topic: "${topicName}". The audience is interested in ${audienceInterest}.
-Each angle should be a very short phrase (1-3 words) that suggests a different perspective or hook. 
-Examples for a tech topic: "Threat alert", "Defense win", "Attacker tactic", "Tool update", "Takeaway".
-For a finance topic: "Shocking stat", "Savings hack", "Expert view", "My mistake", "Daily win".
+  const audienceInterest = profile?.audienceInterest || [];
+  const extraNotes = profile?.extraNotes || '';
+  const piOverrides = pageIntelligence.parsePageIntelligenceOverrides(extraNotes);
+  const primaryTopics = piOverrides.primaryTopics || audienceInterest;
+
+  const recentTopics = await AiTopic.find({ pageId, manualTopic: true })
+    .sort({ createdAt: -1 })
+    .limit(3)
+    .lean();
+  const recentAngles = recentTopics.flatMap(t => t.customAngles || []).slice(0, 9);
+
+  const prompt = `Generate exactly 5 unique "angles" for Facebook posts about the topic: "${topicName}".
+The page's primary topics are: ${primaryTopics.join(', ')}.
+Avoid these recently used angles if possible: ${recentAngles.join(', ') || 'none'}.
+Each angle must be a very short phrase (1-3 words) that suggests a different perspective or hook.
+Examples for football: "Record breaker", "Transfer shock", "Derby fire", "Legend's last dance", "Youth revolution".
 Return only the 5 angles as a comma-separated list, no extra text.`;
+
   for (const provider of TextProviders) {
     try {
       const response = await provider.generate(prompt);
@@ -296,13 +303,14 @@ Return only the 5 angles as a comma-separated list, no extra text.`;
   return [...DEFAULT_ANGLES];
 }
 
-// ========== TOPIC NAME GENERATION ==========
-async function generateShortTopicName(audienceInterest, rawHeadline = null) {
+// ========== IMPROVED TOPIC NAME GENERATION ==========
+async function generateShortTopicName(audienceInterest, rawHeadline = null, pageId = null) {
   let prompt;
+  const interestSample = Array.isArray(audienceInterest) ? audienceInterest.slice(0, 3).join(', ') : audienceInterest;
   if (rawHeadline) {
-    prompt = `Convert this news headline into a very short Facebook post topic (5-10 words maximum) about ${audienceInterest}. Return only the topic phrase, no extra text. Headline: "${rawHeadline}"`;
+    prompt = `Convert this news headline into a very short Facebook post topic (5-10 words maximum) about ${interestSample}. Return only the topic phrase, no extra text. Headline: "${rawHeadline}"`;
   } else {
-    prompt = `Generate a very short Facebook post topic (5-10 words maximum) about ${audienceInterest}. Return only the topic phrase, no extra text. The topic should be timely and interesting.`;
+    prompt = `Generate a very short Facebook post topic (5-10 words maximum) about ${interestSample}. Return only the topic phrase, no extra text. The topic should be timely and interesting.`;
   }
   for (const provider of TextProviders) {
     try {
@@ -318,24 +326,42 @@ async function generateShortTopicName(audienceInterest, rawHeadline = null) {
   return null;
 }
 
-// ========== TRENDING HEADLINE ==========
-async function fetchTrendingHeadline(keyword) {
+// ========== IMPROVED TRENDING HEADLINE (random interest + relevance filter) ==========
+async function fetchTrendingHeadline(pageId) {
+  const profile = await PageProfile.findOne({ pageId });
+  const interests = profile?.audienceInterest || [];
+  if (interests.length === 0) return null;
+
+  const randomInterest = interests[Math.floor(Math.random() * interests.length)];
+  const keyword = randomInterest.split(/\s+/)[0];
+
   const gnewsKey = process.env.GNEWS_API_KEY;
   if (gnewsKey) {
     try {
       const url = `https://gnews.io/api/v4/search?q=${encodeURIComponent(keyword)}&lang=en&country=ke&max=1&token=${gnewsKey}`;
       const response = await fetch(url);
       const data = await response.json();
-      if (data.articles && data.articles.length > 0) return data.articles[0].title;
+      if (data.articles && data.articles.length > 0) {
+        const title = data.articles[0].title;
+        const lowerTitle = title.toLowerCase();
+        const hasRelevance = interests.some(interest => lowerTitle.includes(interest.toLowerCase()));
+        if (hasRelevance) return title;
+      }
     } catch (err) { console.error('GNews fetch failed:', err.message); }
   }
+
   const newsApiKey = process.env.NEWS_API_KEY;
   if (newsApiKey) {
     try {
       const url = `https://newsapi.org/v2/everything?q=${encodeURIComponent(keyword)}&sortBy=popularity&pageSize=1&apiKey=${newsApiKey}`;
       const response = await fetch(url);
       const data = await response.json();
-      if (data.articles && data.articles.length > 0) return data.articles[0].title;
+      if (data.articles && data.articles.length > 0) {
+        const title = data.articles[0].title;
+        const lowerTitle = title.toLowerCase();
+        const hasRelevance = interests.some(interest => lowerTitle.includes(interest.toLowerCase()));
+        if (hasRelevance) return title;
+      }
     } catch (err) { console.error('NewsAPI fetch failed:', err.message); }
   }
   return null;
@@ -420,9 +446,16 @@ async function createBrandedImage(topicId, pageId, rawMediaUrl, postText) {
   } catch (err) { console.error('createBrandedImage failed:', err.message); await monitor(topicId, pageId, null, 'BRANDED_MEDIA_FAILED', err.message); return null; }
 }
 
-// ========== CREATE MANUAL TOPIC WITH QA (with MAX_ACTIVE_TOPICS enforcement) ==========
+// ========== HELPER: EVALUATE TOPIC QUALITY ==========
+async function evaluateTopicQuality(topicName, pageId) {
+  const profile = await PageProfile.findOne({ pageId });
+  const topicScore = qualityAssurance.scoreTopic(topicName, pageId);
+  const pageFit = qualityAssurance.pageFitScore(topicName, profile, null, {});
+  return { topicScore, pageFit, combined: (topicScore + pageFit) / 2 };
+}
+
+// ========== ENHANCED MANUAL TOPIC CREATION ==========
 async function createManualTopicWithQA(pageId, topicName, startDate, endDate, times, postsPerDay, includeMedia, includeVideo) {
-  // FIX 3: Enforce maximum active topics for manual creation
   const activeTopicsCount = await AiTopic.countDocuments({
     pageId,
     startDate: { $lte: new Date() },
@@ -433,26 +466,38 @@ async function createManualTopicWithQA(pageId, topicName, startDate, endDate, ti
     return { success: false, reason: `Maximum active topics (${MAX_ACTIVE_TOPICS}) reached. Please end some topics first.` };
   }
 
-  const topicScore = qualityAssurance.scoreTopic(topicName, pageId);
-  if (topicScore < 20) {
-    await monitor(null, pageId, null, 'MANUAL_TOPIC_REJECTED', `Topic score too low (${topicScore}): ${topicName}`);
+  const profile = await PageProfile.findOne({ pageId });
+  const { topicScore, pageFit } = await evaluateTopicQuality(topicName, pageId);
+  const minTopicScore = 20;
+  const minPageFit = 30;
+
+  if (topicScore < minTopicScore) {
+    await monitor(null, pageId, null, 'MANUAL_TOPIC_REJECTED', `Topic score too low (${topicScore})`);
     return { success: false, reason: `Topic score too low (${topicScore}). Choose a more specific or trending topic.` };
   }
+  if (pageFit < minPageFit) {
+    await monitor(null, pageId, null, 'MANUAL_TOPIC_REJECTED', `Topic relevance low (${pageFit})`);
+    return { success: false, reason: `Topic not relevant enough to page interests (${pageFit}/100).` };
+  }
+
   if (await isTopicTooSimilar(topicName, pageId)) {
     await monitor(null, pageId, null, 'MANUAL_TOPIC_REJECTED', `Similar topic exists: ${topicName}`);
     return { success: false, reason: `Similar topic already exists. Choose a different topic.` };
   }
+
   const customAngles = await generateCustomAngles(topicName, pageId);
   const newTopic = await AiTopic.create({
     topicName, pageId, startDate: new Date(startDate), endDate: new Date(endDate),
     times: Array.isArray(times) ? times : [times], postsPerDay: postsPerDay || 1,
-    includeMedia: includeMedia || false, includeVideo: includeVideo || false, customAngles: customAngles || null, manualTopic: true
+    includeMedia: includeMedia || false, includeVideo: includeVideo || false,
+    customAngles: customAngles || null, manualTopic: true
   });
-  await monitor(newTopic._id, pageId, null, 'MANUAL_TOPIC_CREATED', `Topic: "${topicName}", Angles: ${customAngles?.join(', ') || 'defaults'}, Score: ${topicScore}`);
-  return { success: true, topic: newTopic, topicScore, customAngles };
+  await monitor(newTopic._id, pageId, null, 'MANUAL_TOPIC_CREATED',
+    `Topic: "${topicName}", Angles: ${customAngles?.join(', ') || 'defaults'}, Scores: topic=${topicScore}, fit=${pageFit}`);
+  return { success: true, topic: newTopic, topicScore, pageFit, customAngles };
 }
 
-// ========== GENERATE POSTS FOR MANUAL TOPIC (existing) ==========
+// ========== GENERATE POSTS FOR MANUAL TOPIC ==========
 async function generatePostsForManualTopic(topicId, generateImmediately = false) {
   const topic = await AiTopic.findById(topicId);
   if (!topic) return { success: false, reason: 'Topic not found' };
@@ -497,7 +542,6 @@ async function generatePostsForManualTopic(topicId, generateImmediately = false)
   return { success: true, created };
 }
 
-// ========== GENERATE POSTS FOR TOPIC (public, used by route) ==========
 async function generatePostsForTopic(topicId, options = {}) {
   const { immediate = false } = options;
   const topic = await AiTopic.findById(topicId);
@@ -506,22 +550,17 @@ async function generatePostsForTopic(topicId, options = {}) {
   return result.created || [];
 }
 
-// ========== DELETE TOPIC POSTS ==========
 async function deleteTopicPosts(topicId) {
   await AiScheduledPost.deleteMany({ topicId });
   await monitor(null, null, null, 'TOPIC_POSTS_DELETED', `Topic ${topicId} posts deleted`);
 }
 
-// ========== CREATE AI LOG (public wrapper) ==========
 async function createAiLog(pageId, postId, action, message) {
   await monitor(null, pageId, postId, action, message);
 }
 
-// ========== AUTO-GENERATION LOGIC ==========
-
-// Generate the next missing post for a given topic (used by cron)
+// ========== GENERATE NEXT POST FOR A TOPIC (used by auto) ==========
 async function generateNextPostForTopic(topic) {
-  // FIX 2: Enforce global pending posts limit per page
   const totalPendingForPage = await AiScheduledPost.countDocuments({
     pageId: topic.pageId,
     status: 'PENDING'
@@ -531,18 +570,15 @@ async function generateNextPostForTopic(topic) {
     return null;
   }
 
-  // Check total posts limit per topic
   const totalPosts = await AiScheduledPost.countDocuments({ topicId: topic._id });
   if (totalPosts >= MAX_POSTS_PER_TOPIC) {
     await monitor(topic._id, topic.pageId, null, 'AUTO_SKIP_MAX_POSTS', `Topic has reached max ${MAX_POSTS_PER_TOPIC} posts`);
     return null;
   }
 
-  // Get all existing scheduled times for this topic
   const existingPosts = await AiScheduledPost.find({ topicId: topic._id }).select('scheduledTime');
   const existingTimesSet = new Set(existingPosts.map(p => p.scheduledTime.getTime()));
 
-  // Determine the next slot to generate (earliest future slot not yet used)
   const start = moment.tz(topic.startDate, TIMEZONE);
   const end = moment.tz(topic.endDate, TIMEZONE);
   const now = moment().tz(TIMEZONE);
@@ -551,16 +587,15 @@ async function generateNextPostForTopic(topic) {
     for (let i = 0; i < topic.postsPerDay; i++) {
       const timeStr = topic.times[i % topic.times.length];
       const scheduledMoment = moment.tz(`${day.format('YYYY-MM-DD')} ${timeStr}`, TIMEZONE);
-      if (scheduledMoment.isBefore(now)) continue; // skip past slots
+      if (scheduledMoment.isBefore(now)) continue;
       const slotKey = scheduledMoment.toDate().getTime();
       if (!existingTimesSet.has(slotKey)) {
-        // Found the next missing slot
         const pageProfile = await PageProfile.findOne({ pageId: topic.pageId });
         const recentPosts = await AiScheduledPost.find({ pageId: topic.pageId, status: 'PENDING' })
           .sort({ scheduledTime: -1 }).limit(10).select('text').lean();
         const recentPostTexts = recentPosts.map(p => p.text).filter(Boolean);
         const anglesToUse = (topic.customAngles && topic.customAngles.length) ? topic.customAngles : await generateCustomAngles(topic.topicName, topic.pageId);
-        const angle = anglesToUse[totalPosts % anglesToUse.length]; // cycle angles
+        const angle = anglesToUse[totalPosts % anglesToUse.length];
 
         const context = await pageIntelligence.enrichContext(topic.pageId, pageProfile, topic.topicName, recentPostTexts);
         const validatedPost = await generateAndValidatePost(
@@ -593,50 +628,49 @@ async function generateNextPostForTopic(topic) {
   return null;
 }
 
-// Ensure a page has enough active topics and each auto topic has ≤1 pending post
+// ========== ENHANCED AUTO TOPIC GENERATION ==========
 async function ensureActiveTopicsForPage(pageId) {
   const now = new Date();
-  // Get all active topics (both manual and auto)
   const activeTopics = await AiTopic.find({
     pageId,
     startDate: { $lte: now },
     endDate: { $gte: now }
   });
 
-  // For each active topic, enforce "at most 1 pending post"
   for (const topic of activeTopics) {
-    const pendingCount = await AiScheduledPost.countDocuments({
-      topicId: topic._id,
-      status: 'PENDING'
-    });
-    if (pendingCount === 0) {
-      await generateNextPostForTopic(topic);
-    }
+    const pendingCount = await AiScheduledPost.countDocuments({ topicId: topic._id, status: 'PENDING' });
+    if (pendingCount === 0) await generateNextPostForTopic(topic);
   }
 
-  // Check if we need more auto topics (only if global flag is on)
   if (!GLOBAL_AUTO_TOPIC_CREATION_ENABLED) return;
   const autoTopics = activeTopics.filter(t => !t.manualTopic);
   if (autoTopics.length >= MIN_ACTIVE_TOPICS) return;
-
-  // FIX 1: Enforce maximum active topics (auto + manual) before creating a new auto topic
   if (activeTopics.length >= MAX_ACTIVE_TOPICS) {
     await monitor(null, pageId, null, 'AUTO_SKIP_MAX_ACTIVE_TOPICS', `Already have ${activeTopics.length} active topics (max ${MAX_ACTIVE_TOPICS})`);
     return;
   }
 
-  // Create a new auto topic (with only one post initially)
   const profile = await PageProfile.findOne({ pageId });
-  const audienceInterest = profile?.audienceInterest?.join(', ') || 'general audience';
+  if (!profile?.audienceInterest?.length) return;
+
   let trendingHeadline = null;
   try {
-    trendingHeadline = await fetchTrendingHeadline(audienceInterest.split(',')[0]);
+    trendingHeadline = await fetchTrendingHeadline(pageId);
   } catch (e) {}
-  let topicName = await generateShortTopicName(audienceInterest, trendingHeadline);
-  if (!topicName) topicName = `Interesting update about ${audienceInterest}`;
+
+  let topicName = await generateShortTopicName(profile.audienceInterest, trendingHeadline, pageId);
+  if (!topicName) topicName = `Interesting update about ${profile.audienceInterest[0]}`;
+
+  const { topicScore, pageFit } = await evaluateTopicQuality(topicName, pageId);
+  if (topicScore < 20 || pageFit < 30) {
+    await monitor(null, pageId, null, 'AUTO_TOPIC_REJECTED_QUALITY', `Topic "${topicName}" score=${topicScore}, fit=${pageFit}`);
+    return;
+  }
+
   if (await isTopicTooSimilar(topicName, pageId)) {
     topicName = `${topicName} (fresh take)`;
   }
+
   const startDate = await getIntelligentStartDate(pageId);
   const endDate = moment.tz(startDate, TIMEZONE).add(TOPIC_LIFETIME_DAYS, 'days').toDate();
   const times = [];
@@ -646,19 +680,15 @@ async function ensureActiveTopicsForPage(pageId) {
   }
   const customAngles = await generateCustomAngles(topicName, pageId);
   const newTopic = await AiTopic.create({
-    topicName,
-    pageId,
-    startDate,
-    endDate,
-    times,
+    topicName, pageId, startDate, endDate, times,
     postsPerDay: POSTS_PER_DAY_AUTO,
     includeMedia: INCLUDE_MEDIA_AUTO,
     includeVideo: false,
     customAngles,
     manualTopic: false
   });
-  await monitor(newTopic._id, pageId, null, 'AUTO_TOPIC_CREATED', `Topic: "${topicName}", Angles: ${customAngles.join(', ')}`);
-  // Generate first post for this new topic
+  await monitor(newTopic._id, pageId, null, 'AUTO_TOPIC_CREATED',
+    `Topic: "${topicName}", Angles: ${customAngles.join(', ')}, Scores: topic=${topicScore}, fit=${pageFit}`);
   await generateNextPostForTopic(newTopic);
 }
 
@@ -696,5 +726,6 @@ module.exports = {
   deleteTopicPosts,
   createAiLog,
   ensureActiveTopicsForPage,
-  generateNextPostForTopic
+  generateNextPostForTopic,
+  evaluateTopicQuality
 };
