@@ -112,10 +112,20 @@ function extractCriticalRules(extraNotes) {
 async function buildPrompt({ topic, angle, pageId, textSeed, qualityFix = null, dna = null, topHeadline = null, contentType = null }) {
   const profile = await PageProfile.findOne({ pageId });
   let extraNotes = profile?.extraNotes || '';
+
+  // ----- Safely parse pi: and qa: overrides (non‑breaking) -----
+  let piOverrides = {}, qaOverrides = {};
+  try {
+    piOverrides = pageIntelligence.parsePageIntelligenceOverrides(extraNotes);
+    qaOverrides = qualityAssurance.parsePageOverrides(extraNotes);
+  } catch (e) {
+    console.warn('Override parsing failed, using defaults', e.message);
+  }
+
+  // ----- Extract CRITICAL RULES (basic text, ignoring pi/qa blocks) -----
   let criticalRules = extractCriticalRules(extraNotes);
   if (!criticalRules) {
-    criticalRules = `CRITICAL RULES (DEFAULT):
-- Maximum 3 sentences total.
+    criticalRules = `- Maximum 2 sentences total.
 - Never start with a question ("Have you ever...", "Are you ready...").
 - Never use "we'll", "let's", "I'll explain", "in this post".
 - No advice, no teaching, no "how to" language.
@@ -123,20 +133,43 @@ async function buildPrompt({ topic, angle, pageId, textSeed, qualityFix = null, 
 - Keep language punchy and conversational.`;
   }
 
+  // ----- Forbidden openings from qa: block (or fallback) -----
+  const avoidPhrases = Array.isArray(qaOverrides.avoidPhrases) ? qaOverrides.avoidPhrases : [
+    "Did you know", "Have you ever", "Are you ready", "I've been thinking",
+    "Sometimes I", "Here is the rewritten post", "I was thinking", "Today I felt",
+    "In today's world", "Let's explore", "It's important to"
+  ];
+
+  // ----- Primary topics from pi: block or profile -----
+  const primaryTopics = piOverrides.primaryTopics || profile?.audienceInterest || [];
+  const voiceStyle = piOverrides.voiceStyle || profile?.voice || 'conversational';
+  const authority = piOverrides.authority || 50;
+  const humor = piOverrides.humor || 20;
+  const emotionality = piOverrides.emotionality || 50;
+
   const seedText = textSeed ? ` Reference previous text: "${textSeed}"` : '';
   const qualityFixText = qualityFix ? `\n\nIMPORTANT FIXES NEEDED: ${qualityFix}\nRewrite the post fixing these issues while keeping the same core message.` : '';
 
-  // Incorporate PI data
+  // ----- PI guidance (already existed, but now includes overrides) -----
   let piGuidance = '';
   if (dna) {
     piGuidance = `\nPage Personality:
-- Authority: ${dna.authority}/100 (higher = more expert)
-- Humor: ${dna.humor}/100 (higher = funnier)
+- Authority: ${dna.authority}/100
+- Humor: ${dna.humor}/100
 - Seriousness: ${dna.seriousness}/100
 - Optimism: ${dna.optimism}/100
 - Emotionality: ${dna.emotionality}/100
 - Voice style: ${dna.voiceStyle}
 - Primary topics: ${dna.primaryTopics.join(', ')}
+`;
+  } else {
+    // Fallback using overrides
+    piGuidance = `\nPage Personality:
+- Authority: ${authority}/100
+- Humor: ${humor}/100
+- Emotionality: ${emotionality}/100
+- Voice style: ${voiceStyle}
+- Primary topics: ${primaryTopics.join(', ')}
 `;
   }
   if (topHeadline) {
@@ -146,23 +179,35 @@ async function buildPrompt({ topic, angle, pageId, textSeed, qualityFix = null, 
     piGuidance += `\nSuggested content type: ${contentType} (e.g., warning, analysis, myth‑busting). Write accordingly.\n`;
   }
 
-  return `
-Write a natural, relatable Facebook post about "${topic}".
-Angle: ${angle}
+  // ----- Build the final prompt with hard constraints -----
+  const prompt = `
+YOU ARE A SOCIAL MEDIA POST WRITER. FOLLOW THESE RULES EXACTLY – THEY OVERRIDE ALL OTHER INSTRUCTIONS.
+
+CRITICAL RULES:
+${criticalRules}
+
+ADDITIONAL HARD CONSTRAINTS (MUST FOLLOW):
+- Write ONLY about the topic: "${topic}". Do NOT mention unrelated topics (e.g., general stress, weather, politics).
+- NEVER start the post with any of these phrases: ${avoidPhrases.join(', ')}.
+- Maximum sentences: 2 (unless CRITICAL RULES specify otherwise).
+- Do NOT include meta‑commentary like "Here is a post", "I've rewritten", "Here is the rewritten post".
+- Stay within the page's primary topics: ${primaryTopics.join(', ')}.
+
+TOPIC: "${topic}"
+ANGLE: ${angle}
 Tone: ${profile?.tone || 'friendly'}
-Style: ${profile?.writingStyle || 'conversational'}
-Voice: ${profile?.voice || 'first-person plural'}
-Audience: ${profile?.audienceTone || 'casual'}, interests: ${profile?.audienceInterest?.join(', ') || 'general audience'}
+Writing Style: ${profile?.writingStyle || 'conversational'}
+Voice: ${voiceStyle}
+Audience interests: ${primaryTopics.join(', ')}
 
 ${piGuidance}
-${criticalRules}
 ${seedText}
 ${qualityFixText}
 
-The rules above are MANDATORY and override any other instructions. Follow them exactly.
+Return ONLY the post text, with no extra quotes, explanations, or markdown.
 `;
+  return prompt;
 }
-
 // ========== TEXT GENERATION with PI context ==========
 async function generateText(topic, angle, pageId, textSeed = null, qualityFix = null, dna = null, topHeadline = null, contentType = null) {
   try {
