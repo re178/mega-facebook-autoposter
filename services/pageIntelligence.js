@@ -1,21 +1,81 @@
 // services/pageIntelligence.js
-// Full Page Intelligence with per‑page pi: blocks – now fully overridable
+// Full Page Intelligence with per‑page pi: blocks – now fully overridable, secure, and production‑ready
 
 const moment = require('moment-timezone');
 const { generateSmart } = require('./textProviders');
 
-// Global caches
-const globalNewsCache = {
-  education: [], cybersecurity: [], technology: [], finance: [], health: [], business: [], sports: [],
-  lastUpdated: null
-};
-const pageDNA = new Map();
-const pageMemory = new Map();
-const audienceState = new Map();
-const eventCache = new Map();
-const pageContentTypeIndex = new Map();
+// ------------------------------
+//  Configurable caches with TTL & size limits
+// ------------------------------
+class TTLCache {
+  constructor(ttlSeconds = 300, maxSize = 100) {
+    this.ttl = ttlSeconds * 1000;
+    this.maxSize = maxSize;
+    this.cache = new Map();
+  }
 
-// ---------- SAFE Parse pi: overrides (returns full set of overrides) ----------
+  set(key, value) {
+    if (this.cache.size >= this.maxSize) {
+      const oldestKey = this.cache.keys().next().value;
+      this.cache.delete(oldestKey);
+    }
+    this.cache.set(key, { value, expires: Date.now() + this.ttl });
+  }
+
+  get(key) {
+    const entry = this.cache.get(key);
+    if (!entry) return undefined;
+    if (Date.now() > entry.expires) {
+      this.cache.delete(key);
+      return undefined;
+    }
+    return entry.value;
+  }
+
+  has(key) {
+    return this.get(key) !== undefined;
+  }
+
+  clear() {
+    this.cache.clear();
+  }
+}
+
+// Global caches – now with defaults (can be overridden via pi:)
+const globalNewsCache = new TTLCache(30 * 60, 50);        // 30 min TTL, 50 entries
+const pageDNA = new TTLCache(3600, 500);                  // 1 hour TTL
+const pageMemory = new TTLCache(86400, 500);              // 24 hours TTL
+const audienceState = new TTLCache(3600, 200);            // 1 hour
+const pageContentTypeIndex = new Map();                   // simple counter, reset on restart
+
+// ------------------------------
+//  Safe JSON‑like parsing for pi: blocks (no eval)
+// ------------------------------
+function safeParsePiBlock(content) {
+  // Remove trailing commas, comments, and ensure property names are quoted
+  let cleaned = content
+    .replace(/\/\/.*$/gm, '')                     // remove line comments
+    .replace(/\/\*[\s\S]*?\*\//g, '')             // remove block comments
+    .replace(/,\s*}/g, '}')                       // trailing comma in objects
+    .replace(/,\s*]/g, ']');                      // trailing comma in arrays
+
+  // Convert unquoted property names to quoted
+  cleaned = cleaned.replace(/([{,]\s*)([a-zA-Z_$][a-zA-Z0-9_$]*)\s*:/g, '$1"$2":');
+
+  // Convert unquoted string values (e.g., foo: bar) to quoted
+  cleaned = cleaned.replace(/:\s*([a-zA-Z_$][a-zA-Z0-9_$]*)(?=[,\}])/g, ':"$1"');
+
+  // Convert single quotes to double quotes
+  cleaned = cleaned.replace(/'/g, '"');
+
+  try {
+    return JSON.parse(cleaned);
+  } catch (err) {
+    console.warn('Failed to parse pi: block – falling back to empty overrides', err.message);
+    return {};
+  }
+}
+
 function parsePageIntelligenceOverrides(extraNotes = '') {
   const startMatch = extraNotes.match(/pi:\s*\{/i);
   if (!startMatch) return {};
@@ -41,99 +101,50 @@ function parsePageIntelligenceOverrides(extraNotes = '') {
   const content = extraNotes.substring(startIndex + 1, endIndex);
   if (!content.trim()) return {};
 
-  const tryEval = (str) => {
-    try {
-      const evaluated = eval('(' + str + ')');
-      if (evaluated && typeof evaluated === 'object') return evaluated;
-    } catch (e) { return null; }
-    return null;
-  };
+  const obj = safeParsePiBlock(content);
+  if (!obj || typeof obj !== 'object') return {};
 
-  let obj = tryEval('{' + content + '}');
-  if (!obj) {
-    let fixed = content.replace(/,\s*}/g, '}').replace(/,\s*,/g, ',');
-    obj = tryEval('{' + fixed + '}');
-  }
-  if (!obj) {
-    let fixed = content.replace(/[()]/g, '');
-    obj = tryEval('{' + fixed + '}');
-  }
-  if (!obj) {
-    try {
-      let jsonStr = '{' + content + '}';
-      jsonStr = jsonStr.replace(/([{,]\s*)([a-zA-Z_][a-zA-Z0-9_]*)\s*:/g, '$1"$2":');
-      jsonStr = jsonStr.replace(/:\s*([a-zA-Z_][a-zA-Z0-9_]*)(?=[,}])/g, ':"$1"');
-      jsonStr = jsonStr.replace(/:\s*'([^']*)'/g, ':"$1"');
-      obj = JSON.parse(jsonStr);
-    } catch (e) {}
-  }
-
-  if (!obj) {
-    console.warn('Failed to parse pi overrides – content:', content);
-    return {};
-  }
-
-  return {
+  // Return only allowed keys (sanitization)
+  const allowedKeys = [
     // DNA direct overrides
-    authority: typeof obj.authority === 'number' ? obj.authority : undefined,
-    curiosity: typeof obj.curiosity === 'number' ? obj.curiosity : undefined,
-    seriousness: typeof obj.seriousness === 'number' ? obj.seriousness : undefined,
-    optimism: typeof obj.optimism === 'number' ? obj.optimism : undefined,
-    emotionality: typeof obj.emotionality === 'number' ? obj.emotionality : undefined,
-    humor: typeof obj.humor === 'number' ? obj.humor : undefined,
-    voiceStyle: typeof obj.voiceStyle === 'string' ? obj.voiceStyle : undefined,
-    primaryTopics: Array.isArray(obj.primaryTopics) ? obj.primaryTopics : undefined,
-    secondaryTopics: Array.isArray(obj.secondaryTopics) ? obj.secondaryTopics : undefined,
-    
+    'authority', 'curiosity', 'seriousness', 'optimism', 'emotionality', 'humor',
+    'voiceStyle', 'primaryTopics', 'secondaryTopics',
     // Content types
-    contentTypes: Array.isArray(obj.contentTypes) ? obj.contentTypes : undefined,
-    
+    'contentTypes',
     // News configuration
-    newsRefreshMinutes: typeof obj.newsRefreshMinutes === 'number' ? obj.newsRefreshMinutes : undefined,
-    disableNews: typeof obj.disableNews === 'boolean' ? obj.disableNews : undefined,
-    newsCategories: Array.isArray(obj.newsCategories) ? obj.newsCategories : undefined,
-    newsPerCategory: typeof obj.newsPerCategory === 'number' ? obj.newsPerCategory : undefined,
-    maxNewsArticles: typeof obj.maxNewsArticles === 'number' ? obj.maxNewsArticles : undefined,
-    
+    'newsRefreshMinutes', 'disableNews', 'newsCategories', 'newsPerCategory', 'maxNewsArticles',
+    'newsApiUrl', 'newsApiKey', 'newsApiHeaders',
     // Category mapping
-    categoryOverrides: typeof obj.categoryOverrides === 'object' ? obj.categoryOverrides : undefined,
-    defaultCategory: typeof obj.defaultCategory === 'string' ? obj.defaultCategory : undefined,
-    
-    // Topic keywords (for scoring & matching)
-    topicTrendWords: Array.isArray(obj.topicTrendWords) ? obj.topicTrendWords : undefined,
-    topicCuriosityWords: Array.isArray(obj.topicCuriosityWords) ? obj.topicCuriosityWords : undefined,
-    topicGenericPenaltyWords: Array.isArray(obj.topicGenericPenaltyWords) ? obj.topicGenericPenaltyWords : undefined,
-    
+    'categoryOverrides', 'defaultCategory',
+    // Topic keywords
+    'topicTrendWords', 'topicCuriosityWords', 'topicGenericPenaltyWords',
     // Audience state generation
-    audienceStatePromptTemplate: typeof obj.audienceStatePromptTemplate === 'string' ? obj.audienceStatePromptTemplate : undefined,
-    audienceStateMaxItems: typeof obj.audienceStateMaxItems === 'number' ? obj.audienceStateMaxItems : undefined,
-    
+    'audienceStatePromptTemplate', 'audienceStateMaxItems',
     // Event interpretation
-    eventInterpretationPrompt: typeof obj.eventInterpretationPrompt === 'string' ? obj.eventInterpretationPrompt : undefined,
-    defaultEventSignificance: typeof obj.defaultEventSignificance === 'string' ? obj.defaultEventSignificance : undefined,
-    defaultEventUrgency: typeof obj.defaultEventUrgency === 'string' ? obj.defaultEventUrgency : undefined,
-    defaultEventLifespan: typeof obj.defaultEventLifespan === 'string' ? obj.defaultEventLifespan : undefined,
-    defaultEventAffectedAudience: typeof obj.defaultEventAffectedAudience === 'string' ? obj.defaultEventAffectedAudience : undefined,
-    
+    'eventInterpretationPrompt', 'defaultEventSignificance', 'defaultEventUrgency',
+    'defaultEventLifespan', 'defaultEventAffectedAudience',
     // Identity scoring
-    identityScorePromptTemplate: typeof obj.identityScorePromptTemplate === 'string' ? obj.identityScorePromptTemplate : undefined,
-    
-    // DNA auto‑inference (disable or customize)
-    disableAutoDNA: typeof obj.disableAutoDNA === 'boolean' ? obj.disableAutoDNA : false,
-    interestDNAMapping: typeof obj.interestDNAMapping === 'object' ? obj.interestDNAMapping : undefined,
-    
+    'identityScorePromptTemplate',
+    // DNA auto‑inference
+    'disableAutoDNA', 'interestDNAMapping',
     // Memory limits
-    maxMemoryTopics: typeof obj.maxMemoryTopics === 'number' ? obj.maxMemoryTopics : undefined,
-    maxMemoryPosts: typeof obj.maxMemoryPosts === 'number' ? obj.maxMemoryPosts : undefined
-  };
+    'maxMemoryTopics', 'maxMemoryPosts'
+  ];
+
+  const filtered = {};
+  for (const key of allowedKeys) {
+    if (obj[key] !== undefined) filtered[key] = obj[key];
+  }
+  return filtered;
 }
 
-// ---------- Helper to merge overrides with defaults ----------
 function getParam(overrides, key, defaultValue) {
   return overrides && overrides[key] !== undefined ? overrides[key] : defaultValue;
 }
 
-// ---------- Build DNA (now fully controlled by overrides) ----------
+// ------------------------------
+//  Build Page DNA (auto‑inference + overrides)
+// ------------------------------
 async function buildPageDNA(pageProfile, recentPosts = [], overrides = {}) {
   const interests = pageProfile?.audienceInterest || [];
   const extraNotes = pageProfile?.extraNotes || '';
@@ -141,7 +152,6 @@ async function buildPageDNA(pageProfile, recentPosts = [], overrides = {}) {
 
   let authority = 50, curiosity = 50, seriousness = 50, optimism = 50, emotionality = 50, humor = 20;
 
-  // Auto‑inference only if not disabled and not overridden directly
   const disableAuto = getParam(piOverrides, 'disableAutoDNA', false);
   if (!disableAuto && piOverrides.authority === undefined) {
     const mapping = piOverrides.interestDNAMapping || {
@@ -169,7 +179,6 @@ async function buildPageDNA(pageProfile, recentPosts = [], overrides = {}) {
   if (extraNotes.includes('professional')) seriousness += 15;
   if (extraNotes.includes('casual')) humor += 20;
 
-  // Direct overrides from pi:
   authority = getParam(piOverrides, 'authority', authority);
   curiosity = getParam(piOverrides, 'curiosity', curiosity);
   seriousness = getParam(piOverrides, 'seriousness', seriousness);
@@ -196,26 +205,48 @@ async function buildPageDNA(pageProfile, recentPosts = [], overrides = {}) {
   };
 }
 
-// ---------- News with full overrides ----------
+// ------------------------------
+//  News with full overrides (including custom API URL/Key)
+// ------------------------------
 async function refreshGlobalNewsCache(overrides = {}) {
   const refreshMinutes = getParam(overrides, 'newsRefreshMinutes', 30);
-  if (globalNewsCache.lastUpdated && moment().diff(globalNewsCache.lastUpdated, 'minutes') < refreshMinutes) {
-    return globalNewsCache;
+  const cacheKey = `news_${refreshMinutes}_${JSON.stringify(overrides.newsCategories)}`;
+  const cached = globalNewsCache.get(cacheKey);
+  if (cached && moment().diff(cached.lastUpdated, 'minutes') < refreshMinutes) {
+    return cached.data;
   }
+
   const categories = getParam(overrides, 'newsCategories', ['education', 'cybersecurity', 'technology', 'finance', 'health', 'business', 'sports']);
   const perCategory = getParam(overrides, 'newsPerCategory', 10);
+  
+  // Allow custom news API configuration
+  let apiUrl = getParam(overrides, 'newsApiUrl', 'https://gnews.io/api/v4/top-headlines');
+  let apiKey = getParam(overrides, 'newsApiKey', process.env.GNEWS_API_KEY);
+  let apiHeaders = getParam(overrides, 'newsApiHeaders', {});
+
+  const newsData = {};
   for (const cat of categories) {
     try {
-      const url = `https://gnews.io/api/v4/top-headlines?category=${cat}&lang=en&token=${process.env.GNEWS_API_KEY}`;
-      const res = await fetch(url);
+      let url = `${apiUrl}?category=${cat}&lang=en&token=${apiKey}`;
+      if (!apiKey && apiUrl.includes('gnews.io')) {
+        console.warn(`No GNEWS_API_KEY provided – skipping news category ${cat}`);
+        continue;
+      }
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 8000);
+      const res = await fetch(url, { headers: apiHeaders, signal: controller.signal });
+      clearTimeout(timeoutId);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
-      globalNewsCache[cat] = data.articles?.slice(0, perCategory) || [];
+      newsData[cat] = data.articles?.slice(0, perCategory) || [];
     } catch (err) {
       console.error(`Failed to fetch ${cat} news:`, err.message);
+      newsData[cat] = [];
     }
   }
-  globalNewsCache.lastUpdated = new Date();
-  return globalNewsCache;
+  const result = { data: newsData, lastUpdated: new Date() };
+  globalNewsCache.set(cacheKey, result);
+  return newsData;
 }
 
 function mapInterestToCategory(interest, overrides = {}) {
@@ -237,13 +268,12 @@ function mapInterestToCategory(interest, overrides = {}) {
 
 async function getNewsForPage(pageProfile, overrides = {}) {
   if (getParam(overrides, 'disableNews', false)) return [];
-  await refreshGlobalNewsCache(overrides);
+  const newsData = await refreshGlobalNewsCache(overrides);
   const interests = pageProfile?.audienceInterest || [];
   let relevant = [];
-  const maxPerCategory = getParam(overrides, 'newsPerCategory', 10);
   for (const interest of interests) {
     const cat = mapInterestToCategory(interest, overrides);
-    if (globalNewsCache[cat]) relevant.push(...globalNewsCache[cat]);
+    if (newsData[cat]) relevant.push(...newsData[cat]);
   }
   const seen = new Set();
   const unique = relevant.filter(a => {
@@ -255,7 +285,9 @@ async function getNewsForPage(pageProfile, overrides = {}) {
   return unique.slice(0, maxArticles);
 }
 
-// ---------- Content type rotation (overridable) ----------
+// ------------------------------
+//  Content type rotation (overridable)
+// ------------------------------
 const DEFAULT_CONTENT_TYPES = ['observation', 'analysis', 'reaction', 'warning', 'reflection', 'community', 'opportunity', 'myth_busting'];
 
 function getNextContentType(pageId, pageProfile, overrides = {}) {
@@ -266,14 +298,16 @@ function getNextContentType(pageId, pageProfile, overrides = {}) {
   return type;
 }
 
-// ---------- Interpret event (fully overridable) ----------
+// ------------------------------
+//  Interpret event (LLM + overrides)
+// ------------------------------
 async function interpretEvent(headline, pageProfile, overrides = {}) {
   const defaultPrompt = `Analyze this news headline for a ${pageProfile?.audienceInterest?.join(', ') || 'general'} page.
 Headline: "${headline}"
 Return JSON: { significance: "short phrase", urgency: "low/medium/high", lifespan: "X days", affectedAudience: "who" }`;
   const prompt = getParam(overrides, 'eventInterpretationPrompt', defaultPrompt);
-  const response = await generateSmart(prompt);
   try {
+    const response = await generateSmart(prompt);
     return JSON.parse(response);
   } catch(e) {
     return {
@@ -285,21 +319,24 @@ Return JSON: { significance: "short phrase", urgency: "low/medium/high", lifespa
   }
 }
 
-// ---------- Audience state (fully overridable) ----------
+// ------------------------------
+//  Audience state (LLM + caching)
+// ------------------------------
 async function buildAudienceState(pageProfile, overrides = {}) {
   const interests = pageProfile?.audienceInterest || [];
   if (!interests.length) return { goals: [], fears: [], frustrations: [], aspirations: [] };
   const cacheKey = interests.join(',') + JSON.stringify(overrides.audienceStatePromptTemplate || '');
-  if (audienceState.has(cacheKey)) return audienceState.get(cacheKey);
+  const cached = audienceState.get(cacheKey);
+  if (cached) return cached;
+
   const maxItems = getParam(overrides, 'audienceStateMaxItems', 3);
   const defaultPrompt = `For a Facebook audience interested in: ${interests.join(', ')}. 
 List ${maxItems} goals, ${maxItems} fears, ${maxItems} frustrations, ${maxItems} aspirations. Return as JSON: {"goals":[],"fears":[],"frustrations":[],"aspirations":[]}`;
   const prompt = getParam(overrides, 'audienceStatePromptTemplate', defaultPrompt);
-  const response = await generateSmart(prompt);
   let state = { goals: [], fears: [], frustrations: [], aspirations: [] };
   try {
+    const response = await generateSmart(prompt);
     state = JSON.parse(response);
-    // Trim to maxItems
     for (const key of ['goals','fears','frustrations','aspirations']) {
       if (state[key] && state[key].length > maxItems) state[key] = state[key].slice(0, maxItems);
     }
@@ -308,23 +345,28 @@ List ${maxItems} goals, ${maxItems} fears, ${maxItems} frustrations, ${maxItems}
   return state;
 }
 
-// ---------- Page memory (now respects overrides for limits) ----------
+// ------------------------------
+//  Page memory (respects limits)
+// ------------------------------
 function updatePageMemory(pageId, topic, post, score, hook = null, eventId = null, overrides = {}) {
-  if (!pageMemory.has(pageId)) {
-    pageMemory.set(pageId, {
+  let mem = pageMemory.get(pageId);
+  if (!mem) {
+    mem = {
       recurringThemes: new Map(),
       recurringHooks: new Map(),
       recurringEvents: new Map(),
       lastTopics: [],
       lastPosts: [],
       lastQualityScore: score
-    });
+    };
+    pageMemory.set(pageId, mem);
   }
-  const mem = pageMemory.get(pageId);
+
   const words = topic.toLowerCase().split(/\s+/);
   for (const w of words) if (w.length > 3) mem.recurringThemes.set(w, (mem.recurringThemes.get(w) || 0) + 1);
   if (hook) mem.recurringHooks.set(hook, (mem.recurringHooks.get(hook) || 0) + 1);
   if (eventId) mem.recurringEvents.set(eventId, (mem.recurringEvents.get(eventId) || 0) + 1);
+
   const maxTopics = getParam(overrides, 'maxMemoryTopics', 10);
   const maxPosts = getParam(overrides, 'maxMemoryPosts', 10);
   mem.lastTopics.unshift(topic);
@@ -338,7 +380,9 @@ function getPageMemory(pageId) {
   return pageMemory.get(pageId) || null;
 }
 
-// ---------- Identity score (fully overridable prompt) ----------
+// ------------------------------
+//  Identity score (LLM + overrides)
+// ------------------------------
 async function identityScore(post, pageDNA, pageProfile, overrides = {}) {
   const defaultPrompt = `Does this Facebook post sound like it comes from a page with:
 - Authority: ${pageDNA.authority}/100
@@ -351,16 +395,22 @@ Post: "${post}"
 
 Return only a number 0-100 indicating how well it matches the page identity.`;
   const prompt = getParam(overrides, 'identityScorePromptTemplate', defaultPrompt);
-  const response = await generateSmart(prompt);
-  const score = parseInt(response) || 50;
-  return Math.min(100, Math.max(0, score));
+  try {
+    const response = await generateSmart(prompt);
+    const score = parseInt(response) || 50;
+    return Math.min(100, Math.max(0, score));
+  } catch(e) {
+    return 50;
+  }
 }
 
-// ---------- Main orchestrator (now passes overrides to all helpers) ----------
+// ------------------------------
+//  Main orchestrator
+// ------------------------------
 async function enrichContext(pageId, pageProfile, topic, recentPosts = []) {
   const extraNotes = pageProfile?.extraNotes || '';
   const overrides = parsePageIntelligenceOverrides(extraNotes);
-  
+
   let dna = pageDNA.get(pageId);
   if (!dna) {
     dna = await buildPageDNA(pageProfile, recentPosts, overrides);
@@ -373,6 +423,9 @@ async function enrichContext(pageId, pageProfile, topic, recentPosts = []) {
   return { dna, news, topHeadline, audience, contentType, timestamp: new Date() };
 }
 
+// ------------------------------
+//  Exports
+// ------------------------------
 module.exports = {
   enrichContext,
   updatePageMemory,
@@ -381,5 +434,13 @@ module.exports = {
   interpretEvent,
   refreshGlobalNewsCache,
   parsePageIntelligenceOverrides,
-  buildPageDNA
+  buildPageDNA,
+  // Expose cache controls for advanced use
+  clearAllCaches: () => {
+    globalNewsCache.clear();
+    pageDNA.clear();
+    pageMemory.clear();
+    audienceState.clear();
+    pageContentTypeIndex.clear();
+  }
 };
