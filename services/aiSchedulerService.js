@@ -268,13 +268,14 @@ async function generateImage(topic, pageId, textSeed = null) {
   return null;
 }
 
-// ========== IMPROVED CUSTOM ANGLES (with repetition avoidance) ==========
-async function generateCustomAngles(topicName, pageId) {
+// ================================================================
+// ========== FIXED: STRICT CUSTOM ANGLES (HARD SANITIZATION) ======
+// ================================================================
+async function generateCustomAngles(topicName, pageId, singleInterest = null) {
   const profile = await PageProfile.findOne({ pageId });
   const audienceInterest = profile?.audienceInterest || [];
-  const extraNotes = profile?.extraNotes || '';
-  const piOverrides = pageIntelligence.parsePageIntelligenceOverrides(extraNotes);
-  const primaryTopics = piOverrides.primaryTopics || audienceInterest;
+  // Force strict focus on the single interest if provided
+  const primaryTopics = singleInterest ? [singleInterest] : audienceInterest;
 
   const recentTopics = await AiTopic.find({ pageId, manualTopic: true })
     .sort({ createdAt: -1 })
@@ -282,35 +283,68 @@ async function generateCustomAngles(topicName, pageId) {
     .lean();
   const recentAngles = recentTopics.flatMap(t => t.customAngles || []).slice(0, 9);
 
+  // ULTRA-STRICT PROMPT with explicit formatting rules
   const prompt = `Generate exactly 5 unique "angles" for Facebook posts about the topic: "${topicName}".
-The page's primary topics are: ${primaryTopics.join(', ')}.
+Strict focus only on: ${primaryTopics.join(', ')}.
 Avoid these recently used angles if possible: ${recentAngles.join(', ') || 'none'}.
-Each angle must be a very short phrase (1-3 words) that suggests a different perspective or hook.
-Examples for football: "Record breaker", "Transfer shock", "Derby fire", "Legend's last dance", "Youth revolution".
-Return only the 5 angles as a comma-separated list, no extra text.`;
+
+CRITICAL OUTPUT FORMATTING RULES (DO NOT BREAK):
+- Return ONLY a plain comma-separated list.
+- NO numbers (1., 2.), NO bullet points (* or -), NO extra sentences.
+- Each angle must be exactly 1 to 3 words long.
+- Example of correct output: "Record breaker, Transfer shock, Derby fire, Legend's last dance, Youth revolution"
+
+Your response:`;
 
   for (const provider of TextProviders) {
     try {
       const response = await provider.generate(prompt);
       if (response) {
-        let angles = response.split(',').map(s => s.trim().toLowerCase()).filter(s => s.length > 0);
-        angles = angles.slice(0, 5);
-        if (angles.length === 5) return angles;
-        if (angles.length > 0) return ensureFiveAngles(angles);
+        // HARD SANITIZATION: Remove numbers, bullets, quotes, and extra whitespace
+        let cleaned = response
+          .replace(/^[\d\s\.\-\*]+/gm, '') // Remove leading numbers/bullets per line
+          .replace(/["']/g, '')            // Remove quotes
+          .replace(/\n/g, ',')             // Turn newlines into commas
+          .trim();
+
+        let angles = cleaned.split(',').map(s => s.trim().toLowerCase()).filter(s => s.length > 0);
+        
+        // STRICT VALIDATION: Ensure each angle is max 4 words (to allow 1-3 words)
+        angles = angles.filter(s => s.split(/\s+/).length <= 4);
+        
+        // Take first 5, or pad with defaults
+        if (angles.length >= 5) {
+          return angles.slice(0, 5);
+        }
+        if (angles.length >= 3) {
+          // If we got 3 or 4, pad the rest with defaults to make 5
+          const padded = [...angles];
+          while (padded.length < 5) {
+            padded.push(DEFAULT_ANGLES[padded.length % DEFAULT_ANGLES.length]);
+          }
+          return padded;
+        }
+        // If fewer than 3, log and try next provider
+        console.warn(`Invalid angle format from ${provider.name}: "${response}"`);
+        await monitor(null, pageId, null, 'ANGLE_FORMAT_FAILED', `Provider ${provider.name} returned: ${response}`);
       }
-    } catch (err) { console.error(`Custom angle generation failed for ${provider.name}:`, err.message); }
+    } catch (err) { 
+      console.error(`Custom angle generation failed for ${provider.name}:`, err.message); 
+    }
   }
+  // ULTIMATE FALLBACK: If all providers fail to format correctly, return hardcoded defaults
   return [...DEFAULT_ANGLES];
 }
 
-// ========== IMPROVED TOPIC NAME GENERATION ==========
-async function generateShortTopicName(audienceInterest, rawHeadline = null, pageId = null) {
+// ================================================================
+// ========== FIXED: STRICT TOPIC NAME (1 INTEREST FOCUS) =========
+// ================================================================
+async function generateShortTopicName(singleInterest, rawHeadline = null, pageId = null) {
   let prompt;
-  const interestSample = Array.isArray(audienceInterest) ? audienceInterest.slice(0, 3).join(', ') : audienceInterest;
   if (rawHeadline) {
-    prompt = `Convert this news headline into a very short Facebook post topic (5-10 words maximum) about ${interestSample}. Return only the topic phrase, no extra text. Headline: "${rawHeadline}"`;
+    prompt = `Convert this news headline into a very short Facebook post topic (5-10 words). The topic MUST be strictly about "${singleInterest}". Ignore any other subjects. Return only the topic phrase. Headline: "${rawHeadline}"`;
   } else {
-    prompt = `Generate a very short Facebook post topic (5-10 words maximum) about ${interestSample}. Return only the topic phrase, no extra text. The topic should be timely and interesting.`;
+    prompt = `Generate a very short, timely Facebook post topic (5-10 words) strictly about "${singleInterest}". Do NOT mention other topics. Return only the topic phrase.`;
   }
   for (const provider of TextProviders) {
     try {
@@ -323,17 +357,20 @@ async function generateShortTopicName(audienceInterest, rawHeadline = null, page
       }
     } catch (err) { console.error(`Topic name generation failed for ${provider.name}:`, err.message); }
   }
-  return null;
+  // Hard fallback: manually construct a topic from the single interest
+  return `Latest update on ${singleInterest}`;
 }
 
-// ========== IMPROVED TRENDING HEADLINE (random interest + relevance filter) ==========
-async function fetchTrendingHeadline(pageId) {
+// ================================================================
+// ========== FIXED: NEWS FETCH WITH SPECIFIC INTEREST ============
+// ================================================================
+async function fetchTrendingHeadline(pageId, specificInterest = null) {
   const profile = await PageProfile.findOne({ pageId });
   const interests = profile?.audienceInterest || [];
   if (interests.length === 0) return null;
 
-  const randomInterest = interests[Math.floor(Math.random() * interests.length)];
-  const keyword = randomInterest.split(/\s+/)[0];
+  // Use the passed interest, otherwise pick random
+  const keyword = specificInterest || interests[Math.floor(Math.random() * interests.length)];
 
   const gnewsKey = process.env.GNEWS_API_KEY;
   if (gnewsKey) {
@@ -344,8 +381,8 @@ async function fetchTrendingHeadline(pageId) {
       if (data.articles && data.articles.length > 0) {
         const title = data.articles[0].title;
         const lowerTitle = title.toLowerCase();
-        const hasRelevance = interests.some(interest => lowerTitle.includes(interest.toLowerCase()));
-        if (hasRelevance) return title;
+        // Strictly check if this specific interest is in the title
+        if (lowerTitle.includes(keyword.toLowerCase())) return title;
       }
     } catch (err) { console.error('GNews fetch failed:', err.message); }
   }
@@ -359,8 +396,7 @@ async function fetchTrendingHeadline(pageId) {
       if (data.articles && data.articles.length > 0) {
         const title = data.articles[0].title;
         const lowerTitle = title.toLowerCase();
-        const hasRelevance = interests.some(interest => lowerTitle.includes(interest.toLowerCase()));
-        if (hasRelevance) return title;
+        if (lowerTitle.includes(keyword.toLowerCase())) return title;
       }
     } catch (err) { console.error('NewsAPI fetch failed:', err.message); }
   }
@@ -485,7 +521,7 @@ async function createManualTopicWithQA(pageId, topicName, startDate, endDate, ti
     return { success: false, reason: `Similar topic already exists. Choose a different topic.` };
   }
 
-  const customAngles = await generateCustomAngles(topicName, pageId);
+  const customAngles = await generateCustomAngles(topicName, pageId); // Manual uses full interest list
   const newTopic = await AiTopic.create({
     topicName, pageId, startDate: new Date(startDate), endDate: new Date(endDate),
     times: Array.isArray(times) ? times : [times], postsPerDay: postsPerDay || 1,
@@ -559,23 +595,30 @@ async function createAiLog(pageId, postId, action, message) {
   await monitor(null, pageId, postId, action, message);
 }
 
-// ========== GENERATE NEXT POST FOR A TOPIC (used by auto) ==========
+// ================================================================
+// ========== FIXED: HARD ENFORCED LIMITS (THROW ERRORS) ==========
+// ================================================================
 async function generateNextPostForTopic(topic) {
+  // HARD CHECK 1: Max scheduled posts per page
   const totalPendingForPage = await AiScheduledPost.countDocuments({
     pageId: topic.pageId,
     status: 'PENDING'
   });
   if (totalPendingForPage >= MAX_SCHEDULED_POSTS) {
-    await monitor(topic._id, topic.pageId, null, 'AUTO_SKIP_MAX_SCHEDULED', `Page already has ${totalPendingForPage} pending posts (max ${MAX_SCHEDULED_POSTS})`);
-    return null;
+    const errMsg = `HARD LIMIT REACHED: Page has ${totalPendingForPage} pending posts (Max ${MAX_SCHEDULED_POSTS}). Cannot generate more.`;
+    await monitor(topic._id, topic.pageId, null, 'AUTO_BLOCKED_MAX_SCHEDULED', errMsg);
+    throw new Error(errMsg);
   }
 
+  // HARD CHECK 2: Max posts per specific topic
   const totalPosts = await AiScheduledPost.countDocuments({ topicId: topic._id });
   if (totalPosts >= MAX_POSTS_PER_TOPIC) {
-    await monitor(topic._id, topic.pageId, null, 'AUTO_SKIP_MAX_POSTS', `Topic has reached max ${MAX_POSTS_PER_TOPIC} posts`);
-    return null;
+    const errMsg = `HARD LIMIT REACHED: Topic has ${totalPosts} posts (Max ${MAX_POSTS_PER_TOPIC}).`;
+    await monitor(topic._id, topic.pageId, null, 'AUTO_BLOCKED_MAX_POSTS', errMsg);
+    throw new Error(errMsg);
   }
 
+  // Find the next available time slot
   const existingPosts = await AiScheduledPost.find({ topicId: topic._id }).select('scheduledTime');
   const existingTimesSet = new Set(existingPosts.map(p => p.scheduledTime.getTime()));
 
@@ -604,7 +647,7 @@ async function generateNextPostForTopic(topic) {
         );
         if (!validatedPost) {
           await monitor(topic._id, topic.pageId, null, 'AUTO_POST_FAILED', `Angle: ${angle} - QA failed`);
-          return null;
+          return null; // QA failure is not a hard limit, just a quality issue
         }
         let rawMediaUrl = null;
         if (topic.includeMedia) rawMediaUrl = await generateImage(topic.topicName, topic.pageId, validatedPost.text);
@@ -624,11 +667,14 @@ async function generateNextPostForTopic(topic) {
       }
     }
   }
+  // No future slot available is NOT a hard limit; return null gracefully
   await monitor(topic._id, topic.pageId, null, 'AUTO_NO_SLOT', 'No future slot available for this topic');
   return null;
 }
 
-// ========== ENHANCED AUTO TOPIC GENERATION ==========
+// ================================================================
+// ========== FIXED: AUTOPILOT WITH 1-INTEREST FOCUS & TRY/CATCH ==
+// ================================================================
 async function ensureActiveTopicsForPage(pageId) {
   const now = new Date();
   const activeTopics = await AiTopic.find({
@@ -637,11 +683,22 @@ async function ensureActiveTopicsForPage(pageId) {
     endDate: { $gte: now }
   });
 
+  // Loop through active topics and generate missing posts with hard error handling
   for (const topic of activeTopics) {
     const pendingCount = await AiScheduledPost.countDocuments({ topicId: topic._id, status: 'PENDING' });
-    if (pendingCount === 0) await generateNextPostForTopic(topic);
+    if (pendingCount === 0) {
+      try {
+        await generateNextPostForTopic(topic);
+      } catch (err) {
+        // Hard limit hit – stop generating for this cycle to prevent spam
+        console.error(`BLOCKED: ${err.message}`);
+        await monitor(topic._id, topic.pageId, null, 'HARD_LIMIT_TRIGGERED', err.message);
+        break; // Stop trying to generate more posts this round
+      }
+    }
   }
 
+  // Auto-topic creation logic
   if (!GLOBAL_AUTO_TOPIC_CREATION_ENABLED) return;
   const autoTopics = activeTopics.filter(t => !t.manualTopic);
   if (autoTopics.length >= MIN_ACTIVE_TOPICS) return;
@@ -653,24 +710,37 @@ async function ensureActiveTopicsForPage(pageId) {
   const profile = await PageProfile.findOne({ pageId });
   if (!profile?.audienceInterest?.length) return;
 
+  // STEP 1: Strictly pick ONE random interest for this topic cycle
+  const interests = profile.audienceInterest;
+  const selectedInterest = interests[Math.floor(Math.random() * interests.length)];
+  
+  // STEP 2: Try to fetch news for this SPECIFIC interest only
   let trendingHeadline = null;
   try {
-    trendingHeadline = await fetchTrendingHeadline(pageId);
-  } catch (e) {}
+    trendingHeadline = await fetchTrendingHeadline(pageId, selectedInterest);
+  } catch (e) {
+    console.warn('Trending headline fetch failed, proceeding without news:', e.message);
+  }
 
-  let topicName = await generateShortTopicName(profile.audienceInterest, trendingHeadline, pageId);
-  if (!topicName) topicName = `Interesting update about ${profile.audienceInterest[0]}`;
+  // STEP 3: Generate topic name strictly from this ONE interest
+  let topicName = await generateShortTopicName(selectedInterest, trendingHeadline, pageId);
+  if (!topicName) {
+    topicName = `Latest update on ${selectedInterest}`;
+  }
 
+  // Quality checks
   const { topicScore, pageFit } = await evaluateTopicQuality(topicName, pageId);
   if (topicScore < 20 || pageFit < 30) {
     await monitor(null, pageId, null, 'AUTO_TOPIC_REJECTED_QUALITY', `Topic "${topicName}" score=${topicScore}, fit=${pageFit}`);
     return;
   }
 
+  // Avoid similarity
   if (await isTopicTooSimilar(topicName, pageId)) {
     topicName = `${topicName} (fresh take)`;
   }
 
+  // Scheduling
   const startDate = await getIntelligentStartDate(pageId);
   const endDate = moment.tz(startDate, TIMEZONE).add(TOPIC_LIFETIME_DAYS, 'days').toDate();
   const times = [];
@@ -678,7 +748,10 @@ async function ensureActiveTopicsForPage(pageId) {
     const time = await getNonCollidingTime(pageId, startDate);
     times.push(time);
   }
-  const customAngles = await generateCustomAngles(topicName, pageId);
+
+  // STEP 4: Generate custom angles strictly focused on the single interest
+  const customAngles = await generateCustomAngles(topicName, pageId, selectedInterest);
+  
   const newTopic = await AiTopic.create({
     topicName, pageId, startDate, endDate, times,
     postsPerDay: POSTS_PER_DAY_AUTO,
@@ -688,8 +761,15 @@ async function ensureActiveTopicsForPage(pageId) {
     manualTopic: false
   });
   await monitor(newTopic._id, pageId, null, 'AUTO_TOPIC_CREATED',
-    `Topic: "${topicName}", Angles: ${customAngles.join(', ')}, Scores: topic=${topicScore}, fit=${pageFit}`);
-  await generateNextPostForTopic(newTopic);
+    `Topic: "${topicName}", Interest: "${selectedInterest}", Angles: ${customAngles.join(', ')}, Scores: topic=${topicScore}, fit=${pageFit}`);
+
+  // Generate the first post for this topic (wrap in try/catch to respect limits)
+  try {
+    await generateNextPostForTopic(newTopic);
+  } catch (err) {
+    console.error(`Failed to generate first post for new topic: ${err.message}`);
+    await monitor(newTopic._id, pageId, null, 'AUTO_FIRST_POST_FAILED', err.message);
+  }
 }
 
 // ========== EXPORTS ==========
