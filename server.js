@@ -20,6 +20,9 @@ const { startScheduler } = require('./services/scheduler');
 const { startAiPostScheduler } = require('./services/aiPostScheduler');
 const { startAutoMaintenance } = require('./services/autoMaintenance'); // ADDED
 
+// ==================== 🚀 ADDED: MPESA ROUTES ====================
+const lipaRoutes = require('./routes/lipaRoutes');
+
 // ==================== APP INIT ====================
 const app = express();
 app.set('trust proxy', 1);
@@ -126,6 +129,9 @@ app.use('/api/auth', authRoutes);
 
 // Facebook OAuth routes (handle auth internally)
 app.use('/api/facebook', facebookAuthRoutes);
+
+// 🚀 ADDED: M-Pesa Routes (Mounted globally so Safaricom can hit the callback)
+app.use('/api/lipa', lipaRoutes);
 
 // Protected API routes (require login)
 app.use('/api/dashboard', requireLogin, dashboardRoutes);
@@ -318,7 +324,8 @@ mongoose
             console.error('❌ Auto Maintenance error:', err.message);
         }
         
-         require('./services/autoGeneration');
+        // 🚀 KEEP YOUR EXISTING autoGeneration REQUIRE
+        require('./services/autoGeneration');
 
         // Start server
         app.listen(PORT, () => {
