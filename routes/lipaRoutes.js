@@ -1,7 +1,7 @@
 // routes/lipaRoutes.js
 const express = require('express');
 const router = express.Router();
-const { stkPush } = require('../Services/lipaService');
+const { stkPush } = require('../services/lipaService');
 const User = require('../models/User');
 
 // --- Endpoint 1: Initiate Payment (Frontend calls this) ---
