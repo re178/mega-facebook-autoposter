@@ -1,4 +1,7 @@
 // public/js/lipaService.js
+console.log('✅ lipaService.js loaded');
+
+// Function to load wallet balance
 async function loadWalletData() {
   try {
     const res = await fetch('/api/auth/profile', { credentials: 'include' });
@@ -22,14 +25,24 @@ async function loadWalletData() {
   }
 }
 
+// Function to initiate payment
 async function initiatePayment(amount) {
   const userId = document.getElementById('userId')?.value;
   const phone = document.getElementById('userPhone')?.value;
   const payBtn = document.getElementById('payButton');
 
-  if (!userId) return alert('Please login.');
-  if (!phone || phone.length < 10) return alert('⚠️ Update your phone number in profile.');
-  if (!amount || amount <= 0) return alert('Enter a valid amount.');
+  if (!userId) {
+    alert('Please login first.');
+    return;
+  }
+  if (!phone || phone.length < 10) {
+    alert('⚠️ Update your phone number in profile.');
+    return;
+  }
+  if (!amount || amount <= 0) {
+    alert('Enter a valid amount.');
+    return;
+  }
 
   payBtn.disabled = true;
   payBtn.innerHTML = '⏳ Sending...';
@@ -51,7 +64,7 @@ async function initiatePayment(amount) {
       alert('❌ ' + data.message);
     }
   } catch (e) {
-    alert('Network error.');
+    alert('Network error. Check console.');
     console.error(e);
   } finally {
     payBtn.disabled = false;
@@ -60,4 +73,19 @@ async function initiatePayment(amount) {
   }
 }
 
-document.addEventListener('DOMContentLoaded', loadWalletData);
+// Make it global so the inline onclick works (fallback)
+window.initiatePayment = initiatePayment;
+
+// Auto-load when DOM is ready
+document.addEventListener('DOMContentLoaded', () => {
+  loadWalletData();
+
+  // Also attach click event to the button (if you remove inline onclick)
+  const payBtn = document.getElementById('payButton');
+  if (payBtn) {
+    payBtn.addEventListener('click', function(e) {
+      const amount = document.getElementById('amountInput').value;
+      initiatePayment(amount);
+    });
+  }
+});
