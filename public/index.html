@@ -285,9 +285,8 @@
             <input type="hidden" id="userId" value="">
             <input type="hidden" id="userPhone" value="">
 
-            <button id="payButton" 
-                    onclick="initiatePayment(document.getElementById('amountInput').value)" 
-                    style="background: #22c55e; color: #0b1220; border: none; padding: 10px 24px; border-radius: 40px; font-weight: 600; font-size: 14px; cursor: pointer; height: 44px; white-space: nowrap; display: flex; align-items: center; gap: 8px;">
+            <!-- ✅ FIXED: Removed inline onclick – event listener is attached by lipaService.js -->
+            <button id="payButton" style="background: #22c55e; color: #0b1220; border: none; padding: 10px 24px; border-radius: 40px; font-weight: 600; font-size: 14px; cursor: pointer; height: 44px; white-space: nowrap; display: flex; align-items: center; gap: 8px;">
               <span>📱</span> Pay with M-Pesa
             </button>
           </div>
