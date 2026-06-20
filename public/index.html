@@ -182,6 +182,21 @@
       cursor: pointer;
       display: none;
     }
+
+    /* Responsive tweaks for the new wallet widget */
+    @media (max-width: 640px) {
+      #wallet-section > div {
+        flex-direction: column;
+        align-items: stretch !important;
+      }
+      #wallet-section input {
+        width: 100% !important;
+      }
+      #wallet-section button {
+        width: 100% !important;
+        justify-content: center;
+      }
+    }
     @media (max-width: 768px) {
       .sidebar { display: none; }
       .menu-btn { display: block; }
@@ -245,6 +260,44 @@
         </div>
       </section>
 
+      <!-- ============================================================ -->
+      <!-- 🚀 WALLET & M-PESA PAYMENT WIDGET (ADDED)                     -->
+      <!-- ============================================================ -->
+      <section class="card" id="wallet-section" style="border-left: 4px solid #22c55e;">
+        <div style="display: flex; flex-wrap: wrap; gap: 20px; align-items: center; justify-content: space-between;">
+          
+          <!-- Balance Display -->
+          <div>
+            <h3 style="margin: 0 0 4px 0; color: #9ca3af; font-size: 14px; font-weight: normal;">💰 Wallet Balance</h3>
+            <span style="font-size: 2.5rem; font-weight: bold; color: #fff;" id="walletBalanceDisplay">0.00</span>
+            <span style="color: #6b7280; font-size: 14px; margin-left: 4px;">KES</span>
+          </div>
+
+          <!-- Top-Up Form -->
+          <div style="display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap;">
+            <div>
+              <label style="color: #9ca3af; font-size: 12px; display: block; margin-bottom: 4px;">Amount (KES)</label>
+              <input type="number" id="amountInput" min="1" placeholder="e.g. 100" 
+                     style="background: #0b1220; border: 1px solid #2a2f3b; color: white; padding: 10px 12px; border-radius: 6px; width: 160px; height: 44px;">
+            </div>
+            
+            <!-- Hidden fields for user data -->
+            <input type="hidden" id="userId" value="">
+            <input type="hidden" id="userPhone" value="">
+
+            <button id="payButton" 
+                    onclick="initiatePayment(document.getElementById('amountInput').value)" 
+                    style="background: #22c55e; color: #0b1220; border: none; padding: 10px 24px; border-radius: 40px; font-weight: 600; font-size: 14px; cursor: pointer; height: 44px; white-space: nowrap; display: flex; align-items: center; gap: 8px;">
+              <span>📱</span> Pay with M-Pesa
+            </button>
+          </div>
+        </div>
+        <small style="color: #6b7280; display: block; margin-top: 14px; border-top: 1px solid #2a2f3b; padding-top: 12px;">
+          ⚡ You will receive an STK Push prompt on your registered phone. 
+          <span id="registeredPhoneDisplay" style="color: #22c55e;">(Loading...)</span>
+        </small>
+      </section>
+
       <!-- Summary Cards -->
       <section class="stats" id="summary-cards">
         <!-- JS will inject summary cards here -->
@@ -304,6 +357,9 @@
   <script src="js/api.js"></script>
   <script src="js/master.js"></script>
   <script src="/js/dashboard.js"></script>
+  
+  <!-- 🚀 ADDED: M-Pesa Wallet Frontend Logic -->
+  <script src="/js/lipaService.js"></script>
   
   <!-- Main Dashboard Script -->
   <script>
