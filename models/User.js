@@ -1,4 +1,3 @@
-
 const mongoose = require('mongoose');
 const bcrypt = require('bcrypt');
 
@@ -7,7 +6,6 @@ const UserSchema = new mongoose.Schema({
   /* =====================================================
      BASIC AUTH
   ===================================================== */
-
   email: {
     type: String,
     required: true,
@@ -15,7 +13,6 @@ const UserSchema = new mongoose.Schema({
     lowercase: true,
     trim: true
   },
-
   password: {
     type: String,
     required: true
@@ -24,17 +21,14 @@ const UserSchema = new mongoose.Schema({
   /* =====================================================
      EMAIL VERIFICATION
   ===================================================== */
-
   isVerified: {
     type: Boolean,
     default: false
   },
-
   verificationToken: {
     type: String,
     default: null
   },
-
   verificationExpires: {
     type: Date,
     default: null
@@ -43,12 +37,10 @@ const UserSchema = new mongoose.Schema({
   /* =====================================================
      PASSWORD RESET
   ===================================================== */
-
   resetPasswordToken: {
     type: String,
     default: null
   },
-
   resetPasswordExpires: {
     type: Date,
     default: null
@@ -57,7 +49,6 @@ const UserSchema = new mongoose.Schema({
   /* =====================================================
      USER ROLE
   ===================================================== */
-
   role: {
     type: String,
     enum: ['admin', 'moderator', 'user'],
@@ -67,7 +58,6 @@ const UserSchema = new mongoose.Schema({
   /* =====================================================
      PHONE
   ===================================================== */
-
   phone: {
     type: String,
     default: null
@@ -76,17 +66,14 @@ const UserSchema = new mongoose.Schema({
   /* =====================================================
      LEGAL AGREEMENTS
   ===================================================== */
-
   acceptedTerms: {
     type: Boolean,
     default: false
   },
-
   acceptedPrivacy: {
     type: Boolean,
     default: false
   },
-
   acceptedTermsAt: {
     type: Date,
     default: null
@@ -95,19 +82,16 @@ const UserSchema = new mongoose.Schema({
   /* =====================================================
      SUBSCRIPTION
   ===================================================== */
-
   subscription: {
     status: {
       type: String,
       enum: ['free', 'active', 'expired'],
       default: 'free'
     },
-
     plan: {
       type: String,
       default: 'free'
     },
-
     startDate: Date,
     expiryDate: Date
   },
@@ -115,30 +99,25 @@ const UserSchema = new mongoose.Schema({
   /* =====================================================
      USAGE TRACKING
   ===================================================== */
-
   usage: {
     postsToday: {
       type: Number,
       default: 0
     },
-
     lastPostDate: Date
   },
 
   /* =====================================================
      ACCOUNT STATUS
   ===================================================== */
-
   isActive: {
     type: Boolean,
     default: true
   },
-
   isSuspended: {
     type: Boolean,
     default: false
   },
-
   suspensionReason: {
     type: String,
     default: null
@@ -147,14 +126,11 @@ const UserSchema = new mongoose.Schema({
   /* =====================================================
      SECURITY
   ===================================================== */
-
   lastLogin: Date,
-
   lastLoginIP: {
     type: String,
     default: null
   },
-
   loginHistory: [
     {
       ip: String,
@@ -169,12 +145,10 @@ const UserSchema = new mongoose.Schema({
   /* =====================================================
      ANTI-BRUTE FORCE
   ===================================================== */
-
   failedLoginAttempts: {
     type: Number,
     default: 0
   },
-
   lockedUntil: {
     type: Date,
     default: null
@@ -183,26 +157,66 @@ const UserSchema = new mongoose.Schema({
   /* =====================================================
      PROFILE
   ===================================================== */
-
   fullName: {
     type: String,
     default: ''
   },
-
   avatar: {
     type: String,
     default: null
   },
 
   /* =====================================================
+     🚀 NEW: MPESA WALLET & TRANSACTIONS (SAFE ADDITION)
+  ===================================================== */
+  walletBalance: {
+    type: Number,
+    default: 0,
+    min: 0
+  },
+  transactions: [
+    {
+      type: {
+        type: String,
+        enum: ['deposit', 'payment', 'refund'],
+        default: 'deposit'
+      },
+      amount: {
+        type: Number,
+        required: true
+      },
+      mpesaReceipt: {
+        type: String,
+        unique: true,
+        sparse: true
+      },
+      checkoutRequestID: {
+        type: String,
+        index: true
+      },
+      status: {
+        type: String,
+        enum: ['pending', 'completed', 'failed'],
+        default: 'pending'
+      },
+      description: {
+        type: String,
+        default: 'M-Pesa deposit'
+      },
+      date: {
+        type: Date,
+        default: Date.now
+      }
+    }
+  ],
+
+  /* =====================================================
      TIMESTAMPS
   ===================================================== */
-
   createdAt: {
     type: Date,
     default: Date.now
   },
-
   updatedAt: {
     type: Date,
     default: Date.now
@@ -213,36 +227,23 @@ const UserSchema = new mongoose.Schema({
 /* =====================================================
    HASH PASSWORD BEFORE SAVE
 ===================================================== */
-
 UserSchema.pre('save', async function(next) {
-
   this.updatedAt = Date.now();
-
-  // only hash if password modified
   if (!this.isModified('password')) {
     return next();
   }
-
   try {
-
     const salt = await bcrypt.genSalt(10);
-
     this.password = await bcrypt.hash(this.password, salt);
-
     next();
-
   } catch (err) {
-
     next(err);
-
   }
-
 });
 
 /* =====================================================
    PASSWORD COMPARISON METHOD
 ===================================================== */
-
 UserSchema.methods.comparePassword = async function(candidatePassword) {
   return bcrypt.compare(candidatePassword, this.password);
 };
