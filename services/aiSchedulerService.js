@@ -44,7 +44,6 @@ const ImageProviders = [CloudflareImage, StabilityImage, LeonardoImage, DALLEIma
 
 // Global settings
 const TIMEZONE = 'Africa/Nairobi';
-const MAX_POSTS_PER_TOPIC = 5;
 const MAX_SCHEDULED_POSTS = 10;
 const MIN_ACTIVE_TOPICS = 3;
 const MAX_ACTIVE_TOPICS = 6;
@@ -76,7 +75,7 @@ async function monitor(topicId, pageId, postId, action, message) {
   } catch (err) { console.error('LOG ERROR:', err.message); }
 }
 
-// Cleanup
+// Cleanup old logs (keeps AUTO_ logs for longer)
 async function cleanupLogs() {
   const cutoff = new Date(Date.now() - 30 * 60 * 1000);
   await AiLog.deleteMany({ createdAt: { $lt: cutoff }, action: { $not: /^AUTO_/ } });
@@ -490,6 +489,41 @@ async function evaluateTopicQuality(topicName, pageId) {
   return { topicScore, pageFit, combined: (topicScore + pageFit) / 2 };
 }
 
+// ================================================================
+// ========== NEW: Count used angles via logs ====================
+// ================================================================
+async function getUsedAnglesCount(topicId) {
+  return await AiLog.countDocuments({
+    topicId: topicId,
+    action: { $in: ['AUTO_POST_GENERATED', 'MANUAL_POST_CREATED'] }
+  });
+}
+
+// ================================================================
+// ========== NEW: Expire & delete topic if complete =============
+// ================================================================
+async function expireTopicIfComplete(topic) {
+  const usedCount = await getUsedAnglesCount(topic._id);
+  const totalAngles = (topic.customAngles && topic.customAngles.length) ? topic.customAngles.length : 5;
+  if (usedCount < totalAngles) return; // not complete
+
+  // Set endDate to now (expire)
+  await AiTopic.findByIdAndUpdate(topic._id, { endDate: new Date() });
+
+  // Check for pending posts
+  const pendingCount = await AiScheduledPost.countDocuments({ topicId: topic._id, status: 'PENDING' });
+  if (pendingCount === 0) {
+    // Safe to delete topic and logs
+    await AiTopic.findByIdAndDelete(topic._id);
+    await AiLog.deleteMany({ topicId: topic._id });
+    await monitor(null, topic.pageId, null, 'TOPIC_EXPIRED_DELETED',
+      `Topic "${topic.topicName}" – all angles used, no pending posts. Deleted.`);
+  } else {
+    await monitor(topic._id, topic.pageId, null, 'TOPIC_EXPIRED_PENDING',
+      `Topic "${topic.topicName}" – all angles used, but ${pendingCount} pending posts remain. Will delete after they are gone.`);
+  }
+}
+
 // ========== ENHANCED MANUAL TOPIC CREATION ==========
 async function createManualTopicWithQA(pageId, topicName, startDate, endDate, times, postsPerDay, includeMedia, includeVideo) {
   const activeTopicsCount = await AiTopic.countDocuments({
@@ -533,36 +567,57 @@ async function createManualTopicWithQA(pageId, topicName, startDate, endDate, ti
   return { success: true, topic: newTopic, topicScore, pageFit, customAngles };
 }
 
-// ========== GENERATE POSTS FOR MANUAL TOPIC ==========
+// ========== GENERATE POSTS FOR MANUAL TOPIC (UPDATED) ==========
 async function generatePostsForManualTopic(topicId, generateImmediately = false) {
   const topic = await AiTopic.findById(topicId);
   if (!topic) return { success: false, reason: 'Topic not found' };
-  const pageProfile = await PageProfile.findOne({ pageId: topic.pageId });
-  const recentPosts = await AiScheduledPost.find({ pageId: topic.pageId, status: 'PENDING' }).sort({ scheduledTime: -1 }).limit(10).select('text').lean();
-  const recentPostTexts = recentPosts.map(p => p.text).filter(Boolean);
+
+  // Determine how many posts already generated (via logs)
+  const usedCount = await getUsedAnglesCount(topic._id);
   let anglesToUse = (topic.customAngles && topic.customAngles.length) ? topic.customAngles : await generateCustomAngles(topic.topicName, topic.pageId);
   if (!anglesToUse) anglesToUse = [...DEFAULT_ANGLES];
   while (anglesToUse.length < 5) anglesToUse.push(DEFAULT_ANGLES[anglesToUse.length % DEFAULT_ANGLES.length]);
+  const totalAngles = anglesToUse.length;
+  if (usedCount >= totalAngles) {
+    await expireTopicIfComplete(topic);
+    return { success: false, reason: 'All angles already used. Topic expired.' };
+  }
+
+  const pageProfile = await PageProfile.findOne({ pageId: topic.pageId });
+  const recentPosts = await AiScheduledPost.find({ pageId: topic.pageId, status: 'PENDING' }).sort({ scheduledTime: -1 }).limit(10).select('text').lean();
+  const recentPostTexts = recentPosts.map(p => p.text).filter(Boolean);
+
   const start = moment.tz(topic.startDate, TIMEZONE);
   const end = moment.tz(topic.endDate, TIMEZONE);
   let created = [];
-  let angleIndex = 0;
-  const totalPostsNeeded = Math.ceil(end.diff(start, 'days') + 1) * topic.postsPerDay;
+  let angleIndex = usedCount; // start from the next unused angle
+
+  // Loop through days and times, generating posts only until angleIndex reaches totalAngles
   for (let day = start.clone(); day.isSameOrBefore(end); day.add(1, 'day')) {
     for (let i = 0; i < topic.postsPerDay; i++) {
-      if (angleIndex >= totalPostsNeeded) break;
-      const angle = anglesToUse[angleIndex % anglesToUse.length];
+      if (angleIndex >= totalAngles) break;
+      const angle = anglesToUse[angleIndex];
       const time = topic.times[i % topic.times.length];
       const scheduled = moment.tz(`${day.format('YYYY-MM-DD')} ${time}`, TIMEZONE).toDate();
+      // Skip if already scheduled (should not happen for manual generation, but guard)
       const existsScheduled = await AiScheduledPost.findOne({ topicId, scheduledTime: scheduled });
       if (existsScheduled) continue;
+
       const context = await pageIntelligence.enrichContext(topic.pageId, pageProfile, topic.topicName, recentPostTexts);
-      const validatedPost = await generateAndValidatePost(topic.topicName, angle, topic.pageId, pageProfile, recentPostTexts, context.dna, context.topHeadline, context.contentType);
-      if (!validatedPost) { await monitor(topicId, topic.pageId, null, 'MANUAL_POST_FAILED', `Angle: ${angle} - Failed QA`); continue; }
+      const validatedPost = await generateAndValidatePost(
+        topic.topicName, angle, topic.pageId, pageProfile, recentPostTexts,
+        context.dna, context.topHeadline, context.contentType
+      );
+      if (!validatedPost) {
+        await monitor(topicId, topic.pageId, null, 'MANUAL_POST_FAILED', `Angle: ${angle} - Failed QA`);
+        continue; // skip this angle, but we might want to retry? We'll move on.
+      }
+
       let rawMediaUrl = null;
       if (topic.includeMedia) rawMediaUrl = await generateImage(topic.topicName, topic.pageId, validatedPost.text);
       let finalMediaUrl = null;
       if (rawMediaUrl || topic.includeVideo) finalMediaUrl = await createBrandedImage(topicId, topic.pageId, rawMediaUrl, validatedPost.text);
+
       const post = await AiScheduledPost.create({
         topicId, pageId: topic.pageId, text: validatedPost.text, mediaUrl: finalMediaUrl,
         scheduledTime: scheduled, status: generateImmediately ? 'PENDING' : 'PENDING',
@@ -574,7 +629,12 @@ async function generatePostsForManualTopic(topicId, generateImmediately = false)
       await monitor(topicId, topic.pageId, post._id, 'MANUAL_POST_CREATED', `Angle: ${angle}, QA Score: ${validatedPost.score}, Scheduled: ${scheduled}`);
       angleIndex++;
     }
+    if (angleIndex >= totalAngles) break;
   }
+
+  // After generation, expire topic if all angles used
+  await expireTopicIfComplete(topic);
+
   return { success: true, created };
 }
 
@@ -596,86 +656,144 @@ async function createAiLog(pageId, postId, action, message) {
 }
 
 // ================================================================
-// ========== FIXED: HARD ENFORCED LIMITS (THROW ERRORS) ==========
+// ========== UPDATED: GENERATE NEXT POST (USING LOGS) ============
 // ================================================================
 async function generateNextPostForTopic(topic) {
-  // HARD CHECK 1: Max scheduled posts per page
-  const totalPendingForPage = await AiScheduledPost.countDocuments({
-    pageId: topic.pageId,
-    status: 'PENDING'
-  });
-  if (totalPendingForPage >= MAX_SCHEDULED_POSTS) {
-    const errMsg = `HARD LIMIT REACHED: Page has ${totalPendingForPage} pending posts (Max ${MAX_SCHEDULED_POSTS}). Cannot generate more.`;
-    await monitor(topic._id, topic.pageId, null, 'AUTO_BLOCKED_MAX_SCHEDULED', errMsg);
-    throw new Error(errMsg);
+  // --- PREREQUISITE CHECKS ---
+
+  // 1. Topic must be active (not ended)
+  const now = new Date();
+  if (topic.endDate < now) {
+    await monitor(topic._id, topic.pageId, null, 'SKIP_EXPIRED', 'Topic has already ended.');
+    return null;
   }
 
-  // HARD CHECK 2: Max posts per specific topic
-  const totalPosts = await AiScheduledPost.countDocuments({ topicId: topic._id });
-  if (totalPosts >= MAX_POSTS_PER_TOPIC) {
-    const errMsg = `HARD LIMIT REACHED: Topic has ${totalPosts} posts (Max ${MAX_POSTS_PER_TOPIC}).`;
-    await monitor(topic._id, topic.pageId, null, 'AUTO_BLOCKED_MAX_POSTS', errMsg);
-    throw new Error(errMsg);
+  // 2. Check angles used via logs
+  const usedCount = await getUsedAnglesCount(topic._id);
+  const totalAngles = (topic.customAngles && topic.customAngles.length) ? topic.customAngles.length : 5;
+  if (usedCount >= totalAngles) {
+    // All angles used – expire and clean up if possible
+    await expireTopicIfComplete(topic);
+    return null;
   }
 
-  // Find the next available time slot
+  // 3. Topic must have zero pending posts
+  const pendingCount = await AiScheduledPost.countDocuments({ topicId: topic._id, status: 'PENDING' });
+  if (pendingCount > 0) {
+    await monitor(topic._id, topic.pageId, null, 'SKIP_HAS_PENDING', `Topic has ${pendingCount} pending posts.`);
+    return null;
+  }
+
+  // 4. Page must not exceed max pending posts
+  const pagePending = await AiScheduledPost.countDocuments({ pageId: topic.pageId, status: 'PENDING' });
+  if (pagePending >= MAX_SCHEDULED_POSTS) {
+    await monitor(topic._id, topic.pageId, null, 'SKIP_PAGE_LIMIT', `Page has ${pagePending} pending (max ${MAX_SCHEDULED_POSTS}).`);
+    return null;
+  }
+
+  // 5. Find a future free time slot
   const existingPosts = await AiScheduledPost.find({ topicId: topic._id }).select('scheduledTime');
-  const existingTimesSet = new Set(existingPosts.map(p => p.scheduledTime.getTime()));
-
+  const existingTimes = new Set(existingPosts.map(p => p.scheduledTime.getTime()));
   const start = moment.tz(topic.startDate, TIMEZONE);
   const end = moment.tz(topic.endDate, TIMEZONE);
-  const now = moment().tz(TIMEZONE);
-
+  const nowMoment = moment().tz(TIMEZONE);
+  let scheduledTime = null;
   for (let day = start.clone(); day.isSameOrBefore(end); day.add(1, 'day')) {
     for (let i = 0; i < topic.postsPerDay; i++) {
       const timeStr = topic.times[i % topic.times.length];
-      const scheduledMoment = moment.tz(`${day.format('YYYY-MM-DD')} ${timeStr}`, TIMEZONE);
-      if (scheduledMoment.isBefore(now)) continue;
-      const slotKey = scheduledMoment.toDate().getTime();
-      if (!existingTimesSet.has(slotKey)) {
-        const pageProfile = await PageProfile.findOne({ pageId: topic.pageId });
-        const recentPosts = await AiScheduledPost.find({ pageId: topic.pageId, status: 'PENDING' })
-          .sort({ scheduledTime: -1 }).limit(10).select('text').lean();
-        const recentPostTexts = recentPosts.map(p => p.text).filter(Boolean);
-        const anglesToUse = (topic.customAngles && topic.customAngles.length) ? topic.customAngles : await generateCustomAngles(topic.topicName, topic.pageId);
-        const angle = anglesToUse[totalPosts % anglesToUse.length];
-
-        const context = await pageIntelligence.enrichContext(topic.pageId, pageProfile, topic.topicName, recentPostTexts);
-        const validatedPost = await generateAndValidatePost(
-          topic.topicName, angle, topic.pageId, pageProfile, recentPostTexts,
-          context.dna, context.topHeadline, context.contentType
-        );
-        if (!validatedPost) {
-          await monitor(topic._id, topic.pageId, null, 'AUTO_POST_FAILED', `Angle: ${angle} - QA failed`);
-          return null; // QA failure is not a hard limit, just a quality issue
-        }
-        let rawMediaUrl = null;
-        if (topic.includeMedia) rawMediaUrl = await generateImage(topic.topicName, topic.pageId, validatedPost.text);
-        let finalMediaUrl = null;
-        if (rawMediaUrl || topic.includeVideo) finalMediaUrl = await createBrandedImage(topic._id, topic.pageId, rawMediaUrl, validatedPost.text);
-        const post = await AiScheduledPost.create({
-          topicId: topic._id,
-          pageId: topic.pageId,
-          text: validatedPost.text,
-          mediaUrl: finalMediaUrl,
-          scheduledTime: scheduledMoment.toDate(),
-          status: 'PENDING',
-          meta: { angle, qaScore: validatedPost.score, qaBreakdown: validatedPost.breakdown, generatedByAutoCron: true }
-        });
-        await monitor(topic._id, topic.pageId, post._id, 'AUTO_POST_GENERATED', `Next post for topic "${topic.topicName}" at ${scheduledMoment.format()}`);
-        return post;
+      const candidate = moment.tz(`${day.format('YYYY-MM-DD')} ${timeStr}`, TIMEZONE);
+      if (candidate.isBefore(nowMoment)) continue;
+      const key = candidate.toDate().getTime();
+      if (!existingTimes.has(key)) {
+        scheduledTime = candidate.toDate();
+        break;
       }
     }
+    if (scheduledTime) break;
   }
-  // No future slot available is NOT a hard limit; return null gracefully
-  await monitor(topic._id, topic.pageId, null, 'AUTO_NO_SLOT', 'No future slot available for this topic');
-  return null;
+  if (!scheduledTime) {
+    await monitor(topic._id, topic.pageId, null, 'SKIP_NO_SLOT', 'No future time slot available.');
+    return null;
+  }
+
+  // --- GENERATE POST ---
+
+  // Determine next angle (sequential)
+  const anglesToUse = (topic.customAngles && topic.customAngles.length) ? topic.customAngles : DEFAULT_ANGLES;
+  const nextAngle = anglesToUse[usedCount]; // usedCount is 0-indexed, next unused
+
+  const pageProfile = await PageProfile.findOne({ pageId: topic.pageId });
+  const recentPosts = await AiScheduledPost.find({ pageId: topic.pageId, status: 'PENDING' })
+    .sort({ scheduledTime: -1 }).limit(10).select('text').lean();
+  const recentPostTexts = recentPosts.map(p => p.text).filter(Boolean);
+  const context = await pageIntelligence.enrichContext(topic.pageId, pageProfile, topic.topicName, recentPostTexts);
+
+  const validatedPost = await generateAndValidatePost(
+    topic.topicName, nextAngle, topic.pageId, pageProfile, recentPostTexts,
+    context.dna, context.topHeadline, context.contentType
+  );
+  if (!validatedPost) {
+    await monitor(topic._id, topic.pageId, null, 'POST_GEN_FAILED', `Angle "${nextAngle}" failed QA.`);
+    return null;
+  }
+
+  // Generate media (if enabled)
+  let rawMediaUrl = null;
+  if (topic.includeMedia) rawMediaUrl = await generateImage(topic.topicName, topic.pageId, validatedPost.text);
+  let finalMediaUrl = null;
+  if (rawMediaUrl || topic.includeVideo) finalMediaUrl = await createBrandedImage(topic._id, topic.pageId, rawMediaUrl, validatedPost.text);
+
+  // Save the post
+  const post = await AiScheduledPost.create({
+    topicId: topic._id,
+    pageId: topic.pageId,
+    text: validatedPost.text,
+    mediaUrl: finalMediaUrl,
+    scheduledTime: scheduledTime,
+    status: 'PENDING',
+    meta: {
+      angle: nextAngle,
+      qaScore: validatedPost.score,
+      qaBreakdown: validatedPost.breakdown,
+      generatedByAutoCron: true
+    }
+  });
+
+  // Log the successful generation
+  await monitor(topic._id, topic.pageId, post._id, 'AUTO_POST_GENERATED',
+    `Angle: "${nextAngle}" (${usedCount + 1}/${totalAngles}), Score: ${validatedPost.score}`);
+
+  // --- AFTER GENERATION: check if all angles are now used ---
+  const newUsedCount = await getUsedAnglesCount(topic._id); // recount
+  if (newUsedCount >= totalAngles) {
+    // All angles used → expire topic
+    await expireTopicIfComplete(topic);
+  }
+
+  return post;
 }
 
 // ================================================================
-// ========== FIXED: AUTOPILOT WITH 1-INTEREST FOCUS & TRY/CATCH ==
+// ========== UPDATED AUTOPILOT (CLEANUP + POST GENERATION) ======
 // ================================================================
 async function ensureActiveTopicsForPage(pageId) {
+  // --- CLEANUP PHASE: remove fully used topics with no pending posts ---
+  const allTopics = await AiTopic.find({ pageId });
+  for (const topic of allTopics) {
+    const usedCount = await getUsedAnglesCount(topic._id);
+    const totalAngles = (topic.customAngles && topic.customAngles.length) ? topic.customAngles.length : 5;
+    if (usedCount >= totalAngles) {
+      const pending = await AiScheduledPost.countDocuments({ topicId: topic._id, status: 'PENDING' });
+      if (pending === 0) {
+        // Delete topic and logs
+        await AiTopic.findByIdAndDelete(topic._id);
+        await AiLog.deleteMany({ topicId: topic._id });
+        await monitor(null, pageId, null, 'CLEANUP_DELETED', `Removed expired topic "${topic.topicName}" (no pending posts).`);
+      }
+    }
+  }
+
+  // --- ACTIVE TOPICS POST GENERATION ---
   const now = new Date();
   const activeTopics = await AiTopic.find({
     pageId,
@@ -683,7 +801,6 @@ async function ensureActiveTopicsForPage(pageId) {
     endDate: { $gte: now }
   });
 
-  // Loop through active topics and generate missing posts with hard error handling
   for (const topic of activeTopics) {
     const pendingCount = await AiScheduledPost.countDocuments({ topicId: topic._id, status: 'PENDING' });
     if (pendingCount === 0) {
@@ -698,7 +815,7 @@ async function ensureActiveTopicsForPage(pageId) {
     }
   }
 
-  // Auto-topic creation logic
+  // --- AUTO-TOPIC CREATION (unchanged) ---
   if (!GLOBAL_AUTO_TOPIC_CREATION_ENABLED) return;
   const autoTopics = activeTopics.filter(t => !t.manualTopic);
   if (autoTopics.length >= MIN_ACTIVE_TOPICS) return;
@@ -710,11 +827,9 @@ async function ensureActiveTopicsForPage(pageId) {
   const profile = await PageProfile.findOne({ pageId });
   if (!profile?.audienceInterest?.length) return;
 
-  // STEP 1: Strictly pick ONE random interest for this topic cycle
   const interests = profile.audienceInterest;
   const selectedInterest = interests[Math.floor(Math.random() * interests.length)];
   
-  // STEP 2: Try to fetch news for this SPECIFIC interest only
   let trendingHeadline = null;
   try {
     trendingHeadline = await fetchTrendingHeadline(pageId, selectedInterest);
@@ -722,25 +837,21 @@ async function ensureActiveTopicsForPage(pageId) {
     console.warn('Trending headline fetch failed, proceeding without news:', e.message);
   }
 
-  // STEP 3: Generate topic name strictly from this ONE interest
   let topicName = await generateShortTopicName(selectedInterest, trendingHeadline, pageId);
   if (!topicName) {
     topicName = `Latest update on ${selectedInterest}`;
   }
 
-  // Quality checks
   const { topicScore, pageFit } = await evaluateTopicQuality(topicName, pageId);
   if (topicScore < 20 || pageFit < 30) {
     await monitor(null, pageId, null, 'AUTO_TOPIC_REJECTED_QUALITY', `Topic "${topicName}" score=${topicScore}, fit=${pageFit}`);
     return;
   }
 
-  // Avoid similarity
   if (await isTopicTooSimilar(topicName, pageId)) {
     topicName = `${topicName} (fresh take)`;
   }
 
-  // Scheduling
   const startDate = await getIntelligentStartDate(pageId);
   const endDate = moment.tz(startDate, TIMEZONE).add(TOPIC_LIFETIME_DAYS, 'days').toDate();
   const times = [];
@@ -749,7 +860,6 @@ async function ensureActiveTopicsForPage(pageId) {
     times.push(time);
   }
 
-  // STEP 4: Generate custom angles strictly focused on the single interest
   const customAngles = await generateCustomAngles(topicName, pageId, selectedInterest);
   
   const newTopic = await AiTopic.create({
@@ -763,7 +873,6 @@ async function ensureActiveTopicsForPage(pageId) {
   await monitor(newTopic._id, pageId, null, 'AUTO_TOPIC_CREATED',
     `Topic: "${topicName}", Interest: "${selectedInterest}", Angles: ${customAngles.join(', ')}, Scores: topic=${topicScore}, fit=${pageFit}`);
 
-  // Generate the first post for this topic (wrap in try/catch to respect limits)
   try {
     await generateNextPostForTopic(newTopic);
   } catch (err) {
@@ -807,5 +916,7 @@ module.exports = {
   createAiLog,
   ensureActiveTopicsForPage,
   generateNextPostForTopic,
-  evaluateTopicQuality
+  evaluateTopicQuality,
+  getUsedAnglesCount,        // exported for debugging
+  expireTopicIfComplete      // exported for debugging
 };
