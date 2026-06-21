@@ -1,16 +1,20 @@
 // services/qualityAssurance.js - Intelligent artifact removal + safe overrides
 const { identityScore, updatePageMemory: updateIntelligenceMemory, getPageMemory: getIntelligenceMemory } = require('./pageIntelligence');
 
-// ========== INTELLIGENT POST CLEANING ==========
+// ========== INTELLIGENT POST CLEANING (SAFE VERSION) ==========
 function cleanPostResponse(rawResponse) {
   if (!rawResponse || typeof rawResponse !== 'string') return '';
   let cleaned = rawResponse.trim();
 
-  // 1. Remove markdown code blocks
-  cleaned = cleaned.replace(/```[\s\S]*?```/g, '');
+  // 1. Remove markdown code blocks (but keep the inner content)
+  cleaned = cleaned.replace(/```[\s\S]*?```/g, (match) => {
+    // Extract content between backticks, removing the fences
+    return match.replace(/^```\s*|```$/g, '').trim();
+  });
+  // Also remove inline backticks (only if they are not part of words)
   cleaned = cleaned.replace(/`([^`]+)`/g, '$1');
 
-  // 2. Remove common AI prefixes (extended list)
+  // 2. Remove common AI prefixes only if they appear at the very start
   const prefixes = [
     /^here('s| is) (the )?rewritten (post|version)(:)?\s*/i,
     /^rewritten post(:)?\s*/i,
@@ -26,44 +30,26 @@ function cleanPostResponse(rawResponse) {
     /^this is the (rewritten )?post(:)?\s*/i,
   ];
   for (const re of prefixes) {
-    cleaned = cleaned.replace(re, '');
-  }
-
-  // 3. If the string starts with a quote, extract what's inside the first pair of quotes
-  const quoteMatch = cleaned.match(/^["'](.*)["']/s);
-  if (quoteMatch) {
-    cleaned = quoteMatch[1];
-  } else {
-    // If no outer quotes but contains quoted text, take the first quoted block
-    const innerQuoteMatch = cleaned.match(/["']([^"']+)["']/);
-    if (innerQuoteMatch) {
-      cleaned = innerQuoteMatch[1];
+    if (cleaned.match(re)) {
+      cleaned = cleaned.replace(re, '');
+      break; // only one prefix should be removed
     }
   }
 
-  // 4. Remove any remaining leading/trailing quotes or backticks
-  cleaned = cleaned.replace(/^["'`]+|["'`]+$/g, '');
-
-  // 5. If the cleaned text starts with a lowercase letter after a period? No – just trim
-  //    But also remove common instructional leftovers
+  // 3. Remove leftover instructional phrases only if they start the text
   const instructional = /^(the post |the rewritten post |the response |the text |the content |the message )/i;
   cleaned = cleaned.replace(instructional, '');
 
-  // 6. If the result is still suspiciously long with instruction words at start, try to extract first complete sentence
-  if (cleaned.length > 50 && /^(here|this|below|above|as|i have|the following)/i.test(cleaned)) {
-    const firstSentence = cleaned.match(/^[^.!?]+[.!?]/);
-    if (firstSentence && firstSentence[0].length < cleaned.length / 2) {
-      // The first sentence might be instruction; take everything after it
-      const afterFirst = cleaned.slice(firstSentence[0].length).trim();
-      if (afterFirst.length > 20) cleaned = afterFirst;
-    }
+  // 4. Remove any stray quotes/backticks that may have been left at the very edges
+  cleaned = cleaned.replace(/^["'`]+|["'`]+$/g, '');
+
+  // 5. Final trim
+  cleaned = cleaned.trim();
+
+  // 6. If empty, return a fallback (but avoid truncation – use a default placeholder)
+  if (!cleaned) {
+    return rawResponse.substring(0, 200) || '(empty post)';
   }
-
-  // 7. Final trim and remove any stray quotes at edges again
-  cleaned = cleaned.trim().replace(/^["']|["']$/g, '');
-
-  // 8. If the result is empty, return a fallback message (though this shouldn't happen)
-  if (!cleaned) return rawResponse.substring(0, 200); // fallback
 
   return cleaned;
 }
