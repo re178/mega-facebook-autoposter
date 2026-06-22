@@ -1,9 +1,8 @@
-// pageAi.js – Complete working version with Page Profile and working delete buttons
+// pageAi.js – Complete AI Scheduler with plan enforcement
 (function() {
-    // Helper: escape HTML
     function escapeHtml(str) {
         if (!str) return '';
-        return str.replace(/[&<>]/g, function(m) {
+        return str.replace(/[&<>]/g, m => {
             if (m === '&') return '&amp;';
             if (m === '<') return '&lt;';
             if (m === '>') return '&gt;';
@@ -11,7 +10,6 @@
         });
     }
 
-    // Get pageId from URL
     const qs = new URLSearchParams(window.location.search);
     const pageId = qs.get('pageId');
     if (!pageId) {
@@ -19,7 +17,22 @@
         return;
     }
 
-    // DOM elements
+    // Get user plan from global
+    const userPlan = window.userPlan || 'free';
+    const FEATURE_LIMITS = {
+        aiTopics: { free: 1, pro: Infinity, enterprise: Infinity },
+        aiPostsPerMonth: { free: 5, pro: Infinity, enterprise: Infinity }
+    };
+    function getLimit(feature) {
+        const limits = FEATURE_LIMITS[feature];
+        if (!limits) return 0;
+        return limits[userPlan] !== undefined ? limits[userPlan] : 0;
+    }
+    function canAccess(feature) {
+        const limit = getLimit(feature);
+        return limit > 0;
+    }
+
     const els = {
         topicSelect: document.getElementById('ai-topic-select'),
         editBtn: document.getElementById('ai-edit-topic'),
@@ -39,10 +52,10 @@
         postsTable: document.getElementById('ai-upcoming-posts'),
         logsTable: document.getElementById('ai-logs'),
         monitor: document.getElementById('ai-monitor-log'),
-        autoGenToggle: document.getElementById('autoGenToggle')
+        autoGenToggle: document.getElementById('autoGenToggle'),
+        deleteAllTopicPosts: document.getElementById('ai-delete-all-topic-posts')
     };
 
-    // Page Profile elements
     const profileEls = {
         name: document.getElementById('profile-name'),
         tone: document.getElementById('profile-tone'),
@@ -56,7 +69,6 @@
         deleteBtn: document.getElementById('profile-delete')
     };
 
-    // Use global apiFetch if available
     const apiFetch = window.apiFetch || (async (url, opts) => {
         const res = await fetch(url, { ...opts, credentials: 'include' });
         if (res.status === 401) window.location.href = '/login';
@@ -72,18 +84,32 @@
 
     function log(msg, type = 'info') {
         if (!els.monitor) return;
-        const color = type === 'error' ? '#ff4c4c' : type === 'warn' ? '#ffaa00' : '#00ff99';
+        const color = type === 'error' ? '#f97316' : type === 'warn' ? '#f59e0b' : '#10b981';
         const line = document.createElement('div');
         line.innerHTML = `<span style="color:${color}">[${new Date().toLocaleTimeString()}]</span> ${escapeHtml(msg)}`;
         els.monitor.appendChild(line);
         els.monitor.scrollTop = els.monitor.scrollHeight;
     }
 
-    // ========== PAGE PROFILE ==========
+    // Check if user can use AI features
+    if (!canAccess('aiTopics')) {
+        const container = document.getElementById('ai-scheduler-section');
+        if (container) {
+            container.innerHTML = `
+                <div style="background:#fef3c7; border-left:4px solid #f59e0b; padding:16px; border-radius:6px;">
+                    <p style="margin:0; color:#78350f;"><strong>🔒 AI Scheduler requires Pro plan</strong></p>
+                    <p style="margin:4px 0 0; font-size:14px; color:#92400e;">Upgrade to unlock unlimited AI topics and posts.</p>
+                    <button class="btn btn-warning" onclick="showUpgradeModal()" style="margin-top:8px;">Upgrade Now</button>
+                </div>
+            `;
+        }
+        return; // Stop executing AI features
+    }
+
+    // ===== PAGE PROFILE =====
     async function loadProfile() {
         try {
             const data = await apiFetch(`/api/ai/page/${pageId}/profile`);
-            console.log('Profile data:', data);
             if (data && Object.keys(data).length > 0) {
                 if (profileEls.name) profileEls.name.value = data.name || '';
                 if (profileEls.tone) profileEls.tone.value = data.tone || 'friendly';
@@ -130,10 +156,10 @@
                     body: JSON.stringify(payload)
                 });
                 log('💾 Page profile saved');
-                alert('Profile saved successfully!');
+                showToast('Profile saved successfully!', 'success');
             } catch (err) {
                 log('❌ Failed saving page profile', 'error');
-                alert('Error saving profile: ' + err.message);
+                showToast('Error saving profile: ' + err.message, 'error');
             }
         };
     }
@@ -144,7 +170,6 @@
             try {
                 await apiFetch(`/api/ai/page/${pageId}/profile`, { method: 'DELETE' });
                 log('🗑 Page profile deleted');
-                // Clear form
                 if (profileEls.name) profileEls.name.value = '';
                 if (profileEls.tone) profileEls.tone.value = 'friendly';
                 if (profileEls.writingStyle) profileEls.writingStyle.value = 'conversational';
@@ -153,9 +178,10 @@
                 if (profileEls.audienceAge) profileEls.audienceAge.value = '';
                 if (profileEls.audienceInterest) profileEls.audienceInterest.value = '';
                 if (profileEls.extraNotes) profileEls.extraNotes.value = '';
-                alert('Profile deleted');
+                showToast('Profile deleted', 'success');
             } catch (err) {
                 log('❌ Failed deleting profile', 'error');
+                showToast('Error deleting profile', 'error');
             }
         };
     }
@@ -191,8 +217,10 @@
                 els.autoGenToggle.dataset.enabled = data.enabled;
                 els.autoGenToggle.textContent = data.enabled ? 'Auto-Generation: ON' : 'Auto-Generation: OFF';
                 log(`🔄 Auto-Generation ${data.enabled ? 'enabled' : 'disabled'}`);
+                showToast(`Auto-Generation ${data.enabled ? 'enabled' : 'disabled'}`, 'success');
             } catch (err) {
                 log('❌ Failed to toggle auto-generation', 'error');
+                showToast('Error toggling auto-generation', 'error');
             }
         });
         loadAutoGenState();
@@ -203,6 +231,7 @@
         const input = document.createElement('input');
         input.type = 'time';
         input.value = value;
+        input.style.cssText = 'padding:6px; border:1px solid #e2e8f0; border-radius:4px; background:#f8fafc;';
         els.timesContainer.appendChild(input);
     }
     if (els.addTimeBtn) {
@@ -244,10 +273,17 @@
         };
     }
 
-    // Save topic
+    // Save topic (with limit check)
     if (els.saveBtn) {
         els.saveBtn.onclick = async () => {
             try {
+                // Check if user already has max topics
+                const topics = await apiFetch(`/api/ai/page/${pageId}/topics`);
+                const limit = getLimit('aiTopics');
+                if (topics.length >= limit && !currentTopicId) {
+                    showToast(`You have reached the maximum of ${limit} topics. Upgrade to Pro for unlimited.`, 'warning');
+                    return;
+                }
                 const payload = {
                     topicName: els.topicName.value.trim(),
                     postsPerDay: Number(els.postsPerDay.value),
@@ -269,11 +305,13 @@
                 });
                 currentTopicId = data._id;
                 log(`💾 Topic saved: ${data.topicName}`);
+                showToast('Topic saved', 'success');
                 loadTopics();
                 loadUpcomingPosts();
                 loadLogs();
             } catch (err) {
                 log('❌ Save failed', 'error');
+                showToast('Error saving topic', 'error');
             }
         };
     }
@@ -298,11 +336,13 @@
                     body: JSON.stringify(payload)
                 });
                 log('✏️ Topic updated');
+                showToast('Topic updated', 'success');
                 loadTopics();
                 loadUpcomingPosts();
                 loadLogs();
             } catch (err) {
                 log('❌ Failed updating topic', 'error');
+                showToast('Error updating topic', 'error');
             }
         };
     }
@@ -324,11 +364,13 @@
                 els.repeatType.value = 'daily';
                 els.includeMedia.checked = false;
                 els.includeVideo.checked = false;
+                showToast('Topic deleted', 'success');
                 loadTopics();
                 loadUpcomingPosts();
                 loadLogs();
             } catch (err) {
                 log('❌ Failed deleting topic', 'error');
+                showToast('Error deleting topic', 'error');
             }
         };
     }
@@ -351,6 +393,7 @@
                         if (count >= Number(els.postsPerDay.value)) {
                             clearInterval(pollTimer);
                             log('🚀 Posts generated');
+                            showToast('Posts generated successfully', 'success');
                             loadUpcomingPosts();
                             loadLogs();
                             els.generateBtn.disabled = false;
@@ -366,12 +409,31 @@
                 }, 2000);
             } catch (err) {
                 log('❌ Generation request failed', 'error');
+                showToast('Generation failed', 'error');
                 els.generateBtn.disabled = false;
             }
         };
     }
 
-    // Load upcoming posts with WORKING delete buttons
+    // Delete all topic posts
+    if (els.deleteAllTopicPosts) {
+        els.deleteAllTopicPosts.onclick = async () => {
+            if (!currentTopicId) return log('❌ Select topic first', 'error');
+            if (!confirm('Delete all scheduled posts for this topic?')) return;
+            try {
+                await apiFetch(`/api/ai/topic/${currentTopicId}/posts`, { method: 'DELETE' });
+                log('🗑 All topic posts deleted');
+                showToast('All posts deleted', 'success');
+                loadUpcomingPosts();
+                loadLogs();
+            } catch (err) {
+                log('❌ Failed deleting posts', 'error');
+                showToast('Error deleting posts', 'error');
+            }
+        };
+    }
+
+    // Load upcoming posts
     async function loadUpcomingPosts() {
         if (!els.postsTable) return;
         try {
@@ -387,7 +449,7 @@
                     const isVideo = /\.(mp4|webm|mov)(\?|$)/i.test(p.mediaUrl) || p.mediaUrl.includes('/video/upload/');
                     mediaHtml = isVideo ?
                         `<video width="120" controls><source src="${escapeHtml(p.mediaUrl)}" type="video/mp4"></video>` :
-                        `<a href="${escapeHtml(p.mediaUrl)}" target="_blank"><img src="${escapeHtml(p.mediaUrl)}" width="80"></a>`;
+                        `<a href="${escapeHtml(p.mediaUrl)}" target="_blank"><img src="${escapeHtml(p.mediaUrl)}" width="80" style="border-radius:4px;"></a>`;
                 }
                 const tr = document.createElement('tr');
                 tr.innerHTML = `
@@ -397,30 +459,28 @@
                     <td>${mediaHtml}</td>
                     <td>${escapeHtml(p.status)}</td>
                     <td>
-                        <button class="post-now-btn" data-id="${p._id}">▶ Post</button>
-                        <button class="edit-post-btn" data-id="${p._id}">✏️ Edit</button>
-                        <button class="delete-post-btn" data-id="${p._id}">🗑️ Delete</button>
+                        <button class="post-now-btn btn btn-primary btn-sm" data-id="${p._id}">▶ Post</button>
+                        <button class="edit-post-btn btn btn-secondary btn-sm" data-id="${p._id}">✏️ Edit</button>
+                        <button class="delete-post-btn btn btn-danger btn-sm" data-id="${p._id}">🗑️ Delete</button>
                     </td>
                 `;
                 els.postsTable.appendChild(tr);
             });
-            
-            // Post Now buttons
             els.postsTable.querySelectorAll('.post-now-btn').forEach(btn => {
                 btn.onclick = async () => {
                     const id = btn.dataset.id;
                     try {
                         await apiFetch(`/api/ai/post/${id}/post-now`, { method: 'POST' });
                         log('📤 Post published');
+                        showToast('Post published', 'success');
                         loadUpcomingPosts();
                         loadLogs();
                     } catch (err) {
                         log('❌ Failed to post: ' + err.message, 'error');
+                        showToast('Failed to post', 'error');
                     }
                 };
             });
-            
-            // Edit buttons
             els.postsTable.querySelectorAll('.edit-post-btn').forEach(btn => {
                 btn.onclick = async () => {
                     const id = btn.dataset.id;
@@ -432,15 +492,15 @@
                                 body: JSON.stringify({ text: newText })
                             });
                             log('✏️ Post updated');
+                            showToast('Post updated', 'success');
                             loadUpcomingPosts();
                         } catch (err) {
                             log('❌ Failed to update post', 'error');
+                            showToast('Error updating post', 'error');
                         }
                     }
                 };
             });
-            
-            // DELETE buttons - FIXED
             els.postsTable.querySelectorAll('.delete-post-btn').forEach(btn => {
                 btn.onclick = async () => {
                     const id = btn.dataset.id;
@@ -450,10 +510,12 @@
                         btn.textContent = 'Deleting...';
                         await apiFetch(`/api/ai/post/${id}`, { method: 'DELETE' });
                         log('✅ Post deleted');
+                        showToast('Post deleted', 'success');
                         await loadUpcomingPosts();
                         await loadLogs();
                     } catch (err) {
                         log('❌ Failed to delete post: ' + err.message, 'error');
+                        showToast('Error deleting post', 'error');
                         btn.disabled = false;
                         btn.textContent = 'Delete';
                     }
@@ -490,9 +552,11 @@
             try {
                 await apiFetch(`/api/ai/page/${pageId}/logs`, { method: 'DELETE' });
                 log('🗑️ All logs cleared');
+                showToast('Logs cleared', 'success');
                 loadLogs();
             } catch (err) {
                 log('❌ Failed to clear logs', 'error');
+                showToast('Error clearing logs', 'error');
             }
         };
     }
