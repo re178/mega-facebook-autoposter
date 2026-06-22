@@ -1,18 +1,15 @@
-// admin.js – Fixed version
-// Requires CSRF meta tag: <meta name="csrf-token" content="...">
-// Requires global apiFetch to be defined in api.js (see below)
-
+// admin.js – Full admin control with pricing management
 (function() {
     let refreshInterval = null;
     let charts = { usersChart: null, postsChart: null };
 
-    // Helper to get CSRF token from meta
+    // Helper to get CSRF token
     function getCsrfToken() {
         const meta = document.querySelector('meta[name="csrf-token"]');
         return meta ? meta.getAttribute('content') : '';
     }
 
-    // Central apiFetch with CSRF and 401 handling
+    // Central apiFetch (reuse from dashboard-api if available)
     async function apiFetch(url, options = {}) {
         const csrfToken = getCsrfToken();
         const headers = {
@@ -36,15 +33,14 @@
         return res.json();
     }
 
-    // ---------- DOM Helpers ----------
+    // DOM helpers
     function setText(id, value) {
         const el = document.getElementById(id);
         if (el) el.textContent = value;
     }
-
     function escapeHtml(str) {
         if (!str) return '';
-        return str.replace(/[&<>]/g, function(m) {
+        return str.replace(/[&<>]/g, m => {
             if (m === '&') return '&amp;';
             if (m === '<') return '&lt;';
             if (m === '>') return '&gt;';
@@ -59,7 +55,7 @@
         await loadCharts();
     }
 
-    // ---------- Dashboard Stats ----------
+    // Dashboard Stats
     async function loadDashboardStats() {
         try {
             const stats = await apiFetch('/api/admin/stats');
@@ -68,13 +64,14 @@
             setText('stat-suspended-users', stats.suspendedUsers);
             setText('stat-total-pages', stats.totalPages);
             setText('stat-total-posts', stats.totalPosts);
+            setText('stat-total-ai-posts', stats.totalAIPosts || 0);
             window.adminStats = stats;
         } catch (err) {
             console.error('Failed to load stats:', err);
         }
     }
 
-    // ---------- Users Table ----------
+    // Users Table
     async function loadUsers() {
         try {
             const users = await apiFetch('/api/admin/users');
@@ -91,13 +88,13 @@
                     <td>${user.isActive ? '✅ Active' : '❌ Suspended'}</td>
                     <td>${user.aiLocked ? '🔒 Locked' : '🟢 Open'}</td>
                     <td>
-                        <button class="edit-user" data-id="${user._id}">Edit</button>
-                        <button class="reset-password" data-id="${user._id}">Reset Password</button>
-                        <button class="suspend-user" data-id="${user._id}">Suspend</button>
-                        <button class="reactivate-user" data-id="${user._id}">Activate</button>
-                        <button class="lock-ai" data-id="${user._id}">Lock AI</button>
-                        <button class="unlock-ai" data-id="${user._id}">Unlock AI</button>
-                        <button class="delete-user" data-id="${user._id}">Delete</button>
+                        <button class="edit-user btn btn-secondary btn-sm" data-id="${user._id}">Edit</button>
+                        <button class="reset-password btn btn-secondary btn-sm" data-id="${user._id}">Reset PW</button>
+                        <button class="suspend-user btn btn-warning btn-sm" data-id="${user._id}">Suspend</button>
+                        <button class="reactivate-user btn btn-primary btn-sm" data-id="${user._id}">Activate</button>
+                        <button class="lock-ai btn btn-secondary btn-sm" data-id="${user._id}">Lock AI</button>
+                        <button class="unlock-ai btn btn-secondary btn-sm" data-id="${user._id}">Unlock AI</button>
+                        <button class="delete-user btn btn-danger btn-sm" data-id="${user._id}">Delete</button>
                     </td>
                 `;
                 tbody.appendChild(tr);
@@ -109,7 +106,6 @@
     }
 
     function bindUserButtons() {
-        // Suspend
         document.querySelectorAll('.suspend-user').forEach(btn => {
             btn.onclick = async () => {
                 if (!confirm('Suspend this user?')) return;
@@ -117,28 +113,24 @@
                 await reloadAdmin();
             };
         });
-        // Activate
         document.querySelectorAll('.reactivate-user').forEach(btn => {
             btn.onclick = async () => {
                 await apiFetch(`/api/admin/users/${btn.dataset.id}/reactivate`, { method: 'PATCH' });
                 await reloadAdmin();
             };
         });
-        // Lock AI
         document.querySelectorAll('.lock-ai').forEach(btn => {
             btn.onclick = async () => {
                 await apiFetch(`/api/admin/users/${btn.dataset.id}/lock-ai`, { method: 'PATCH' });
                 await reloadAdmin();
             };
         });
-        // Unlock AI
         document.querySelectorAll('.unlock-ai').forEach(btn => {
             btn.onclick = async () => {
                 await apiFetch(`/api/admin/users/${btn.dataset.id}/unlock-ai`, { method: 'PATCH' });
                 await reloadAdmin();
             };
         });
-        // Delete user
         document.querySelectorAll('.delete-user').forEach(btn => {
             btn.onclick = async () => {
                 if (!confirm('Permanently delete user?')) return;
@@ -146,7 +138,6 @@
                 await reloadAdmin();
             };
         });
-        // Reset password
         document.querySelectorAll('.reset-password').forEach(btn => {
             btn.onclick = async () => {
                 const newPassword = prompt('Enter new password');
@@ -155,30 +146,28 @@
                     method: 'PATCH',
                     body: JSON.stringify({ newPassword })
                 });
-                alert('Password reset successful');
+                showToast('Password reset successful', 'success');
             };
         });
-        // Edit user – modal with cleanup
         document.querySelectorAll('.edit-user').forEach(btn => {
             btn.onclick = async () => {
                 const userId = btn.dataset.id;
                 const user = await apiFetch(`/api/admin/users/${userId}`);
-                // Remove existing modal if any
                 const oldModal = document.getElementById('editUserModal');
                 if (oldModal) oldModal.remove();
                 const modal = document.createElement('div');
                 modal.id = 'editUserModal';
-                modal.style.cssText = 'position:fixed;top:20%;left:30%;background:white;padding:20px;border:1px solid #ccc;z-index:9999;box-shadow:0 0 10px rgba(0,0,0,0.5);';
+                modal.style.cssText = 'position:fixed;top:20%;left:30%;background:white;padding:20px;border:1px solid #ccc;z-index:9999;box-shadow:0 0 10px rgba(0,0,0,0.5);border-radius:8px;';
                 modal.innerHTML = `
                     <h3>Edit User</h3>
-                    <label>Email: <input id="edit-email" type="email"></label><br>
-                    <label>Role: <select id="edit-role"><option>user</option><option>admin</option></select></label><br>
-                    <label>Phone: <input id="edit-phone"></label><br>
-                    <label>Subscription: <select id="edit-subscription"><option>free</option><option>pro</option><option>enterprise</option></select></label><br>
-                    <label>Status: <select id="edit-active"><option value="true">Active</option><option value="false">Suspended</option></select></label><br>
-                    <label>AI Lock: <select id="edit-aiLock"><option value="false">Unlocked</option><option value="true">Locked</option></select></label><br><br>
-                    <button id="save-user-edit">Save</button>
-                    <button id="close-user-modal">Cancel</button>
+                    <label>Email: <input id="edit-email" type="email" style="width:100%; padding:6px; margin-bottom:8px; border:1px solid #e2e8f0; border-radius:4px;"></label>
+                    <label>Role: <select id="edit-role" style="width:100%; padding:6px; margin-bottom:8px; border:1px solid #e2e8f0; border-radius:4px;"><option>user</option><option>admin</option></select></label>
+                    <label>Phone: <input id="edit-phone" style="width:100%; padding:6px; margin-bottom:8px; border:1px solid #e2e8f0; border-radius:4px;"></label>
+                    <label>Subscription: <select id="edit-subscription" style="width:100%; padding:6px; margin-bottom:8px; border:1px solid #e2e8f0; border-radius:4px;"><option>free</option><option>pro</option><option>enterprise</option></select></label>
+                    <label>Status: <select id="edit-active" style="width:100%; padding:6px; margin-bottom:8px; border:1px solid #e2e8f0; border-radius:4px;"><option value="true">Active</option><option value="false">Suspended</option></select></label>
+                    <label>AI Lock: <select id="edit-aiLock" style="width:100%; padding:6px; margin-bottom:8px; border:1px solid #e2e8f0; border-radius:4px;"><option value="false">Unlocked</option><option value="true">Locked</option></select></label>
+                    <button id="save-user-edit" class="btn btn-primary" style="margin-right:8px;">Save</button>
+                    <button id="close-user-modal" class="btn btn-secondary">Cancel</button>
                 `;
                 document.body.appendChild(modal);
                 document.getElementById('edit-email').value = user.email;
@@ -203,13 +192,14 @@
                     });
                     modal.remove();
                     await reloadAdmin();
+                    showToast('User updated', 'success');
                 };
                 document.getElementById('close-user-modal').onclick = () => modal.remove();
             };
         });
     }
 
-    // ---------- Pages Table (No Token Exposure) ----------
+    // Pages Table
     async function loadPages() {
         try {
             const pages = await apiFetch('/api/admin/pages');
@@ -224,13 +214,12 @@
                     <td>${escapeHtml(page.userId?.email || '-')}</td>
                     <td>${page.autoGenerationEnabled ? 'Enabled' : 'Disabled'}</td>
                     <td>
-                        <button class="edit-page-btn" data-id="${page._id}" data-name="${escapeHtml(page.name)}" data-pageid="${escapeHtml(page.pageId)}">Edit</button>
-                        <button class="delete-page" data-id="${page._id}">Delete</button>
+                        <button class="edit-page-btn btn btn-secondary btn-sm" data-id="${page._id}">Edit</button>
+                        <button class="delete-page btn btn-danger btn-sm" data-id="${page._id}">Delete</button>
                     </td>
                 `;
                 tbody.appendChild(tr);
             }
-            // Delete page
             document.querySelectorAll('.delete-page').forEach(btn => {
                 btn.onclick = async () => {
                     if (!confirm('Delete this page?')) return;
@@ -238,31 +227,28 @@
                     await reloadAdmin();
                 };
             });
-            // Edit page – token fetched on demand (not stored in HTML)
             document.querySelectorAll('.edit-page-btn').forEach(btn => {
                 btn.onclick = async () => {
                     const pageId = btn.dataset.id;
-                    // Fetch full page data including token from a secure endpoint
-                    // Assuming you have: GET /api/admin/pages/:id (returns token)
                     let fullPage;
                     try {
                         fullPage = await apiFetch(`/api/admin/pages/${pageId}`);
                     } catch (err) {
-                        alert('Could not fetch page details');
+                        showToast('Could not fetch page details', 'error');
                         return;
                     }
                     const oldModal = document.getElementById('editPageModal');
                     if (oldModal) oldModal.remove();
                     const modal = document.createElement('div');
                     modal.id = 'editPageModal';
-                    modal.style.cssText = 'position:fixed;top:20%;left:30%;background:white;padding:20px;border:1px solid #ccc;z-index:9999;width:400px;';
+                    modal.style.cssText = 'position:fixed;top:20%;left:30%;background:white;padding:20px;border:1px solid #ccc;z-index:9999;width:400px;border-radius:8px;';
                     modal.innerHTML = `
                         <h3>Edit Page</h3>
-                        <label>Name: <input id="edit-page-name" style="width:100%"></label><br>
-                        <label>Page ID: <input id="edit-page-id" style="width:100%"></label><br>
-                        <label>Token: <textarea id="edit-page-token" rows="2" style="width:100%"></textarea></label><br>
-                        <button id="save-page-edit">Save</button>
-                        <button id="close-page-modal">Cancel</button>
+                        <label>Name: <input id="edit-page-name" style="width:100%; padding:6px; margin-bottom:8px; border:1px solid #e2e8f0; border-radius:4px;"></label>
+                        <label>Page ID: <input id="edit-page-id" style="width:100%; padding:6px; margin-bottom:8px; border:1px solid #e2e8f0; border-radius:4px;"></label>
+                        <label>Token: <textarea id="edit-page-token" rows="2" style="width:100%; padding:6px; margin-bottom:8px; border:1px solid #e2e8f0; border-radius:4px;"></textarea></label>
+                        <button id="save-page-edit" class="btn btn-primary" style="margin-right:8px;">Save</button>
+                        <button id="close-page-modal" class="btn btn-secondary">Cancel</button>
                     `;
                     document.body.appendChild(modal);
                     document.getElementById('edit-page-name').value = fullPage.name;
@@ -281,6 +267,7 @@
                         });
                         modal.remove();
                         await reloadAdmin();
+                        showToast('Page updated', 'success');
                     };
                     document.getElementById('close-page-modal').onclick = () => modal.remove();
                 };
@@ -290,7 +277,7 @@
         }
     }
 
-    // ---------- System Logs ----------
+    // System Logs
     async function loadSystemLogs() {
         try {
             const data = await apiFetch('/api/admin/logs');
@@ -304,7 +291,7 @@
                     <strong>${escapeHtml(log.action)}</strong>
                     <p>${escapeHtml(log.message)}</p>
                     <small>${new Date(log.createdAt).toLocaleString()}</small>
-                    <button class="delete-log" data-id="${log._id}">Delete</button>
+                    <button class="delete-log btn btn-danger btn-sm" data-id="${log._id}">Delete</button>
                 `;
                 container.appendChild(div);
                 const delBtn = div.querySelector('.delete-log');
@@ -320,24 +307,24 @@
         }
     }
 
-    // ---------- Broadcast ----------
+    // Broadcast
     function bindBroadcastMessage() {
         const btn = document.getElementById('broadcast-btn');
         if (!btn) return;
         btn.onclick = async () => {
             const message = document.getElementById('broadcast-message').value;
-            if (!message) return alert('Enter message');
+            if (!message) return showToast('Enter message', 'warning');
             btn.disabled = true;
             try {
                 await apiFetch('/api/admin/broadcast', {
                     method: 'POST',
                     body: JSON.stringify({ message })
                 });
-                alert('Broadcast sent');
+                showToast('Broadcast sent', 'success');
                 document.getElementById('broadcast-message').value = '';
-                loadBroadcasts(); // refresh list
+                loadBroadcasts();
             } catch (err) {
-                alert('Failed to send broadcast');
+                showToast('Failed to send broadcast', 'error');
             } finally {
                 btn.disabled = false;
             }
@@ -352,14 +339,15 @@
             container.innerHTML = '';
             broadcasts.forEach(b => {
                 const div = document.createElement('div');
-                div.style.border = '1px solid #ccc';
+                div.style.border = '1px solid #e2e8f0';
                 div.style.margin = '5px';
-                div.style.padding = '5px';
+                div.style.padding = '8px';
+                div.style.borderRadius = '6px';
                 div.innerHTML = `
                     <strong>${escapeHtml(b.message)}</strong><br>
                     <small>${new Date(b.createdAt).toLocaleString()}</small><br>
-                    <button class="edit-broadcast" data-id="${b._id}" data-msg="${escapeHtml(b.message)}">Edit</button>
-                    <button class="delete-broadcast" data-id="${b._id}">Delete</button>
+                    <button class="edit-broadcast btn btn-secondary btn-sm" data-id="${b._id}" data-msg="${escapeHtml(b.message)}">Edit</button>
+                    <button class="delete-broadcast btn btn-danger btn-sm" data-id="${b._id}">Delete</button>
                 `;
                 container.appendChild(div);
             });
@@ -388,7 +376,7 @@
         }
     }
 
-    // ---------- Private Messages ----------
+    // Private Messages
     async function populateUserDatalist(inputId, datalistId) {
         try {
             const users = await apiFetch('/api/admin/users');
@@ -424,16 +412,17 @@
             container.innerHTML = '';
             for (const msg of messages) {
                 const div = document.createElement('div');
-                div.style.border = '1px solid #ccc';
+                div.style.border = '1px solid #e2e8f0';
                 div.style.margin = '5px';
-                div.style.padding = '5px';
+                div.style.padding = '8px';
+                div.style.borderRadius = '6px';
                 const userEmail = msg.userId?.email || 'Unknown user';
                 div.innerHTML = `
                     <strong>To: ${escapeHtml(userEmail)}</strong><br>
                     ${escapeHtml(msg.message)}<br>
                     <small>${new Date(msg.createdAt).toLocaleString()}</small><br>
-                    <button class="edit-pm" data-id="${msg._id}" data-text="${escapeHtml(msg.message)}">Edit</button>
-                    <button class="delete-pm" data-id="${msg._id}">Delete</button>
+                    <button class="edit-pm btn btn-secondary btn-sm" data-id="${msg._id}" data-text="${escapeHtml(msg.message)}">Edit</button>
+                    <button class="delete-pm btn btn-danger btn-sm" data-id="${msg._id}">Delete</button>
                 `;
                 container.appendChild(div);
             }
@@ -467,43 +456,42 @@
         if (!input) return;
         const userEmail = input.value;
         const message = document.getElementById('private-message-text').value;
-        if (!userEmail || !message) return alert('User email and message required');
+        if (!userEmail || !message) return showToast('User email and message required', 'warning');
         const users = await apiFetch('/api/admin/users');
         const user = users.find(u => u.email === userEmail);
-        if (!user) return alert('User not found');
+        if (!user) return showToast('User not found', 'error');
         await apiFetch(`/api/admin/message/${user._id}`, {
             method: 'POST',
             body: JSON.stringify({ message })
         });
-        alert('Message sent');
+        showToast('Message sent', 'success');
         document.getElementById('private-message-text').value = '';
         loadPrivateMessages(user._id);
     }
 
-    // ---------- Maintenance ----------
+    // Maintenance
     function bindMaintenanceButtons() {
         const onBtn = document.getElementById('maintenance-on');
         const offBtn = document.getElementById('maintenance-off');
         if (onBtn) {
             onBtn.onclick = async () => {
                 await apiFetch('/api/admin/maintenance/on', { method: 'PATCH' });
-                alert('Maintenance mode enabled');
+                showToast('Maintenance mode enabled', 'success');
             };
         }
         if (offBtn) {
             offBtn.onclick = async () => {
                 await apiFetch('/api/admin/maintenance/off', { method: 'PATCH' });
-                alert('Maintenance mode disabled');
+                showToast('Maintenance mode disabled', 'success');
             };
         }
     }
 
-    // ---------- Charts with cleanup ----------
+    // Charts
     async function loadCharts() {
         if (!window.Chart) return;
         const stats = window.adminStats;
         if (!stats) return;
-        // Destroy existing charts
         if (charts.usersChart) charts.usersChart.destroy();
         if (charts.postsChart) charts.postsChart.destroy();
         const usersCtx = document.getElementById('usersChart');
@@ -528,7 +516,7 @@
         }
     }
 
-    // ---------- Create User ----------
+    // Create User
     function bindCreateUser() {
         const btn = document.getElementById('admin-create-user-btn');
         if (!btn) return;
@@ -537,44 +525,43 @@
             const password = document.getElementById('admin-user-password').value;
             const role = document.getElementById('admin-user-role').value;
             const phone = document.getElementById('admin-user-phone').value;
-            if (!email || !password) return alert('Email and password required');
+            if (!email || !password) return showToast('Email and password required', 'warning');
             btn.disabled = true;
             try {
                 const data = await apiFetch('/api/admin/users', {
                     method: 'POST',
                     body: JSON.stringify({ email, password, role, phone })
                 });
-                if (data.error) return alert(data.error);
-                alert('User created');
+                if (data.error) return showToast(data.error, 'error');
+                showToast('User created', 'success');
                 await reloadAdmin();
-                // Clear inputs
                 document.getElementById('admin-user-email').value = '';
                 document.getElementById('admin-user-password').value = '';
                 document.getElementById('admin-user-phone').value = '';
             } catch (err) {
-                alert('Failed to create user');
+                showToast('Failed to create user', 'error');
             } finally {
                 btn.disabled = false;
             }
         };
     }
 
-    // ---------- Add Page to User Modal ----------
+    // Add Page to User Modal
     async function showAddPageModal() {
         let modal = document.getElementById('addPageModal');
-        if (modal) modal.remove(); // remove existing to avoid duplication
+        if (modal) modal.remove();
         modal = document.createElement('div');
         modal.id = 'addPageModal';
-        modal.style.cssText = 'position:fixed;top:20%;left:30%;background:white;padding:20px;border:1px solid #ccc;z-index:9999;width:400px;';
+        modal.style.cssText = 'position:fixed;top:20%;left:30%;background:white;padding:20px;border:1px solid #ccc;z-index:9999;width:400px;border-radius:8px;';
         modal.innerHTML = `
             <h3>Add Facebook Page to User</h3>
-            <label>Search User (email): <input id="page-user-email" list="user-datalist-addpage" autocomplete="off"></label>
-            <datalist id="user-datalist-addpage"></datalist><br><br>
-            <label>Page Name: <input id="page-name" style="width:100%"></label><br>
-            <label>Page ID: <input id="page-id" style="width:100%"></label><br>
-            <label>Page Token: <textarea id="page-token" rows="2" style="width:100%"></textarea></label><br><br>
-            <button id="confirm-add-page">Add Page</button>
-            <button id="close-addpage-modal">Cancel</button>
+            <label>Search User (email): <input id="page-user-email" list="user-datalist-addpage" autocomplete="off" style="width:100%; padding:6px; margin-bottom:8px; border:1px solid #e2e8f0; border-radius:4px;"></label>
+            <datalist id="user-datalist-addpage"></datalist><br>
+            <label>Page Name: <input id="page-name" style="width:100%; padding:6px; margin-bottom:8px; border:1px solid #e2e8f0; border-radius:4px;"></label>
+            <label>Page ID: <input id="page-id" style="width:100%; padding:6px; margin-bottom:8px; border:1px solid #e2e8f0; border-radius:4px;"></label>
+            <label>Page Token: <textarea id="page-token" rows="2" style="width:100%; padding:6px; margin-bottom:8px; border:1px solid #e2e8f0; border-radius:4px;"></textarea></label>
+            <button id="confirm-add-page" class="btn btn-primary" style="margin-right:8px;">Add Page</button>
+            <button id="close-addpage-modal" class="btn btn-secondary">Cancel</button>
         `;
         document.body.appendChild(modal);
         await populateUserDatalist('page-user-email', 'user-datalist-addpage');
@@ -583,32 +570,80 @@
             const userEmail = document.getElementById('page-user-email').value;
             const users = await apiFetch('/api/admin/users');
             const user = users.find(u => u.email === userEmail);
-            if (!user) return alert('User not found');
+            if (!user) return showToast('User not found', 'error');
             const payload = {
                 userId: user._id,
                 name: document.getElementById('page-name').value,
                 pageId: document.getElementById('page-id').value,
                 pageToken: document.getElementById('page-token').value
             };
-            if (!payload.name || !payload.pageId || !payload.pageToken) return alert('All fields required');
+            if (!payload.name || !payload.pageId || !payload.pageToken) return showToast('All fields required', 'warning');
             await apiFetch('/api/admin/pages', {
                 method: 'POST',
                 body: JSON.stringify(payload)
             });
             modal.remove();
             await reloadAdmin();
+            showToast('Page added', 'success');
         };
         document.getElementById('close-addpage-modal').onclick = () => modal.remove();
     }
 
-    // ---------- Clear All Logs ----------
+    // Clear All Logs
     async function clearAllLogs() {
         if (!confirm('Delete ALL logs? Cannot undo.')) return;
         await apiFetch('/api/admin/logs/clear-all', { method: 'DELETE' });
         loadSystemLogs();
+        showToast('All logs cleared', 'success');
     }
 
-    // ---------- Initialization ----------
+    // Pricing Management (NEW)
+    async function loadPricing() {
+        try {
+            const pricing = await apiFetch('/api/admin/pricing');
+            document.getElementById('price-pro-usd').value = pricing.pro.priceUSD || 0;
+            document.getElementById('price-pro-kes').value = pricing.pro.priceKES || 0;
+            document.getElementById('price-enterprise-usd').value = pricing.enterprise.priceUSD || 0;
+            document.getElementById('price-enterprise-kes').value = pricing.enterprise.priceKES || 0;
+        } catch (err) {
+            console.error('Failed to load pricing:', err);
+        }
+    }
+
+    function bindPricingSave() {
+        const btn = document.getElementById('save-pricing-btn');
+        if (!btn) return;
+        btn.onclick = async () => {
+            const data = {
+                pro: {
+                    priceUSD: parseFloat(document.getElementById('price-pro-usd').value) || 0,
+                    priceKES: parseFloat(document.getElementById('price-pro-kes').value) || 0
+                },
+                enterprise: {
+                    priceUSD: parseFloat(document.getElementById('price-enterprise-usd').value) || 0,
+                    priceKES: parseFloat(document.getElementById('price-enterprise-kes').value) || 0
+                }
+            };
+            if (data.pro.priceKES <= 0 || data.enterprise.priceKES <= 0) {
+                showToast('Prices must be greater than 0', 'warning');
+                return;
+            }
+            btn.disabled = true;
+            try {
+                await apiFetch('/api/admin/pricing', {
+                    method: 'PUT',
+                    body: JSON.stringify(data)
+                });
+                showToast('Pricing updated successfully', 'success');
+            } catch (err) {
+                showToast('Failed to update pricing', 'error');
+            } finally {
+                btn.disabled = false;
+            }
+        };
+    }
+
+    // Initialization
     async function init() {
         try {
             const sessionRes = await fetch('/api/session', { credentials: 'include' });
@@ -619,7 +654,6 @@
                 const adminNav = document.getElementById('admin-nav-link');
                 if (adminNav) adminNav.style.display = 'block';
             } else {
-                // Optionally redirect non-admin users
                 console.warn('Not an admin');
                 return;
             }
@@ -631,12 +665,14 @@
             await populateUserDatalist('private-message-user-email', 'user-datalist-pm');
             await loadPrivateMessages('');
             await loadCharts();
+            await loadPricing();
             bindCreateUser();
             bindBroadcastMessage();
             bindMaintenanceButtons();
+            bindPricingSave();
             const sendMsgBtn = document.getElementById('send-private-msg-btn');
             if (sendMsgBtn) sendMsgBtn.onclick = sendPrivateMessageFromUI;
-            // Auto-refresh every 60 seconds, but stop when page hidden
+            // Auto-refresh
             function refresh() {
                 if (!document.hidden) {
                     loadDashboardStats();
@@ -649,7 +685,6 @@
             document.addEventListener('visibilitychange', () => {
                 if (!document.hidden && refreshInterval) refresh();
             });
-            // Expose globals for inline buttons (if any)
             window.clearAllLogs = clearAllLogs;
             window.showAddPageModal = showAddPageModal;
         } catch (err) {
