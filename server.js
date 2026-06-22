@@ -10,6 +10,7 @@ const bcrypt = require('bcrypt');
 const rateLimit = require('express-rate-limit');
 const helmet = require('helmet');
 const MongoStore = require('connect-mongo');
+const os = require('os'); // 🆕 Added for health endpoint
 
 // ==================== MODELS ====================
 const User = require('./models/User');
@@ -263,12 +264,27 @@ app.get('/health', (req, res) => {
         success: true,
         status: 'healthy',
         service: 'Viraloop Socials',
-        uptime: Math.floor(process.uptime()),
+
+        process: {
+            pid: process.pid,
+            uptime: Math.floor(process.uptime()),
+            node: process.version
+        },
+
+        system: {
+            hostname: os.hostname(),
+            platform: os.platform(),
+            arch: os.arch(),
+            cpus: os.cpus().length
+        },
+
         memory: {
             rss: process.memoryUsage().rss,
             heapUsed: process.memoryUsage().heapUsed,
-            heapTotal: process.memoryUsage().heapTotal
+            heapTotal: process.memoryUsage().heapTotal,
+            external: process.memoryUsage().external
         },
+
         timestamp: new Date().toISOString()
     });
 });
