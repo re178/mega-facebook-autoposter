@@ -1,4 +1,4 @@
-// page.js – Fixed version
+// page.js – Page dashboard with plan-aware features
 document.addEventListener('DOMContentLoaded', async () => {
   const urlParams = new URLSearchParams(window.location.search);
   const pageId = urlParams.get('pageId');
@@ -17,26 +17,24 @@ document.addEventListener('DOMContentLoaded', async () => {
   const scheduledTime = document.getElementById('scheduled-time');
   const postNowBtn = document.getElementById('post-now');
   const savePostBtn = document.getElementById('save-post');
-  const deletePostBtn = document.getElementById('delete-post'); // if present
+  const deletePostBtn = document.getElementById('delete-post');
 
-  let currentEditingPostId = null; // Track if we are editing
+  let currentEditingPostId = null;
 
-  // Helper: escape HTML to prevent XSS
   function escapeHtml(str) {
     if (!str) return '';
-    return str
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#39;');
+    return str.replace(/[&<>]/g, m => {
+      if (m === '&') return '&amp;';
+      if (m === '<') return '&lt;';
+      if (m === '>') return '&gt;';
+      return m;
+    });
   }
 
-  // Show loading/error placeholders (simple)
   function showLoading(container, isLoading = true) {
     if (!container) return;
     if (isLoading) {
-      container.innerHTML = '<tr><td colspan="5">Loading...</td></tr>';
+      container.innerHTML = '<tr><td colspan="5" style="text-align:center;">Loading...</td></tr>';
     }
   }
 
@@ -44,12 +42,14 @@ document.addEventListener('DOMContentLoaded', async () => {
   try {
     const page = await getPageInfo(pageId);
     pageTitle.textContent = escapeHtml(page.name);
+    document.getElementById('pageNameDisplay').textContent = escapeHtml(page.name);
+    document.getElementById('pageIdDisplay').textContent = pageId;
   } catch (err) {
     console.error('Failed to load page info:', err);
     pageTitle.textContent = 'Error loading page';
   }
 
-  // === Load posts ===
+  // Load posts
   async function loadPosts() {
     if (!postsTableBody) return;
     showLoading(postsTableBody, true);
@@ -68,19 +68,16 @@ document.addEventListener('DOMContentLoaded', async () => {
           <td>${new Date(post.scheduledTime).toLocaleString()}</td>
           <td>${escapeHtml(post.status || 'scheduled')}</td>
           <td>
-            <button class="edit-post" data-id="${post._id}">Edit</button>
-            <button class="delete-post" data-id="${post._id}">Delete</button>
+            <button class="edit-post btn btn-secondary btn-sm" data-id="${post._id}">Edit</button>
+            <button class="delete-post btn btn-danger btn-sm" data-id="${post._id}">Delete</button>
           </td>
         `;
         postsTableBody.appendChild(tr);
       });
-
-      // Attach delete handlers
       document.querySelectorAll('.delete-post').forEach(btn => {
         btn.removeEventListener('click', handleDeletePost);
         btn.addEventListener('click', handleDeletePost);
       });
-      // Attach edit handlers
       document.querySelectorAll('.edit-post').forEach(btn => {
         btn.removeEventListener('click', handleEditPost);
         btn.addEventListener('click', handleEditPost);
@@ -97,12 +94,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     try {
       await deletePost(postId);
       await loadPosts();
-      // Clear form if the deleted post was being edited
-      if (currentEditingPostId === postId) {
-        resetForm();
-      }
+      if (currentEditingPostId === postId) resetForm();
+      showToast('Post deleted', 'success');
     } catch (err) {
-      alert('Delete failed: ' + err.message);
+      showToast('Delete failed: ' + err.message, 'error');
     }
   }
 
@@ -112,7 +107,6 @@ document.addEventListener('DOMContentLoaded', async () => {
       const posts = await getPagePosts(pageId);
       const post = posts.find(p => p._id === postId);
       if (!post) throw new Error('Post not found');
-      // Populate form
       postText.value = post.text || '';
       mediaUrl.value = post.mediaUrl || '';
       if (post.scheduledTime) {
@@ -125,7 +119,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       savePostBtn.textContent = 'Update Post';
       if (deletePostBtn) deletePostBtn.style.display = 'inline-block';
     } catch (err) {
-      alert('Failed to load post for editing: ' + err.message);
+      showToast('Failed to load post for editing: ' + err.message, 'error');
     }
   }
 
@@ -138,45 +132,41 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (deletePostBtn) deletePostBtn.style.display = 'none';
   }
 
-  // Create or update post
   async function saveOrUpdatePost(scheduledTimestamp) {
     if (!postText.value.trim()) {
-      alert('Please enter post text');
+      showToast('Please enter post text', 'warning');
       return;
     }
     try {
       if (currentEditingPostId) {
-        // Update existing post
         await editPost(currentEditingPostId, {
           text: postText.value,
           mediaUrl: mediaUrl.value,
           scheduledTime: scheduledTimestamp
         });
         resetForm();
+        showToast('Post updated', 'success');
       } else {
-        // Create new post
         await createPost(pageId, postText.value, mediaUrl.value, scheduledTimestamp);
         resetForm();
+        showToast('Post saved', 'success');
       }
       await loadPosts();
     } catch (err) {
-      alert('Operation failed: ' + err.message);
+      showToast('Operation failed: ' + err.message, 'error');
     }
   }
 
-  // Post Now button
   postNowBtn.addEventListener('click', async () => {
     const now = new Date().toISOString();
     await saveOrUpdatePost(now);
   });
 
-  // Save / Update button
   savePostBtn.addEventListener('click', async () => {
     const schedule = scheduledTime.value ? new Date(scheduledTime.value).toISOString() : new Date().toISOString();
     await saveOrUpdatePost(schedule);
   });
 
-  // Optional: Delete button in form (if exists)
   if (deletePostBtn) {
     deletePostBtn.style.display = 'none';
     deletePostBtn.addEventListener('click', async () => {
@@ -186,21 +176,22 @@ document.addEventListener('DOMContentLoaded', async () => {
         await deletePost(currentEditingPostId);
         resetForm();
         await loadPosts();
+        showToast('Post deleted', 'success');
       } catch (err) {
-        alert('Delete failed: ' + err.message);
+        showToast('Delete failed: ' + err.message, 'error');
       }
     });
   }
 
-  // === Load logs ===
+  // Load logs (activity feed)
   async function loadLogs() {
     if (!logsContainer) return;
-    logsContainer.innerHTML = '<div>Loading logs...</div>';
+    logsContainer.innerHTML = '<div class="log">Loading activity...</div>';
     try {
       const logs = await getPageLogs(pageId);
       logsContainer.innerHTML = '';
       if (!logs.length) {
-        logsContainer.innerHTML = '<div>No logs available</div>';
+        logsContainer.innerHTML = '<div class="log">No recent activity</div>';
         return;
       }
       logs.forEach(log => {
@@ -212,14 +203,14 @@ document.addEventListener('DOMContentLoaded', async () => {
       });
     } catch (err) {
       console.error('Failed to load logs:', err);
-      logsContainer.innerHTML = '<div>Error loading logs</div>';
+      logsContainer.innerHTML = '<div class="log">Error loading activity</div>';
     }
   }
 
   await loadPosts();
   await loadLogs();
 
-  // Auto-refresh every 30 seconds, but clear on page unload or visibility change
+  // Auto-refresh
   let refreshInterval = null;
   function startRefreshInterval() {
     if (refreshInterval) clearInterval(refreshInterval);
@@ -243,13 +234,12 @@ document.addEventListener('DOMContentLoaded', async () => {
       stopRefreshInterval();
     } else {
       startRefreshInterval();
-      // Optionally refresh immediately when page becomes visible
       loadPosts();
       loadLogs();
     }
   });
 
-  // ================= RESPONSIVE SIDEBAR SYSTEM =================
+  // Sidebar toggle
   const menuToggle = document.getElementById("menu-toggle");
   const sidebar = document.querySelector(".sidebar");
   const overlay = document.getElementById("overlay");
@@ -271,7 +261,4 @@ document.addEventListener('DOMContentLoaded', async () => {
       overlay.classList.remove("active");
     });
   }
-
-  // NOTE: Section toggling is handled in page-features.js to avoid duplication.
-  // The code below is removed to prevent conflicts.
 });
