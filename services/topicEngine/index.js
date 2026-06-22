@@ -65,4 +65,4 @@ async function generateContent({ interest, format = 'social', pageId = 'SYSTEM' 
   }
 }
 
-module.exports = { generateContent };
+module.exports = { generateContent, discoverAndRank };
