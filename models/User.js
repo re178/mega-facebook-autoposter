@@ -90,10 +90,21 @@ const UserSchema = new mongoose.Schema({
     },
     plan: {
       type: String,
-      default: 'free'
+      default: 'free'   // 'free' | 'pro' | 'enterprise'
     },
-    startDate: Date,
-    expiryDate: Date
+    startDate: {
+      type: Date,
+      default: null
+    },
+    expiryDate: {
+      type: Date,
+      default: null
+    },
+    // ✅ NEW: field required by frontend to track last upgrade date
+    updatedAt: {
+      type: Date,
+      default: Date.now
+    }
   },
 
   /* =====================================================
@@ -167,7 +178,7 @@ const UserSchema = new mongoose.Schema({
   },
 
   /* =====================================================
-     🚀 NEW: MPESA WALLET & TRANSACTIONS (SAFE ADDITION)
+     🚀 MPESA WALLET & TRANSACTIONS (SAFE ADDITION)
   ===================================================== */
   walletBalance: {
     type: Number,
@@ -229,6 +240,10 @@ const UserSchema = new mongoose.Schema({
 ===================================================== */
 UserSchema.pre('save', async function(next) {
   this.updatedAt = Date.now();
+  // Also update subscription.updatedAt if not set
+  if (this.subscription && !this.subscription.updatedAt) {
+    this.subscription.updatedAt = Date.now();
+  }
   if (!this.isModified('password')) {
     return next();
   }
