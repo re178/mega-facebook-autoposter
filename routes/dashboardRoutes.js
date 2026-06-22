@@ -3,17 +3,17 @@ const router = express.Router();
 const Page = require('../models/Page');
 const Post = require('../models/Post');
 const Log = require('../models/Log');
+const AiScheduledPost = require('../models/AiScheduledPost');
+const AiTopic = require('../models/AiTopic');
 
-// Helper: check if user can access a page (by Facebook pageId)
-async function canAccessPage(facebookPageId, req) {
-  const page = await Page.findOne({ pageId: facebookPageId });
-  if (!page) return false;
-  if (req.session.userRole === 'admin') return true;
-  return page.userId.toString() === req.session.userId;
+// -------------------- AUTH MIDDLEWARE --------------------
+function requireLogin(req, res, next) {
+  if (req.session && req.session.userId) return next();
+  return res.status(401).json({ error: 'Not authenticated' });
 }
 
 // =======================
-// MASTER DASHBOARD SUMMARY
+// MASTER DASHBOARD SUMMARY (EXISTING – KEPT)
 // =======================
 router.get('/master/summary', async (req, res) => {
   try {
@@ -35,7 +35,64 @@ router.get('/master/summary', async (req, res) => {
 });
 
 // =======================
-// GET ALL PAGES (for master dashboard navigation)
+// NEW: UNIFIED MASTER SUMMARY (PER‑USER)
+// =======================
+router.get('/master-summary', requireLogin, async (req, res) => {
+  try {
+    const userId = req.session.userId;
+    const isAdmin = req.session.userRole === 'admin';
+
+    let pages;
+    if (isAdmin) {
+      pages = await Page.find().select('pageId name _id');
+    } else {
+      pages = await Page.find({ userId }).select('pageId name _id');
+    }
+
+    let totalPosts = 0, posted = 0, failed = 0;
+    const perPageStats = [];
+
+    for (const page of pages) {
+      const manualPosts = await Post.find({ pageId: page._id });
+      const aiPosts = await AiScheduledPost.find({ pageId: page.pageId });
+      const allPosts = [...manualPosts, ...aiPosts];
+      const postedCount = allPosts.filter(p => p.status === 'POSTED').length;
+      const failedCount = allPosts.filter(p => p.status === 'FAILED').length;
+      const topics = await AiTopic.find({ pageId: page.pageId });
+      totalPosts += allPosts.length;
+      posted += postedCount;
+      failed += failedCount;
+      perPageStats.push({
+        pageName: page.name,
+        totalPosts: allPosts.length,
+        posted: postedCount,
+        failed: failedCount,
+        topics: topics.length
+      });
+    }
+
+    const logs = await Log.find({ userId: isAdmin ? undefined : userId })
+      .sort({ createdAt: -1 })
+      .limit(10)
+      .populate('pageId', 'name');
+    const recentActivity = logs.map(l => ({
+      message: `${l.action} – ${l.message}`,
+      time: l.createdAt
+    }));
+
+    res.json({
+      pages: pages.map(p => ({ pageId: p.pageId, name: p.name })),
+      totalStats: { totalPosts, posted, failed },
+      perPageStats,
+      recentActivity
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// =======================
+// GET ALL PAGES (EXISTING)
 // =======================
 router.get('/pages', async (req, res) => {
   try {
@@ -52,7 +109,7 @@ router.get('/pages', async (req, res) => {
 });
 
 // =======================
-// PAGE DASHBOARD ROUTES (using Facebook pageId)
+// PAGE DASHBOARD ROUTES (EXISTING)
 // =======================
 
 // Get page info
@@ -165,5 +222,15 @@ router.get('/page/:fbId/logs', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+// =======================
+// HELPER: canAccessPage (EXISTING)
+// =======================
+async function canAccessPage(facebookPageId, req) {
+  const page = await Page.findOne({ pageId: facebookPageId });
+  if (!page) return false;
+  if (req.session.userRole === 'admin') return true;
+  return page.userId.toString() === req.session.userId;
+}
 
 module.exports = router;
