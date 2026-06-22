@@ -407,4 +407,36 @@ router.patch('/maintenance/off', async (req, res) => {
     }
 });
 
+/* =====================================================
+   NEW: PRICING MANAGEMENT
+===================================================== */
+router.get('/pricing', async (req, res) => {
+    try {
+        const settings = await SystemSettings.findOne();
+        const pricing = settings?.pricing || {
+            pro: { priceUSD: 29, priceKES: 3500 },
+            enterprise: { priceUSD: 99, priceKES: 12000 }
+        };
+        res.json(pricing);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+router.put('/pricing', async (req, res) => {
+    try {
+        const { pro, enterprise } = req.body;
+        let settings = await SystemSettings.findOne();
+        if (!settings) {
+            settings = new SystemSettings({ pricing: { pro, enterprise } });
+        } else {
+            settings.pricing = { pro, enterprise };
+        }
+        await settings.save();
+        res.json({ success: true, pricing: settings.pricing });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 module.exports = router;
