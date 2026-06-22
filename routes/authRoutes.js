@@ -1,6 +1,8 @@
 const express = require('express');
 const crypto = require('crypto');
+const bcrypt = require('bcrypt');
 const User = require('../models/User');
+const SystemSettings = require('../models/SystemSettings');
 const {
     sendVerificationEmail,
     sendPasswordResetEmail,
@@ -214,7 +216,6 @@ router.get('/profile', async (req, res) => {
 /* =====================================================
    CHANGE PASSWORD
 ===================================================== */
-const bcrypt = require('bcrypt');
 router.post('/change-password', async (req, res) => {
     try {
         if (!req.session.userId) {
@@ -269,6 +270,47 @@ router.delete('/account', async (req, res) => {
     } catch (err) {
         console.error('Delete account error:', err);
         res.status(500).json({ error: 'Failed to delete account' });
+    }
+});
+
+/* =====================================================
+   NEW: UPGRADE PLAN (WALLET DEDUCTION)
+===================================================== */
+function requireLogin(req, res, next) {
+    if (req.session && req.session.userId) return next();
+    return res.status(401).json({ error: 'Unauthorized' });
+}
+
+router.post('/upgrade', requireLogin, async (req, res) => {
+    try {
+        const { plan } = req.body; // 'pro' or 'enterprise'
+        const user = await User.findById(req.session.userId);
+        if (!user) return res.status(404).json({ error: 'User not found' });
+
+        const settings = await SystemSettings.findOne();
+        const pricing = settings?.pricing || {
+            pro: { priceKES: 3500 },
+            enterprise: { priceKES: 12000 }
+        };
+        const amount = plan === 'pro' ? pricing.pro.priceKES : pricing.enterprise.priceKES;
+
+        if (user.walletBalance < amount) {
+            return res.status(400).json({ success: false, message: 'Insufficient balance' });
+        }
+
+        user.walletBalance -= amount;
+        user.subscription = { plan, updatedAt: new Date() };
+        await user.save();
+
+        res.json({
+            success: true,
+            user: {
+                subscription: user.subscription,
+                walletBalance: user.walletBalance
+            }
+        });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
     }
 });
 
