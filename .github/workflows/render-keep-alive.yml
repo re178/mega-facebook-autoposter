@@ -1,37 +1,107 @@
-name: Keep Render Alive Ultra-Adaptive
+name: Viraloop Render Production Keep Alive
 
 on:
   schedule:
-    - cron: '*/5 * * * *'
+    # Runs every 5 minutes (GitHub schedule is best-effort)
+    - cron: "*/5 * * * *"
+
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: viraloop-render-keepalive
+  cancel-in-progress: false
+
 jobs:
-  ping:
+  keepalive:
+    name: Keep Render Warm
     runs-on: ubuntu-latest
 
+    timeout-minutes: 9
+
+    env:
+      URL: https://viraloopsocials.onrender.com/health
+
     steps:
-      - name: Ultra-adaptive silent keep-alive
+
+      - name: Production Keep Alive
         shell: bash
         run: |
-          set +e   # 🔑 CRITICAL: disable fail-on-error completely
 
-          URL="https://mega-facebook-autoposter.onrender.com"
+          set +e
 
-          # Random main delay: 60–240s
-          sleep $((RANDOM % 180 + 60))
+          echo "==============================================="
+          echo "Viraloop Render Production Keep Alive"
+          echo "Started : $(date -u)"
+          echo "Runner  : $RUNNER_NAME"
+          echo "==============================================="
 
-          # Adaptive ping loop (never fails)
-          for i in 1 2 3 4 5; do
-            curl -s --max-time 10 "$URL" > /dev/null 2>&1 || true
-            sleep $((RANDOM % 10 + 5))
-          done
+          success=0
+          failure=0
 
-          # Secondary insurance ping
-          sleep $((RANDOM % 15 + 10))
-          curl -s --max-time 10 "$URL" > /dev/null 2>&1 || true
+          ping() {
 
-          # Tertiary insurance ping
-          sleep $((RANDOM % 20 + 15))
-          curl -s --max-time 10 "$URL" > /dev/null 2>&1 || true
+            echo ""
+            echo "-----------------------------------------------"
+            echo "Ping Time : $(date -u)"
+            echo "Target    : $URL"
+            echo "-----------------------------------------------"
+
+            code=$(curl \
+              --location \
+              --silent \
+              --show-error \
+              --output /dev/null \
+              --write-out "%{http_code}" \
+              --retry 5 \
+              --retry-delay 3 \
+              --retry-all-errors \
+              --connect-timeout 15 \
+              --max-time 120 \
+              "$URL")
+
+            if [[ "$code" == "200" ]]; then
+              echo "SUCCESS (HTTP 200)"
+              success=$((success+1))
+              return 0
+            fi
+
+            echo "FAILED (HTTP $code)"
+            failure=$((failure+1))
+            return 1
+          }
+
+          # Immediate wake
+          ping
+
+          # Verification
+          sleep 20
+          ping
+
+          # Second verification
+          sleep 40
+          ping
+
+          # Third verification
+          sleep 60
+          ping
+
+          # Fourth verification
+          sleep 90
+          ping
+
+          # Final verification
+          sleep 60
+          ping
+
+          echo ""
+          echo "==============================================="
+          echo "Summary"
+          echo "Successful : $success"
+          echo "Failed     : $failure"
+          echo "Finished   : $(date -u)"
+          echo "==============================================="
 
           exit 0
