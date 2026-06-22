@@ -257,6 +257,22 @@ app.get('/api/session', (req, res) => {
     });
 });
 
+// ==================== HEALTH CHECK (PUBLIC) ====================
+app.get('/health', (req, res) => {
+    res.status(200).json({
+        success: true,
+        status: 'healthy',
+        service: 'Viraloop Socials',
+        uptime: Math.floor(process.uptime()),
+        memory: {
+            rss: process.memoryUsage().rss,
+            heapUsed: process.memoryUsage().heapUsed,
+            heapTotal: process.memoryUsage().heapTotal
+        },
+        timestamp: new Date().toISOString()
+    });
+});
+
 // ==================== ENV PAGE SYNC ====================
 async function syncPagesFromEnv(adminId) {
     if (!process.env.PAGES_JSON) return;
