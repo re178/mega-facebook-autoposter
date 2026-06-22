@@ -4,636 +4,533 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>VIRALOOP Dashboard</title>
-  <link rel="stylesheet" href="css/style.css" />
+  <!-- Font & Icons -->
+  <link href="https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" />
+  <meta name="csrf-token" content="{{ csrfToken }}">
   <style>
-    /* Basic inline styles for live app usability */
-    body { font-family: Arial, sans-serif; margin: 0; background: #0b1220; color: #fff; }
-    .layout { display: flex; height: 100vh; }
-    .sidebar { width: 220px; background: #1b1f2a; padding: 20px; display: flex; flex-direction: column; }
-    .sidebar .brand { display: flex; align-items: center; margin-bottom: 40px; }
-    .sidebar .brand .dot { width: 12px; height: 12px; background: #22c55e; border-radius: 50%; margin-right: 8px; }
-    .sidebar nav a { display: block; padding: 10px 0; color: #fff; cursor: pointer; text-decoration: none; }
-    .sidebar nav a.active { font-weight: bold; color: #22c55e; }
-    .main { flex: 1; overflow-y: auto; padding: 20px; }
-    .topbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
-    .topbar h1 { margin: 0; }
-    .stats { display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 20px; }
-    .card { background: #1f2430; padding: 20px; border-radius: 12px; margin-bottom: 20px; }
-    .card h3 { margin-top: 0; margin-bottom: 12px; }
-    .card .value { font-size: 2em; font-weight: bold; }
-    #page-stats-container table { width: 100%; border-collapse: collapse; }
-    #page-stats-container th, #page-stats-container td { padding: 8px 12px; border: 1px solid #333; text-align: left; }
-    #page-stats-container th { background: #2a2f3b; }
-    .logs { max-height: 300px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
-    .log { display: flex; justify-content: space-between; background: #161a27; padding: 8px 12px; border-radius: 6px; font-size: 0.9em; }
-    
-    /* Facebook Status Widget Styles */
-    .fb-status {
-      background: #1f2430;
-      border-radius: 12px;
-      padding: 20px;
-      margin-bottom: 20px;
+    /* ====== NEW GLOBAL STYLES (move to style.css if desired) ====== */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: #f4f6f9;
+      color: #1e293b;
+      line-height: 1.6;
     }
-    .fb-status h3 {
-      margin: 0 0 16px 0;
-      color: #22c55e;
+    .layout { display: flex; min-height: 100vh; }
+
+    /* Sidebar */
+    .sidebar {
+      width: 240px;
+      background: rgba(255,255,255,0.85);
+      backdrop-filter: blur(12px);
+      border-right: 1px solid #e2e8f0;
+      padding: 24px 16px;
       display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-    .pages-grid {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 12px;
-      margin-bottom: 16px;
-    }
-    .page-card {
-      background: #0b1220;
-      border-radius: 10px;
-      padding: 12px 16px;
-      flex: 1;
-      min-width: 160px;
-      border-left: 3px solid #22c55e;
-      position: relative;
-    }
-    .page-card .page-name {
-      font-weight: 600;
-      color: white;
-      margin-bottom: 4px;
-      font-size: 14px;
-    }
-    .page-card .page-status {
-      font-size: 11px;
-      color: #22c55e;
-      margin-bottom: 8px;
-    }
-    .page-card .disconnect-btn {
-      background: #dc2626;
-      color: white;
-      border: none;
-      padding: 4px 8px;
-      border-radius: 4px;
-      font-size: 10px;
-      cursor: pointer;
-      margin-top: 6px;
-      width: 100%;
-    }
-    .page-card .disconnect-btn:hover {
-      background: #b91c1c;
-    }
-    .fb-connect-btn {
-      background: #1877f2;
-      color: white;
-      border: none;
-      padding: 10px 20px;
-      border-radius: 40px;
-      font-size: 14px;
-      font-weight: 600;
-      cursor: pointer;
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      text-decoration: none;
-    }
-    .fb-add-more {
-      background: #2a2f3b;
-      color: #22c55e;
-      border: 1px dashed #22c55e;
-      padding: 10px 20px;
-      border-radius: 40px;
-      font-size: 14px;
-      cursor: pointer;
-      text-decoration: none;
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-    }
-    .loading-pages {
-      color: #9ca3af;
-      text-align: center;
-      padding: 20px;
-    }
-    
-    /* Profile Dropdown Styles */
-    .profile-dropdown {
-      position: fixed;
-      top: 20px;
-      right: 20px;
-      z-index: 1000;
-    }
-    .profile-btn {
-      background: #007bff;
-      color: white;
-      border: none;
-      padding: 8px 16px;
-      border-radius: 4px;
-      cursor: pointer;
-      font-size: 14px;
-    }
-    .dropdown-content {
-      display: none;
-      position: absolute;
-      right: 0;
-      top: 45px;
-      background: #1f2430;
-      min-width: 280px;
-      box-shadow: 0 8px 16px rgba(0,0,0,0.2);
-      padding: 12px;
-      border-radius: 8px;
-      z-index: 1001;
-    }
-    .dropdown-content a {
-      display: block;
-      padding: 8px;
-      text-decoration: none;
-      color: #e5e7eb;
-      font-size: 14px;
-    }
-    .dropdown-content a:hover {
-      background: #2a2f3b;
-      border-radius: 4px;
-    }
-    .dropdown-content .divider {
-      border-top: 1px solid #2a2f3b;
-      margin: 8px 0;
-    }
-    #msgList {
-      list-style: none;
-      padding-left: 0;
-      max-height: 200px;
+      flex-direction: column;
+      position: sticky;
+      top: 0;
+      height: 100vh;
       overflow-y: auto;
     }
-    #msgList li {
-      padding: 4px 0;
-      font-size: 12px;
-      color: #9ca3af;
+    .sidebar .brand {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 32px;
     }
+    .sidebar .brand .dot {
+      width: 10px; height: 10px;
+      background: #10b981;
+      border-radius: 50%;
+    }
+    .sidebar .brand h2 {
+      font-size: 20px;
+      font-weight: 700;
+      color: #0f172a;
+    }
+    .nav a {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 14px;
+      border-radius: 8px;
+      color: #475569;
+      text-decoration: none;
+      font-weight: 500;
+      transition: all 0.2s;
+      margin-bottom: 2px;
+      cursor: pointer;
+    }
+    .nav a:hover {
+      background: #f1f5f9;
+      color: #0f172a;
+    }
+    .nav a.active {
+      background: #10b981;
+      color: white;
+    }
+    .nav a .icon { font-size: 18px; width: 24px; text-align: center; }
+
+    /* Main */
+    .main {
+      flex: 1;
+      padding: 24px 32px;
+      overflow-y: auto;
+    }
+    .topbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 24px;
+    }
+    .topbar h1 {
+      font-size: 24px;
+      font-weight: 600;
+      color: #0f172a;
+    }
+    .menu-btn {
+      display: none;
+      background: none;
+      border: none;
+      font-size: 24px;
+      cursor: pointer;
+    }
+
+    /* Cards */
+    .card {
+      background: #ffffff;
+      border-radius: 12px;
+      padding: 20px 24px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.04);
+      margin-bottom: 20px;
+      border: 1px solid #f1f5f9;
+    }
+    .card h3 {
+      font-size: 16px;
+      font-weight: 600;
+      color: #475569;
+      margin-bottom: 8px;
+    }
+    .card .value {
+      font-size: 28px;
+      font-weight: 700;
+      color: #0f172a;
+    }
+
+    /* Stats Grid */
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+    .stats .card .value { color: #10b981; }
+
+    /* Buttons */
+    .btn {
+      padding: 8px 16px;
+      border: none;
+      border-radius: 6px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 14px;
+      text-decoration: none;
+    }
+    .btn-primary {
+      background: #10b981;
+      color: white;
+    }
+    .btn-primary:hover {
+      background: #059669;
+    }
+    .btn-secondary {
+      background: #f1f5f9;
+      color: #1e293b;
+    }
+    .btn-secondary:hover {
+      background: #e2e8f0;
+    }
+    .btn-warning {
+      background: #f59e0b;
+      color: white;
+    }
+    .btn-warning:hover {
+      background: #d97706;
+    }
+    .btn-danger {
+      background: #f97316;
+      color: white;
+    }
+    .btn-danger:hover {
+      background: #ea580c;
+    }
+    .btn-sm { padding: 4px 12px; font-size: 12px; }
+
+    /* Tables */
+    .table-wrapper { overflow-x: auto; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 14px;
+    }
+    th {
+      text-align: left;
+      padding: 10px 12px;
+      background: #f8fafc;
+      color: #475569;
+      font-weight: 600;
+      border-bottom: 2px solid #e2e8f0;
+    }
+    td {
+      padding: 10px 12px;
+      border-bottom: 1px solid #e2e8f0;
+    }
+    tr:hover td { background: #fafbfc; }
+
+    /* Activity Feed */
+    .logs {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .log {
+      display: flex;
+      justify-content: space-between;
+      background: #f8fafc;
+      padding: 10px 14px;
+      border-radius: 6px;
+      font-size: 14px;
+      color: #334155;
+      border-left: 3px solid #10b981;
+    }
+
+    /* Skeleton */
+    .skeleton {
+      background: #f1f5f9;
+      border-radius: 8px;
+      padding: 16px;
+      animation: pulse 1.5s infinite;
+    }
+    .skeleton-title { height: 16px; width: 60%; background: #e2e8f0; border-radius: 4px; margin-bottom: 8px; }
+    .skeleton-value { height: 32px; width: 40%; background: #e2e8f0; border-radius: 4px; }
+    .skeleton-table .skeleton-row { height: 20px; background: #e2e8f0; margin: 4px 0; border-radius: 4px; }
+    .skeleton-log { height: 24px; background: #e2e8f0; margin: 4px 0; border-radius: 4px; }
+    @keyframes pulse { 0% { opacity: 0.6; } 50% { opacity: 1; } 100% { opacity: 0.6; } }
+
+    /* Toast */
     #toastContainer {
       position: fixed;
       bottom: 20px;
       right: 20px;
       z-index: 9999;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
     }
-    .menu-btn {
-      background: none;
-      border: none;
-      color: white;
-      font-size: 24px;
-      cursor: pointer;
-      display: none;
+    .toast {
+      padding: 12px 20px;
+      border-radius: 8px;
+      background: #ffffff;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+      border-left: 4px solid #10b981;
+      color: #1e293b;
+      font-size: 14px;
+      animation: slideIn 0.3s ease;
+    }
+    .toast.success { border-left-color: #22c55e; }
+    .toast.warning { border-left-color: #f59e0b; }
+    .toast.error { border-left-color: #f97316; }
+    .toast.info { border-left-color: #14b8a6; }
+    @keyframes slideIn {
+      from { opacity: 0; transform: translateX(20px); }
+      to { opacity: 1; transform: translateX(0); }
     }
 
-    /* Responsive tweaks for the new wallet widget */
-    @media (max-width: 640px) {
-      #wallet-section > div {
-        flex-direction: column;
-        align-items: stretch !important;
-      }
-      #wallet-section input {
-        width: 100% !important;
-      }
-      #wallet-section button {
-        width: 100% !important;
-        justify-content: center;
-      }
+    /* Badges */
+    .badge-free { background: #e2e8f0; color: #475569; padding: 2px 10px; border-radius: 12px; font-size: 12px; font-weight: 500; }
+    .badge-pro { background: #10b981; color: white; padding: 2px 10px; border-radius: 12px; font-size: 12px; font-weight: 500; }
+    .badge-enterprise { background: linear-gradient(135deg, #fbbf24, #f59e0b); color: white; padding: 2px 10px; border-radius: 12px; font-size: 12px; font-weight: 500; }
+
+    /* Glass Modal */
+    .modal-glass {
+      background: rgba(255,255,255,0.8);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(255,255,255,0.3);
+      border-radius: 16px;
+      padding: 24px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.08);
     }
+
+    /* Progress bar */
+    #loading-progress-container {
+      margin-bottom: 20px;
+    }
+    #loading-progress-bar {
+      height: 4px;
+      background: #e2e8f0;
+      border-radius: 4px;
+      overflow: hidden;
+    }
+    #loading-progress {
+      height: 100%;
+      background: #10b981;
+      transition: width 0.3s ease;
+      width: 0%;
+    }
+    #loading-text {
+      font-size: 14px;
+      color: #64748b;
+      margin-top: 4px;
+    }
+
+    /* Responsive */
     @media (max-width: 768px) {
       .sidebar { display: none; }
       .menu-btn { display: block; }
-      .profile-dropdown { position: fixed; top: 10px; right: 10px; }
-      .profile-btn { padding: 6px 12px; font-size: 12px; }
+      .main { padding: 16px; }
+      .topbar h1 { font-size: 20px; }
+      .stats { grid-template-columns: 1fr 1fr; }
+      .sidebar.active { display: flex; position: fixed; width: 260px; height: 100%; z-index: 1000; top:0; left:0; background: white; }
+      .overlay.active { display: block; position: fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.3); z-index:999; }
+    }
+
+    /* Quick Actions */
+    .quick-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-bottom: 24px;
+    }
+    .quick-actions .btn { padding: 10px 18px; }
+
+    /* Wallet Card */
+    .wallet-card {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 20px;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .wallet-balance {
+      font-size: 2rem;
+      font-weight: 700;
+      color: #0f172a;
+    }
+    .wallet-balance small {
+      font-size: 1rem;
+      font-weight: 400;
+      color: #64748b;
+    }
+
+    /* Two-column layout */
+    .two-col {
+      display: grid;
+      grid-template-columns: 2fr 1fr;
+      gap: 24px;
+    }
+    @media (max-width: 992px) {
+      .two-col { grid-template-columns: 1fr; }
     }
   </style>
 </head>
 <body>
-  <!-- Profile Dropdown -->
-  <div class="profile-dropdown">
-    <button class="profile-btn" id="profileBtn">👤 My Account ▼</button>
-    <div id="dropdownContent" class="dropdown-content">
-      <a href="#" onclick="showProfileModal(); return false;">👤 My Profile</a>
-      <a href="#" onclick="showChangePasswordModal(); return false;">🔑 Change Password</a>
-      <div class="divider"></div>
-      <div id="privateMessagesList">
-        <strong>📩 Admin Messages</strong>
-        <ul id="msgList"></ul>
+
+  <!-- Profile Dropdown (top right) -->
+  <div class="profile-dropdown" style="position:fixed; top:16px; right:24px; z-index:1000;">
+    <button class="btn btn-secondary" id="profileBtn" style="background:white; border:1px solid #e2e8f0;">
+      <i class="fas fa-user"></i> <span id="userEmailDisplay">Account</span> <i class="fas fa-chevron-down"></i>
+    </button>
+    <div id="dropdownContent" style="display:none; position:absolute; right:0; top:45px; background:white; min-width:260px; box-shadow:0 8px 16px rgba(0,0,0,0.08); padding:12px; border-radius:8px; border:1px solid #e2e8f0;">
+      <a href="#" onclick="showProfileModal(); return false;" style="display:block; padding:6px 8px; color:#1e293b; text-decoration:none;"><i class="fas fa-user-circle"></i> My Profile</a>
+      <a href="#" onclick="showChangePasswordModal(); return false;" style="display:block; padding:6px 8px; color:#1e293b; text-decoration:none;"><i class="fas fa-key"></i> Change Password</a>
+      <a href="#" onclick="showUpgradeModal(); return false;" style="display:block; padding:6px 8px; color:#f59e0b; text-decoration:none;"><i class="fas fa-crown"></i> Upgrade Plan</a>
+      <div style="border-top:1px solid #e2e8f0; margin:8px 0;"></div>
+      <div id="privateMessagesList" style="padding:6px 8px;">
+        <strong><i class="fas fa-envelope"></i> Messages</strong>
+        <ul id="msgList" style="list-style:none; padding-left:0; max-height:150px; overflow-y:auto; font-size:13px;"></ul>
       </div>
-      <div class="divider"></div>
-      <a href="#" onclick="deleteAccount(); return false;" style="color: #d9534f;">🗑️ Delete Account</a>
-      <div class="divider"></div>
-      <a href="/logout" style="color: #22c55e;">🚪 Logout</a>
+      <div style="border-top:1px solid #e2e8f0; margin:8px 0;"></div>
+      <a href="#" onclick="deleteAccount(); return false;" style="display:block; padding:6px 8px; color:#f97316; text-decoration:none;"><i class="fas fa-trash-alt"></i> Delete Account</a>
+      <a href="/logout" style="display:block; padding:6px 8px; color:#10b981; text-decoration:none;"><i class="fas fa-sign-out-alt"></i> Logout</a>
     </div>
   </div>
 
+  <!-- Toast Container -->
   <div id="toastContainer"></div>
 
+  <!-- Main Layout -->
   <div class="layout">
     <div class="overlay" id="overlay"></div>
-    
-    <!-- Sidebar Navigation -->
-    <aside class="sidebar">
+
+    <!-- Sidebar -->
+    <aside class="sidebar" id="sidebar">
       <div class="brand"><span class="dot"></span><h2>VIRALOOP</h2></div>
       <nav class="nav">
-        <a class="active" data-page="master" href="/index.html">Dashboard</a>
-        <a data-page="page" href="/pages">Pages</a>
-        <a data-page="schedule" href="/schedule">Schedule</a>
-        <a data-page="systems" href="#">Systems</a>
-        <a data-page="automations" href="#">Automations</a>
-        <a data-page="logs" href="#">Logs</a>
-        <a data-page="earnings" href="#">Earnings</a>
-        <a data-page="users" href="#">Users</a>
-        <a data-page="settings" href="#">Settings</a>
+        <a class="active" data-page="master" href="/index.html"><span class="icon"><i class="fas fa-chart-pie"></i></span>Dashboard</a>
+        <a data-page="page" href="#"><span class="icon"><i class="fas fa-file-alt"></i></span>Pages</a>
+        <a data-page="schedule" href="/schedule"><span class="icon"><i class="fas fa-calendar-alt"></i></span>Schedule</a>
+        <a data-page="systems" href="#"><span class="icon"><i class="fas fa-robot"></i></span>AI Scheduler</a>
+        <a data-page="automations" href="#"><span class="icon"><i class="fas fa-bolt"></i></span>Automations</a>
+        <a data-page="earnings" href="#"><span class="icon"><i class="fas fa-wallet"></i></span>Wallet</a>
+        <a data-page="users" href="#"><span class="icon"><i class="fas fa-users"></i></span>Users</a>
+        <a data-page="settings" href="#"><span class="icon"><i class="fas fa-cog"></i></span>Settings</a>
+        <!-- Admin link will be shown by JS -->
+        <a data-page="admin" id="admin-nav-link" style="display:none;"><span class="icon"><i class="fas fa-shield-alt"></i></span>Admin</a>
       </nav>
     </aside>
 
     <!-- Main Content -->
     <main class="main">
       <div class="topbar">
-        <button id="menu-toggle" class="menu-btn">☰</button>
+        <button id="menu-toggle" class="menu-btn"><i class="fas fa-bars"></i></button>
         <h1>Master Dashboard</h1>
+        <div style="display:flex; align-items:center; gap:12px;">
+          <span id="planBadge" class="badge-free">Free</span>
+        </div>
       </div>
 
-      <!-- Facebook Connection Status Widget -->
-      <section class="fb-status" id="facebook-status-section">
-        <h3>📘 Facebook Connection</h3>
-        <div id="fb-status-content">
-          <div class="loading-pages">Loading your connected pages...</div>
-        </div>
-      </section>
+      <!-- Loading Progress -->
+      <div id="loading-progress-container">
+        <div id="loading-progress-bar"><div id="loading-progress"></div></div>
+        <div id="loading-text">Loading dashboard...</div>
+      </div>
 
-      <!-- ============================================================ -->
-      <!-- 🚀 WALLET & M-PESA PAYMENT WIDGET (ADDED)                     -->
-      <!-- ============================================================ -->
-      <section class="card" id="wallet-section" style="border-left: 4px solid #22c55e;">
-        <div style="display: flex; flex-wrap: wrap; gap: 20px; align-items: center; justify-content: space-between;">
-          
-          <!-- Balance Display -->
+      <!-- Welcome Banner -->
+      <div class="card" style="background: linear-gradient(135deg, #f0fdf4, #ecfdf5); border:1px solid #bbf7d0;">
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap;">
           <div>
-            <h3 style="margin: 0 0 4px 0; color: #9ca3af; font-size: 14px; font-weight: normal;">💰 Wallet Balance</h3>
-            <span style="font-size: 2.5rem; font-weight: bold; color: #fff;" id="walletBalanceDisplay">0.00</span>
-            <span style="color: #6b7280; font-size: 14px; margin-left: 4px;">KES</span>
+            <h2 style="font-weight:600; color:#0f172a; margin-bottom:4px;">Welcome back, <span id="userNameDisplay">User</span> 👋</h2>
+            <p style="color:#475569;">Manage your pages and grow your audience.</p>
           </div>
-
-          <!-- Top-Up Form -->
-          <div style="display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap;">
-            <div>
-              <label style="color: #9ca3af; font-size: 12px; display: block; margin-bottom: 4px;">Amount (KES)</label>
-              <input type="number" id="amountInput" min="1" placeholder="e.g. 100" 
-                     style="background: #0b1220; border: 1px solid #2a2f3b; color: white; padding: 10px 12px; border-radius: 6px; width: 160px; height: 44px;">
-            </div>
-            
-            <!-- Hidden fields for user data -->
-            <input type="hidden" id="userId" value="">
-            <input type="hidden" id="userPhone" value="">
-
-            <!-- ✅ FIXED: Removed inline onclick – event listener is attached by lipaService.js -->
-            <button id="payButton" style="background: #22c55e; color: #0b1220; border: none; padding: 10px 24px; border-radius: 40px; font-weight: 600; font-size: 14px; cursor: pointer; height: 44px; white-space: nowrap; display: flex; align-items: center; gap: 8px;">
-              <span>📱</span> Pay with M-Pesa
-            </button>
+          <div>
+            <button class="btn btn-warning" onclick="showUpgradeModal()"><i class="fas fa-crown"></i> Upgrade</button>
           </div>
         </div>
-        <small style="color: #6b7280; display: block; margin-top: 14px; border-top: 1px solid #2a2f3b; padding-top: 12px;">
-          ⚡ You will receive an STK Push prompt on your registered phone. 
-          <span id="registeredPhoneDisplay" style="color: #22c55e;">(Loading...)</span>
-        </small>
-      </section>
+      </div>
 
-      <!-- Summary Cards -->
+      <!-- Stats Cards -->
       <section class="stats" id="summary-cards">
-        <!-- JS will inject summary cards here -->
+        <!-- JS will inject -->
       </section>
 
-      <!-- Per-Page Statistics -->
-      <section class="card" id="page-stats-container">
-        <h3>Per-Page Statistics</h3>
-        <table>
-          <thead>
-            <tr>
-              <th>Page Name</th>
-              <th>Total Posts</th>
-              <th>Posted</th>
-              <th>Failed</th>
-              <th>Total Topics</th>
-            </tr>
-          </thead>
-          <tbody>
-            <!-- JS will inject rows here -->
-          </tbody>
-        </table>
-      </section>
-
-      <!-- Recent Logs -->
-      <section class="card">
-        <h3>Recent Logs</h3>
-        <div class="logs" id="recent-logs">
-          <!-- JS will inject logs here -->
+      <!-- Wallet & Quick Actions -->
+      <div class="card" id="wallet-section">
+        <div class="wallet-card">
+          <div>
+            <h3 style="font-weight:400; color:#64748b; font-size:14px; margin-bottom:2px;"><i class="fas fa-wallet"></i> Wallet Balance</h3>
+            <span class="wallet-balance" id="walletBalanceDisplay">0.00</span>
+            <small>KES</small>
+          </div>
+          <div style="display:flex; flex-wrap:wrap; gap:10px;">
+            <input type="number" id="amountInput" min="1" placeholder="e.g. 100" style="background:#f8fafc; border:1px solid #e2e8f0; padding:10px 12px; border-radius:6px; width:140px; height:44px;">
+            <button id="payButton" class="btn btn-primary"><i class="fas fa-mobile-alt"></i> Pay with M-Pesa</button>
+            <button class="btn btn-secondary" onclick="showUpgradeModal()"><i class="fas fa-arrow-up"></i> Upgrade</button>
+          </div>
         </div>
-      </section>
+        <small style="color:#94a3b8; display:block; margin-top:12px; border-top:1px solid #e2e8f0; padding-top:12px;">
+          <i class="fas fa-info-circle"></i> You will receive an STK Push prompt on your registered phone.
+          <span id="registeredPhoneDisplay" style="color:#10b981;">(Loading...)</span>
+        </small>
+        <input type="hidden" id="userId" value="">
+        <input type="hidden" id="userPhone" value="">
+      </div>
+
+      <!-- Quick Actions -->
+      <div class="quick-actions">
+        <button class="btn btn-primary" onclick="window.location.href='/pages'"><i class="fas fa-plus-circle"></i> New Post</button>
+        <button class="btn btn-secondary" onclick="window.location.href='/pages'"><i class="fas fa-robot"></i> AI Generate</button>
+        <button class="btn btn-secondary" onclick="window.location.href='/connect-facebook'"><i class="fab fa-facebook"></i> Connect Page</button>
+        <button class="btn btn-secondary" onclick="window.location.href='/pages'"><i class="fas fa-list-ul"></i> View Pages</button>
+      </div>
+
+      <!-- Two Column: Per-Page Stats + Activity Feed -->
+      <div class="two-col">
+        <section class="card" id="page-stats-container" style="margin-bottom:0;">
+          <h3>Per‑Page Statistics</h3>
+          <div class="table-wrapper">
+            <table>
+              <thead><tr><th>Page Name</th><th>Total Posts</th><th>Posted</th><th>Failed</th><th>Total Topics</th></tr></thead>
+              <tbody id="page-stats-body"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="card" id="recent-activity-container" style="margin-bottom:0;">
+          <h3><i class="fas fa-clock"></i> Recent Activity</h3>
+          <div class="logs" id="recent-logs">
+            <!-- JS injects -->
+          </div>
+        </section>
+      </div>
+
     </main>
   </div>
 
-  <!-- Profile Modal (Hidden by default) -->
-  <div id="profileModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.8); z-index:2000; justify-content:center; align-items:center;">
-    <div style="background:#1f2430; padding:30px; border-radius:12px; max-width:400px; width:90%;">
-      <h3 style="color:#22c55e; margin-bottom:20px;">👤 My Profile</h3>
+  <!-- Modals (hidden by default) -->
+
+  <!-- Profile Modal -->
+  <div id="profileModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.3); z-index:2000; justify-content:center; align-items:center;">
+    <div class="modal-glass" style="max-width:400px; width:90%;">
+      <h3 style="color:#0f172a; margin-bottom:16px;"><i class="fas fa-user-circle"></i> My Profile</h3>
       <div id="profileInfo"></div>
-      <button onclick="closeProfileModal()" style="background:#374151; color:white; padding:10px; border:none; border-radius:6px; margin-top:20px; width:100%; cursor:pointer;">Close</button>
+      <button onclick="closeProfileModal()" class="btn btn-secondary" style="width:100%; margin-top:16px;">Close</button>
     </div>
   </div>
 
   <!-- Change Password Modal -->
-  <div id="passwordModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.8); z-index:2000; justify-content:center; align-items:center;">
-    <div style="background:#1f2430; padding:30px; border-radius:12px; max-width:400px; width:90%;">
-      <h3 style="color:#22c55e; margin-bottom:20px;">🔑 Change Password</h3>
-      <input type="password" id="oldPassword" placeholder="Current Password" style="width:100%; padding:10px; margin-bottom:10px; background:#0b1220; border:1px solid #2a2f3b; color:white; border-radius:6px;">
-      <input type="password" id="newPassword" placeholder="New Password (min 6 chars)" style="width:100%; padding:10px; margin-bottom:10px; background:#0b1220; border:1px solid #2a2f3b; color:white; border-radius:6px;">
-      <input type="password" id="confirmPassword" placeholder="Confirm New Password" style="width:100%; padding:10px; margin-bottom:20px; background:#0b1220; border:1px solid #2a2f3b; color:white; border-radius:6px;">
-      <button onclick="changePassword()" style="background:#22c55e; color:white; padding:10px; border:none; border-radius:6px; width:100%; cursor:pointer;">Update Password</button>
-      <button onclick="closePasswordModal()" style="background:#374151; color:white; padding:10px; border:none; border-radius:6px; margin-top:10px; width:100%; cursor:pointer;">Cancel</button>
+  <div id="passwordModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.3); z-index:2000; justify-content:center; align-items:center;">
+    <div class="modal-glass" style="max-width:400px; width:90%;">
+      <h3 style="color:#0f172a; margin-bottom:16px;"><i class="fas fa-key"></i> Change Password</h3>
+      <input type="password" id="oldPassword" placeholder="Current Password" style="width:100%; padding:10px; margin-bottom:10px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px;">
+      <input type="password" id="newPassword" placeholder="New Password (min 6 chars)" style="width:100%; padding:10px; margin-bottom:10px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px;">
+      <input type="password" id="confirmPassword" placeholder="Confirm New Password" style="width:100%; padding:10px; margin-bottom:20px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px;">
+      <button onclick="changePassword()" class="btn btn-primary" style="width:100%;">Update Password</button>
+      <button onclick="closePasswordModal()" class="btn btn-secondary" style="width:100%; margin-top:8px;">Cancel</button>
+    </div>
+  </div>
+
+  <!-- Page Select Modal (preserved) -->
+  <div id="page-select-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.3); z-index:1000; justify-content:center; align-items:center;">
+    <div style="background:white; padding:24px; border-radius:12px; max-width:400px; width:90%;">
+      <h3 style="margin-top:0; color:#0f172a;">Select a Page</h3>
+      <select id="page-select" style="width:100%; padding:8px; border-radius:6px; margin-bottom:12px; border:1px solid #e2e8f0;"></select>
+      <div style="text-align:right;">
+        <button id="page-cancel" class="btn btn-secondary" style="margin-right:6px;">Cancel</button>
+        <button id="page-go" class="btn btn-primary">Go</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Upgrade Modal -->
+  <div id="upgradeModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.3); z-index:2000; justify-content:center; align-items:center;">
+    <div class="modal-glass" style="max-width:560px; width:95%;">
+      <h3 style="color:#0f172a; margin-bottom:8px;"><i class="fas fa-crown" style="color:#f59e0b;"></i> Upgrade Your Plan</h3>
+      <p style="color:#64748b; margin-bottom:20px;">Choose a plan that fits your needs.</p>
+      <div id="pricingPlans" style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:20px;">
+        <!-- Plans injected by JS -->
+      </div>
+      <div style="display:flex; justify-content:space-between; align-items:center; padding:12px 0; border-top:1px solid #e2e8f0;">
+        <span style="font-weight:500;">Wallet Balance: <span id="upgradeWalletBalance">0.00</span> KES</span>
+        <span id="upgradePriceDisplay" style="font-weight:600; color:#10b981;">Select a plan</span>
+      </div>
+      <div style="display:flex; gap:8px; margin-top:16px;">
+        <button id="confirmUpgradeBtn" class="btn btn-primary" style="flex:1;" disabled>Confirm Upgrade</button>
+        <button onclick="closeUpgradeModal()" class="btn btn-secondary">Cancel</button>
+      </div>
     </div>
   </div>
 
   <!-- Scripts -->
   <script src="js/api.js"></script>
+  <script src="js/dashboard-api.js"></script>
+  <script src="js/session.js"></script>
+  <script src="js/lipaService.js"></script>
   <script src="js/master.js"></script>
-  <script src="/js/dashboard.js"></script>
-  
-  <!-- 🚀 ADDED: M-Pesa Wallet Frontend Logic -->
-  <script src="/js/lipaService.js"></script>
-  
-  <!-- Main Dashboard Script -->
-  <script>
-    // Helper function to escape HTML
-    function escapeHtml(str) {
-      if (!str) return '';
-      return str.replace(/[&<>]/g, function(m) {
-        if (m === '&') return '&amp;';
-        if (m === '<') return '&lt;';
-        if (m === '>') return '&gt;';
-        return m;
-      });
-    }
-    
-    // ========================================
-    // PAGE DISCONNECT/DELETION FUNCTION
-    // ========================================
-    async function disconnectPage(pageId, pageName) {
-      if (!confirm(`⚠️ Remove "${pageName}" from VIRALOOP?\n\nYou can reconnect it later from the Connect Facebook page.`)) {
-        return;
-      }
-      
-      try {
-        const res = await fetch(`/api/facebook/pages/${pageId}`, {
-          method: 'DELETE',
-          credentials: 'include'
-        });
-        
-        const data = await res.json();
-        
-        if (data.success) {
-          showToast('✅ Page disconnected successfully', 'success');
-          loadFacebookStatus(); // Refresh the list
-        } else {
-          showToast('❌ Failed to disconnect: ' + (data.error || 'Unknown error'), 'error');
-        }
-      } catch (err) {
-        showToast('❌ Error: ' + err.message, 'error');
-      }
-    }
-    
-    // ========================================
-    // PROFILE FUNCTIONS
-    // ========================================
-    async function showProfileModal() {
-      try {
-        const res = await fetch('/api/auth/profile', { credentials: 'include' });
-        if (res.ok) {
-          const user = await res.json();
-          document.getElementById('profileInfo').innerHTML = `
-            <p><strong>Name:</strong> ${escapeHtml(user.name || 'N/A')}</p>
-            <p><strong>Email:</strong> ${escapeHtml(user.email)}</p>
-            <p><strong>Role:</strong> ${escapeHtml(user.role || 'User')}</p>
-            <p><strong>Member since:</strong> ${new Date(user.createdAt).toLocaleDateString()}</p>
-            <p><strong>Email Verified:</strong> ${user.isVerified ? '✅ Yes' : '⚠️ No'}</p>
-          `;
-          document.getElementById('profileModal').style.display = 'flex';
-        } else {
-          showToast('Failed to load profile', 'error');
-        }
-      } catch (err) {
-        showToast('Error loading profile', 'error');
-      }
-    }
-    
-    function closeProfileModal() {
-      document.getElementById('profileModal').style.display = 'none';
-    }
-    
-    function showChangePasswordModal() {
-      document.getElementById('passwordModal').style.display = 'flex';
-    }
-    
-    function closePasswordModal() {
-      document.getElementById('passwordModal').style.display = 'none';
-      document.getElementById('oldPassword').value = '';
-      document.getElementById('newPassword').value = '';
-      document.getElementById('confirmPassword').value = '';
-    }
-    
-    async function changePassword() {
-      const oldPassword = document.getElementById('oldPassword').value;
-      const newPassword = document.getElementById('newPassword').value;
-      const confirmPassword = document.getElementById('confirmPassword').value;
-      
-      if (!oldPassword || !newPassword) {
-        showToast('Please fill all fields', 'error');
-        return;
-      }
-      
-      if (newPassword.length < 6) {
-        showToast('New password must be at least 6 characters', 'error');
-        return;
-      }
-      
-      if (newPassword !== confirmPassword) {
-        showToast('Passwords do not match', 'error');
-        return;
-      }
-      
-      try {
-        const res = await fetch('/api/auth/change-password', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
-          body: JSON.stringify({ oldPassword, newPassword })
-        });
-        
-        const data = await res.json();
-        
-        if (data.success) {
-          showToast('✅ Password changed successfully', 'success');
-          closePasswordModal();
-        } else {
-          showToast('❌ ' + (data.error || 'Failed to change password'), 'error');
-        }
-      } catch (err) {
-        showToast('Error changing password', 'error');
-      }
-    }
-    
-    async function deleteAccount() {
-      const confirmed = confirm('⚠️ PERMANENT ACTION ⚠️\n\nDelete your account? This will:\n- Delete all your pages\n- Delete all scheduled posts\n- Delete all AI topics\n- Delete all logs\n\nThis cannot be undone!\n\nType "DELETE" to confirm:');
-      
-      if (!confirmed) return;
-      
-      const confirmText = prompt('Type "DELETE" to confirm account deletion:');
-      if (confirmText !== 'DELETE') {
-        showToast('Account deletion cancelled', 'error');
-        return;
-      }
-      
-      try {
-        const res = await fetch('/api/auth/account', {
-          method: 'DELETE',
-          credentials: 'include'
-        });
-        
-        const data = await res.json();
-        
-        if (data.success) {
-          showToast('Account deleted. Redirecting...', 'success');
-          setTimeout(() => {
-            window.location.href = '/logout';
-          }, 2000);
-        } else {
-          showToast('❌ ' + (data.error || 'Failed to delete account'), 'error');
-        }
-      } catch (err) {
-        showToast('Error deleting account', 'error');
-      }
-    }
-    
-    // ========================================
-    // TOAST NOTIFICATION
-    // ========================================
-    function showToast(message, type = 'info') {
-      const container = document.getElementById('toastContainer');
-      const toast = document.createElement('div');
-      toast.style.cssText = `
-        background: ${type === 'success' ? '#22c55e' : type === 'error' ? '#dc2626' : '#1877f2'};
-        color: white;
-        padding: 12px 20px;
-        border-radius: 8px;
-        margin-bottom: 10px;
-        font-size: 14px;
-        animation: slideIn 0.3s ease;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-      `;
-      toast.textContent = message;
-      container.appendChild(toast);
-      
-      setTimeout(() => {
-        toast.style.opacity = '0';
-        setTimeout(() => toast.remove(), 300);
-      }, 3000);
-    }
-    
-    // ========================================
-    // LOAD MESSAGES
-    // ========================================
-    async function loadMessages() {
-      try {
-        const res = await fetch('/api/user/messages', { credentials: 'include' });
-        if (res.ok) {
-          const msgs = await res.json();
-          const msgList = document.getElementById('msgList');
-          if (msgList && msgs.length) {
-            msgList.innerHTML = msgs.map(m => `<li>📨 ${escapeHtml(m.message)}</li>`).join('');
-          } else if (msgList) {
-            msgList.innerHTML = '<li>No new messages</li>';
-          }
-        }
-      } catch (err) {
-        console.error('Messages error:', err);
-      }
-    }
-    
-    // ========================================
-    // LOAD FACEBOOK CONNECTION STATUS
-    // ========================================
-    async function loadFacebookStatus() {
-      const container = document.getElementById('fb-status-content');
-      if (!container) return;
-      
-      try {
-        const res = await fetch('/api/facebook/pages', { credentials: 'include' });
-        
-        if (res.status === 401) {
-          window.location.href = '/login';
-          return;
-        }
-        
-        const pages = await res.json();
-        
-        if (!pages || pages.length === 0) {
-          container.innerHTML = `
-            <div style="text-align: center; padding: 20px;">
-              <p style="color: #9ca3af; margin-bottom: 16px;">⚠️ No Facebook pages connected</p>
-              <p style="color: #6b7280; font-size: 13px; margin-bottom: 20px;">Connect your Facebook account to start posting and managing your pages.</p>
-              <a href="/connect-facebook" class="fb-connect-btn">🔗 Connect Facebook Account</a>
-            </div>
-          `;
-        } else {
-          container.innerHTML = `
-            <div class="pages-grid">
-              ${pages.map(p => `
-                <div class="page-card">
-                  <div class="page-name">${escapeHtml(p.name)}</div>
-                  <div class="page-status">✅ Connected</div>
-                  <button class="disconnect-btn" onclick="disconnectPage('${p.pageId}', '${escapeHtml(p.name)}')">
-                    🚫 Disconnect
-                  </button>
-                </div>
-              `).join('')}
-              <div style="display: flex; align-items: center;">
-                <a href="/connect-facebook" class="fb-add-more">+ Add More Pages</a>
-              </div>
-            </div>
-            <div style="margin-top: 12px; font-size: 12px; color: #6b7280;">
-              💡 Your pages are connected and ready for posting. Go to <a href="/pages" style="color: #22c55e;">Pages</a> to manage individual pages.
-            </div>
-          `;
-        }
-      } catch (err) {
-        console.error('Facebook status error:', err);
-        container.innerHTML = `
-          <div style="text-align: center; padding: 20px;">
-            <p style="color: #ef4444;">❌ Error loading connection status</p>
-            <a href="/connect-facebook" class="fb-connect-btn">🔗 Connect Facebook</a>
-          </div>
-        `;
-      }
-    }
-    
-    // Profile dropdown toggle
-    document.addEventListener('DOMContentLoaded', () => {
-      const profileBtn = document.getElementById('profileBtn');
-      const dropdownContent = document.getElementById('dropdownContent');
-      
-      if (profileBtn) {
-        profileBtn.addEventListener('click', (e) => {
-          e.stopPropagation();
-          const isVisible = dropdownContent.style.display === 'block';
-          dropdownContent.style.display = isVisible ? 'none' : 'block';
-        });
-        
-        document.addEventListener('click', () => {
-          dropdownContent.style.display = 'none';
-        });
-      }
-      
-      loadFacebookStatus();
-      loadMessages();
-    });
-  </script>
+
 </body>
 </html>
