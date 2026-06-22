@@ -38,6 +38,9 @@ const {
   SmartPexelsImage
 } = require('./imageProviders');
 
+// ========== NEW: Topic Engine for discovery ==========
+const { discoverAndRank } = require('./topicEngine');
+
 // Provider arrays
 const TextProviders = [GeminiText, CloudflareText, GroqText, OpenAIText];
 const ImageProviders = [CloudflareImage, StabilityImage, LeonardoImage, DALLEImage, SmartPexelsImage];
@@ -567,7 +570,6 @@ async function createManualTopicWithQA(pageId, topicName, startDate, endDate, ti
   return { success: true, topic: newTopic, topicScore, pageFit, customAngles };
 }
 
-// ========== GENERATE POSTS FOR MANUAL TOPIC (UPDATED) ==========
 async function generatePostsForManualTopic(topicId, generateImmediately = false) {
   const topic = await AiTopic.findById(topicId);
   if (!topic) return { success: false, reason: 'Topic not found' };
@@ -815,7 +817,7 @@ async function ensureActiveTopicsForPage(pageId) {
     }
   }
 
-  // --- AUTO-TOPIC CREATION (unchanged) ---
+  // --- AUTO-TOPIC CREATION (UPDATED with Engine) ---
   if (!GLOBAL_AUTO_TOPIC_CREATION_ENABLED) return;
   const autoTopics = activeTopics.filter(t => !t.manualTopic);
   if (autoTopics.length >= MIN_ACTIVE_TOPICS) return;
@@ -829,29 +831,66 @@ async function ensureActiveTopicsForPage(pageId) {
 
   const interests = profile.audienceInterest;
   const selectedInterest = interests[Math.floor(Math.random() * interests.length)];
-  
-  let trendingHeadline = null;
+
+  // ---- NEW: Use topicEngine to discover a topic ----
+  let topicName = null;
+  let engineScore = null;
   try {
-    trendingHeadline = await fetchTrendingHeadline(pageId, selectedInterest);
-  } catch (e) {
-    console.warn('Trending headline fetch failed, proceeding without news:', e.message);
+    const candidates = await discoverAndRank(selectedInterest);
+    if (candidates && candidates.length > 0) {
+      const best = candidates[0];
+      topicName = best.title;
+      engineScore = best.overallScore;
+      // Trim to a reasonable length
+      if (topicName.length > 80) topicName = topicName.slice(0, 77) + '…';
+      await monitor(null, pageId, null, 'ENGINE_FETCH_SUCCESS', 
+        `Interest: "${selectedInterest}" → Topic: "${topicName}" (Score: ${engineScore})`);
+    } else {
+      await monitor(null, pageId, null, 'ENGINE_FETCH_EMPTY', `No candidates for interest "${selectedInterest}"`);
+    }
+  } catch (err) {
+    console.warn(`Engine discovery failed for interest "${selectedInterest}":`, err.message);
+    await monitor(null, pageId, null, 'ENGINE_FETCH_ERROR', err.message);
   }
 
-  let topicName = await generateShortTopicName(selectedInterest, trendingHeadline, pageId);
+  // Fallback to old method if engine failed or returned nothing
   if (!topicName) {
-    topicName = `Latest update on ${selectedInterest}`;
+    let trendingHeadline = null;
+    try {
+      trendingHeadline = await fetchTrendingHeadline(pageId, selectedInterest);
+    } catch (e) {
+      console.warn('Trending headline fetch failed, proceeding without news:', e.message);
+    }
+    topicName = await generateShortTopicName(selectedInterest, trendingHeadline, pageId);
+    if (!topicName) {
+      topicName = `Latest update on ${selectedInterest}`; // ultimate fallback
+    }
+    await monitor(null, pageId, null, 'FALLBACK_TOPIC_GENERATED', 
+      `Used fallback for interest "${selectedInterest}" → Topic: "${topicName}"`);
   }
 
+  // ---- Quality checks (combine engine score with existing) ----
   const { topicScore, pageFit } = await evaluateTopicQuality(topicName, pageId);
-  if (topicScore < 20 || pageFit < 30) {
-    await monitor(null, pageId, null, 'AUTO_TOPIC_REJECTED_QUALITY', `Topic "${topicName}" score=${topicScore}, fit=${pageFit}`);
+  let overallQuality = (topicScore + pageFit) / 2;
+  if (engineScore !== null && engineScore !== undefined) {
+    overallQuality = (overallQuality + engineScore) / 2; // average of three
+  }
+  const qualityThreshold = 35; // adjust as needed
+  if (overallQuality < qualityThreshold) {
+    await monitor(null, pageId, null, 'AUTO_TOPIC_REJECTED_QUALITY', 
+      `Topic "${topicName}" overall quality ${overallQuality.toFixed(1)} (engine=${engineScore || 'N/A'}, topic=${topicScore}, fit=${pageFit})`);
     return;
   }
 
+  // ---- Similarity check ----
   if (await isTopicTooSimilar(topicName, pageId)) {
+    // If similar, we could modify the name slightly, or skip
     topicName = `${topicName} (fresh take)`;
+    // Optionally re-evaluate similarity after modification? But we'll proceed cautiously.
+    await monitor(null, pageId, null, 'TOPIC_SIMILAR_RENAMED', `Renamed to "${topicName}"`);
   }
 
+  // ---- Create topic ----
   const startDate = await getIntelligentStartDate(pageId);
   const endDate = moment.tz(startDate, TIMEZONE).add(TOPIC_LIFETIME_DAYS, 'days').toDate();
   const times = [];
@@ -861,17 +900,30 @@ async function ensureActiveTopicsForPage(pageId) {
   }
 
   const customAngles = await generateCustomAngles(topicName, pageId, selectedInterest);
-  
+
   const newTopic = await AiTopic.create({
-    topicName, pageId, startDate, endDate, times,
+    topicName,
+    pageId,
+    startDate,
+    endDate,
+    times,
     postsPerDay: POSTS_PER_DAY_AUTO,
     includeMedia: INCLUDE_MEDIA_AUTO,
     includeVideo: false,
     customAngles,
-    manualTopic: false
+    manualTopic: false,
+    meta: {
+      sourceInterest: selectedInterest,      // TRACKING: where this topic came from
+      engineScore: engineScore,
+      topicScore: topicScore,
+      pageFit: pageFit,
+      overallQuality: overallQuality,
+      generatedBy: 'engine_with_fallback'
+    }
   });
+
   await monitor(newTopic._id, pageId, null, 'AUTO_TOPIC_CREATED',
-    `Topic: "${topicName}", Interest: "${selectedInterest}", Angles: ${customAngles.join(', ')}, Scores: topic=${topicScore}, fit=${pageFit}`);
+    `Topic: "${topicName}", Interest: "${selectedInterest}", Angles: ${customAngles.join(', ')}, Scores: engine=${engineScore || 'N/A'}, topic=${topicScore}, fit=${pageFit}`);
 
   try {
     await generateNextPostForTopic(newTopic);
@@ -917,6 +969,6 @@ module.exports = {
   ensureActiveTopicsForPage,
   generateNextPostForTopic,
   evaluateTopicQuality,
-  getUsedAnglesCount,        // exported for debugging
-  expireTopicIfComplete      // exported for debugging
+  getUsedAnglesCount,
+  expireTopicIfComplete
 };
