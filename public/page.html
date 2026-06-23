@@ -7,9 +7,8 @@
   <title>Page Dashboard</title>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" />
-  <!-- We'll reuse the same styles from index.html; you can also link to style.css -->
   <style>
-    /* Same as index.html – to keep it self-contained, but we can link to style.css */
+    /* Same as index.html – to keep it self-contained */
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { font-family: 'Inter', sans-serif; background: #f4f6f9; color: #1e293b; }
     .layout { display: flex; min-height: 100vh; }
@@ -392,15 +391,189 @@
     </div>
   </div>
 
+  <!-- ===================================================== -->
+  <!-- SCRIPTS – CORRECT LOAD ORDER                         -->
+  <!-- ===================================================== -->
+
+  <!-- Chart.js (external) -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+  <!-- 1. API layer (window.apiFetch, all API functions) -->
   <script src="js/api.js"></script>
-  <script src="js/dashboard-api.js"></script>
-  <script src="js/session.js"></script>
+
+  <!-- 2. Session & plan (window.showToast, window.showUpgradeModal, window.userPlan) -->
+  <script src="js/dashboard.js"></script>
+
+  <!-- 3. Wallet (depends on dashboard.js for showToast) -->
   <script src="js/lipaService.js"></script>
+
+  <!-- 4. Page core (depends on api.js and dashboard.js) -->
   <script src="js/page.js"></script>
+
+  <!-- 5. Page features (depends on api.js, dashboard.js, and page.js) -->
   <script src="js/page-features.js"></script>
+
+  <!-- 6. AI Scheduler (depends on api.js, dashboard.js, and page.js) -->
   <script src="js/pageAi.js"></script>
+
+  <!-- 7. Admin (depends on api.js AND dashboard.js) -->
   <script src="js/admin.js"></script>
+
+  <!-- ===================================================== -->
+  <!-- INLINE SCRIPTS – Missing functions                    -->
+  <!-- ===================================================== -->
+  <script>
+    // ===== PROFILE FUNCTIONS (missing from page.js) =====
+
+    function escapeHtml(str) {
+      if (!str) return '';
+      return str.replace(/[&<>]/g, function(m) {
+        if (m === '&') return '&amp;';
+        if (m === '<') return '&lt;';
+        if (m === '>') return '&gt;';
+        return m;
+      });
+    }
+
+    async function showProfileModal() {
+      try {
+        const res = await fetch('/api/auth/profile', { credentials: 'include' });
+        if (res.ok) {
+          const user = await res.json();
+          document.getElementById('profileInfo').innerHTML = `
+            <p><strong>Name:</strong> ${escapeHtml(user.name || user.fullName || 'N/A')}</p>
+            <p><strong>Email:</strong> ${escapeHtml(user.email)}</p>
+            <p><strong>Role:</strong> ${escapeHtml(user.role || 'User')}</p>
+            <p><strong>Plan:</strong> ${escapeHtml(user.subscription?.plan || 'free')}</p>
+            <p><strong>Wallet:</strong> KES ${(user.walletBalance || 0).toFixed(2)}</p>
+            <p><strong>Member since:</strong> ${new Date(user.createdAt).toLocaleDateString()}</p>
+          `;
+          document.getElementById('profileModal').style.display = 'flex';
+        } else {
+          showToast('Failed to load profile', 'error');
+        }
+      } catch (err) {
+        showToast('Error loading profile', 'error');
+      }
+    }
+
+    function closeProfileModal() {
+      document.getElementById('profileModal').style.display = 'none';
+    }
+
+    function showChangePasswordModal() {
+      document.getElementById('passwordModal').style.display = 'flex';
+    }
+
+    function closePasswordModal() {
+      document.getElementById('passwordModal').style.display = 'none';
+      document.getElementById('oldPassword').value = '';
+      document.getElementById('newPassword').value = '';
+      document.getElementById('confirmPassword').value = '';
+    }
+
+    async function changePassword() {
+      const oldPassword = document.getElementById('oldPassword').value;
+      const newPassword = document.getElementById('newPassword').value;
+      const confirmPassword = document.getElementById('confirmPassword').value;
+
+      if (!oldPassword || !newPassword) {
+        showToast('Please fill all fields', 'error');
+        return;
+      }
+
+      if (newPassword.length < 6) {
+        showToast('New password must be at least 6 characters', 'error');
+        return;
+      }
+
+      if (newPassword !== confirmPassword) {
+        showToast('Passwords do not match', 'error');
+        return;
+      }
+
+      try {
+        const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
+        const res = await fetch('/api/auth/change-password', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(csrfToken ? { 'X-CSRF-Token': csrfToken } : {})
+          },
+          credentials: 'include',
+          body: JSON.stringify({ oldPassword, newPassword })
+        });
+
+        const data = await res.json();
+
+        if (data.success) {
+          showToast('✅ Password changed successfully', 'success');
+          closePasswordModal();
+        } else {
+          showToast('❌ ' + (data.error || 'Failed to change password'), 'error');
+        }
+      } catch (err) {
+        showToast('Error changing password', 'error');
+      }
+    }
+
+    async function deleteAccount() {
+      const confirmed = confirm(
+        '⚠️ PERMANENT ACTION ⚠️\n\nDelete your account? This will:\n- Delete all your pages\n- Delete all scheduled posts\n- Delete all AI topics\n- Delete all logs\n\nThis cannot be undone!\n\nType "DELETE" to confirm:'
+      );
+
+      if (!confirmed) return;
+
+      const confirmText = prompt('Type "DELETE" to confirm account deletion:');
+      if (confirmText !== 'DELETE') {
+        showToast('Account deletion cancelled', 'error');
+        return;
+      }
+
+      try {
+        const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
+        const res = await fetch('/api/auth/account', {
+          method: 'DELETE',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(csrfToken ? { 'X-CSRF-Token': csrfToken } : {})
+          },
+          credentials: 'include'
+        });
+
+        const data = await res.json();
+
+        if (data.success) {
+          showToast('Account deleted. Redirecting...', 'success');
+          setTimeout(() => {
+            window.location.href = '/logout';
+          }, 2000);
+        } else {
+          showToast('❌ ' + (data.error || 'Failed to delete account'), 'error');
+        }
+      } catch (err) {
+        showToast('Error deleting account', 'error');
+      }
+    }
+
+    // Profile dropdown toggle
+    document.addEventListener('DOMContentLoaded', function() {
+      const profileBtn = document.getElementById('profileBtn');
+      const dropdownContent = document.getElementById('dropdownContent');
+
+      if (profileBtn) {
+        profileBtn.addEventListener('click', function(e) {
+          e.stopPropagation();
+          const isVisible = dropdownContent.style.display === 'block';
+          dropdownContent.style.display = isVisible ? 'none' : 'block';
+        });
+
+        document.addEventListener('click', function() {
+          dropdownContent.style.display = 'none';
+        });
+      }
+    });
+  </script>
 
 </body>
 </html>
