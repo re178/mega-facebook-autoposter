@@ -1,11 +1,12 @@
-// admin.js – Full admin control with pricing management (USES GLOBAL apiFetch)
+// admin.js – Full admin control with dynamic plan management
+
 (function() {
     let refreshInterval = null;
     let charts = { usersChart: null, postsChart: null };
+    let editingPlanId = null;
 
     // Use global apiFetch from api.js
     const apiFetch = window.apiFetch || (async function(url, options = {}) {
-        console.warn('admin.js: window.apiFetch not found, using fallback');
         const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
         const headers = {
             'Content-Type': 'application/json',
@@ -43,14 +44,15 @@
         });
     }
 
+    // ========== DASHBOARD STATS (unchanged) ==========
     async function reloadAdmin() {
         await loadDashboardStats();
         await loadUsers();
         await loadPages();
         await loadCharts();
+        await loadPlans(); // new
     }
 
-    // Dashboard Stats
     async function loadDashboardStats() {
         try {
             const stats = await apiFetch('/api/admin/stats');
@@ -66,7 +68,7 @@
         }
     }
 
-    // Users Table
+    // ========== USERS (unchanged) ==========
     async function loadUsers() {
         try {
             const users = await apiFetch('/api/admin/users');
@@ -194,7 +196,7 @@
         });
     }
 
-    // Pages Table
+    // ========== PAGES (unchanged) ==========
     async function loadPages() {
         try {
             const pages = await apiFetch('/api/admin/pages');
@@ -272,7 +274,7 @@
         }
     }
 
-    // System Logs
+    // ========== LOGS (unchanged) ==========
     async function loadSystemLogs() {
         try {
             const data = await apiFetch('/api/admin/logs');
@@ -302,7 +304,7 @@
         }
     }
 
-    // Broadcast
+    // ========== BROADCAST (unchanged) ==========
     function bindBroadcastMessage() {
         const btn = document.getElementById('broadcast-btn');
         if (!btn) return;
@@ -371,7 +373,7 @@
         }
     }
 
-    // Private Messages
+    // ========== PRIVATE MESSAGES (unchanged) ==========
     async function populateUserDatalist(inputId, datalistId) {
         try {
             const users = await apiFetch('/api/admin/users');
@@ -464,7 +466,7 @@
         loadPrivateMessages(user._id);
     }
 
-    // Maintenance
+    // ========== MAINTENANCE (unchanged) ==========
     function bindMaintenanceButtons() {
         const onBtn = document.getElementById('maintenance-on');
         const offBtn = document.getElementById('maintenance-off');
@@ -482,7 +484,7 @@
         }
     }
 
-    // Charts
+    // ========== CHARTS (unchanged) ==========
     async function loadCharts() {
         if (!window.Chart) return;
         const stats = window.adminStats;
@@ -511,7 +513,7 @@
         }
     }
 
-    // Create User
+    // ========== CREATE USER (unchanged) ==========
     function bindCreateUser() {
         const btn = document.getElementById('admin-create-user-btn');
         if (!btn) return;
@@ -541,7 +543,7 @@
         };
     }
 
-    // Add Page to User Modal
+    // ========== ADD PAGE TO USER (unchanged) ==========
     async function showAddPageModal() {
         let modal = document.getElementById('addPageModal');
         if (modal) modal.remove();
@@ -584,7 +586,7 @@
         document.getElementById('close-addpage-modal').onclick = () => modal.remove();
     }
 
-    // Clear All Logs
+    // ========== CLEAR ALL LOGS (unchanged) ==========
     async function clearAllLogs() {
         if (!confirm('Delete ALL logs? Cannot undo.')) return;
         await apiFetch('/api/admin/logs/clear-all', { method: 'DELETE' });
@@ -592,53 +594,178 @@
         showToast('All logs cleared', 'success');
     }
 
-    // Pricing Management
-    async function loadPricing() {
+    // ========== PRICING MANAGEMENT (REMOVED) – Replaced by Plan Management ==========
+
+    // ========== 🔥 NEW: PLAN MANAGEMENT ==========
+
+    async function loadPlans() {
         try {
-            const pricing = await apiFetch('/api/admin/pricing');
-            document.getElementById('price-pro-usd').value = pricing.pro.priceUSD || 0;
-            document.getElementById('price-pro-kes').value = pricing.pro.priceKES || 0;
-            document.getElementById('price-enterprise-usd').value = pricing.enterprise.priceUSD || 0;
-            document.getElementById('price-enterprise-kes').value = pricing.enterprise.priceKES || 0;
+            const plans = await apiFetch('/api/admin/plans');
+            const container = document.getElementById('plans-table-body');
+            if (!container) return;
+            container.innerHTML = '';
+            plans.forEach(plan => {
+                const tr = document.createElement('tr');
+                const features = plan.features || {};
+                tr.innerHTML = `
+                    <td><strong>${escapeHtml(plan.label)}</strong> <span style="color:#64748b;font-size:12px;">(${escapeHtml(plan.name)})</span></td>
+                    <td>KES ${plan.priceKES} / USD ${plan.priceUSD}</td>
+                    <td>${plan.durationDays} days</td>
+                    <td>${plan.isActive ? '✅ Active' : '❌ Inactive'}</td>
+                    <td>
+                        <button class="edit-plan-btn btn btn-secondary btn-sm" data-id="${plan._id}">Edit</button>
+                        <button class="delete-plan-btn btn btn-danger btn-sm" data-id="${plan._id}" ${plan.name === 'free' ? 'disabled' : ''}>Delete</button>
+                    </td>
+                `;
+                container.appendChild(tr);
+            });
+            bindPlanButtons();
         } catch (err) {
-            console.error('Failed to load pricing:', err);
+            console.error('Failed to load plans:', err);
+            showToast('Failed to load plans', 'error');
         }
     }
 
-    function bindPricingSave() {
-        const btn = document.getElementById('save-pricing-btn');
-        if (!btn) return;
-        btn.onclick = async () => {
+    function bindPlanButtons() {
+        document.querySelectorAll('.edit-plan-btn').forEach(btn => {
+            btn.onclick = async () => {
+                const planId = btn.dataset.id;
+                const plan = await apiFetch(`/api/admin/plans/${planId}`);
+                showPlanModal(plan);
+            };
+        });
+        document.querySelectorAll('.delete-plan-btn').forEach(btn => {
+            btn.onclick = async () => {
+                const planId = btn.dataset.id;
+                if (!confirm('Delete this plan? (it will be deactivated)')) return;
+                await apiFetch(`/api/admin/plans/${planId}`, { method: 'DELETE' });
+                loadPlans();
+                showToast('Plan deleted', 'success');
+            };
+        });
+    }
+
+    function showPlanModal(existingPlan = null) {
+        const oldModal = document.getElementById('planModal');
+        if (oldModal) oldModal.remove();
+
+        const isEdit = !!existingPlan;
+        const title = isEdit ? 'Edit Plan' : 'Create New Plan';
+        const plan = existingPlan || {
+            name: '',
+            label: '',
+            priceUSD: 0,
+            priceKES: 0,
+            durationDays: 30,
+            isActive: true,
+            isDefault: false,
+            order: 0,
+            features: {
+                aiTopics: 0,
+                aiPostsPerMonth: 0,
+                manualPostsPerMonth: 0,
+                pagesAllowed: 0,
+                templates: 0,
+                ads: false,
+                comments: false,
+                analyticsAdvanced: false,
+                pageProfile: false,
+                reports: false,
+                broadcastsSend: false,
+                teamMembers: 0
+            }
+        };
+
+        const modal = document.createElement('div');
+        modal.id = 'planModal';
+        modal.style.cssText = 'position:fixed;top:10%;left:20%;width:60%;max-height:80vh;overflow-y:auto;background:white;padding:24px;border-radius:12px;z-index:9999;box-shadow:0 0 30px rgba(0,0,0,0.3);';
+        modal.innerHTML = `
+            <h3>${title}</h3>
+            <form id="planForm">
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+                    <label>Plan Name (internal) <input type="text" id="plan-name" value="${escapeHtml(plan.name)}" ${isEdit ? 'readonly' : ''} required></label>
+                    <label>Label (display) <input type="text" id="plan-label" value="${escapeHtml(plan.label)}" required></label>
+                    <label>Price USD <input type="number" id="plan-priceUSD" value="${plan.priceUSD}" step="0.01"></label>
+                    <label>Price KES <input type="number" id="plan-priceKES" value="${plan.priceKES}" step="1"></label>
+                    <label>Duration (days) <input type="number" id="plan-duration" value="${plan.durationDays}" min="1"></label>
+                    <label>Order (sort) <input type="number" id="plan-order" value="${plan.order || 0}" step="1"></label>
+                    <label><input type="checkbox" id="plan-active" ${plan.isActive ? 'checked' : ''}> Active</label>
+                    <label><input type="checkbox" id="plan-default" ${plan.isDefault ? 'checked' : ''}> Default (free plan)</label>
+                </div>
+                <h4 style="margin-top:16px;">Features</h4>
+                <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px;">
+                    <label>AI Topics <input type="number" id="feature-aiTopics" value="${plan.features.aiTopics}" step="1"> (-1 = unlimited)</label>
+                    <label>AI Posts/Month <input type="number" id="feature-aiPostsPerMonth" value="${plan.features.aiPostsPerMonth}" step="1"></label>
+                    <label>Manual Posts/Month <input type="number" id="feature-manualPostsPerMonth" value="${plan.features.manualPostsPerMonth}" step="1"></label>
+                    <label>Pages Allowed <input type="number" id="feature-pagesAllowed" value="${plan.features.pagesAllowed}" step="1"></label>
+                    <label>Templates <input type="number" id="feature-templates" value="${plan.features.templates}" step="1"></label>
+                    <label><input type="checkbox" id="feature-ads" ${plan.features.ads ? 'checked' : ''}> Ads</label>
+                    <label><input type="checkbox" id="feature-comments" ${plan.features.comments ? 'checked' : ''}> Comments</label>
+                    <label><input type="checkbox" id="feature-analyticsAdvanced" ${plan.features.analyticsAdvanced ? 'checked' : ''}> Advanced Analytics</label>
+                    <label><input type="checkbox" id="feature-pageProfile" ${plan.features.pageProfile ? 'checked' : ''}> Page Profile</label>
+                    <label><input type="checkbox" id="feature-reports" ${plan.features.reports ? 'checked' : ''}> Reports</label>
+                    <label><input type="checkbox" id="feature-broadcastsSend" ${plan.features.broadcastsSend ? 'checked' : ''}> Send Broadcasts</label>
+                    <label>Team Members <input type="number" id="feature-teamMembers" value="${plan.features.teamMembers}" step="1"></label>
+                </div>
+                <div style="margin-top:16px; text-align:right;">
+                    <button type="button" class="btn btn-primary" id="save-plan-btn">Save</button>
+                    <button type="button" class="btn btn-secondary" onclick="this.closest('#planModal').remove()">Cancel</button>
+                </div>
+            </form>
+        `;
+        document.body.appendChild(modal);
+
+        document.getElementById('save-plan-btn').onclick = async () => {
             const data = {
-                pro: {
-                    priceUSD: parseFloat(document.getElementById('price-pro-usd').value) || 0,
-                    priceKES: parseFloat(document.getElementById('price-pro-kes').value) || 0
-                },
-                enterprise: {
-                    priceUSD: parseFloat(document.getElementById('price-enterprise-usd').value) || 0,
-                    priceKES: parseFloat(document.getElementById('price-enterprise-kes').value) || 0
+                name: document.getElementById('plan-name').value.trim(),
+                label: document.getElementById('plan-label').value.trim(),
+                priceUSD: parseFloat(document.getElementById('plan-priceUSD').value) || 0,
+                priceKES: parseFloat(document.getElementById('plan-priceKES').value) || 0,
+                durationDays: parseInt(document.getElementById('plan-duration').value) || 30,
+                isActive: document.getElementById('plan-active').checked,
+                isDefault: document.getElementById('plan-default').checked,
+                order: parseInt(document.getElementById('plan-order').value) || 0,
+                features: {
+                    aiTopics: parseInt(document.getElementById('feature-aiTopics').value) || 0,
+                    aiPostsPerMonth: parseInt(document.getElementById('feature-aiPostsPerMonth').value) || 0,
+                    manualPostsPerMonth: parseInt(document.getElementById('feature-manualPostsPerMonth').value) || 0,
+                    pagesAllowed: parseInt(document.getElementById('feature-pagesAllowed').value) || 0,
+                    templates: parseInt(document.getElementById('feature-templates').value) || 0,
+                    ads: document.getElementById('feature-ads').checked,
+                    comments: document.getElementById('feature-comments').checked,
+                    analyticsAdvanced: document.getElementById('feature-analyticsAdvanced').checked,
+                    pageProfile: document.getElementById('feature-pageProfile').checked,
+                    reports: document.getElementById('feature-reports').checked,
+                    broadcastsSend: document.getElementById('feature-broadcastsSend').checked,
+                    teamMembers: parseInt(document.getElementById('feature-teamMembers').value) || 0
                 }
             };
-            if (data.pro.priceKES <= 0 || data.enterprise.priceKES <= 0) {
-                showToast('Prices must be greater than 0', 'warning');
-                return;
-            }
-            btn.disabled = true;
+
             try {
-                await apiFetch('/api/admin/pricing', {
-                    method: 'PUT',
-                    body: JSON.stringify(data)
-                });
-                showToast('Pricing updated successfully', 'success');
+                if (isEdit) {
+                    await apiFetch(`/api/admin/plans/${plan._id}`, {
+                        method: 'PUT',
+                        body: JSON.stringify(data)
+                    });
+                } else {
+                    await apiFetch('/api/admin/plans', {
+                        method: 'POST',
+                        body: JSON.stringify(data)
+                    });
+                }
+                modal.remove();
+                loadPlans();
+                showToast('Plan saved successfully', 'success');
+                // Also reload plans in session
+                if (window.loadPlans) window.loadPlans();
             } catch (err) {
-                showToast('Failed to update pricing', 'error');
-            } finally {
-                btn.disabled = false;
+                showToast('Failed to save plan: ' + err.message, 'error');
             }
         };
     }
 
-    // Initialization
+    // ========== INIT ==========
+
     async function init() {
         try {
             const sessionRes = await fetch('/api/session', { credentials: 'include' });
@@ -660,19 +787,27 @@
             await populateUserDatalist('private-message-user-email', 'user-datalist-pm');
             await loadPrivateMessages('');
             await loadCharts();
-            await loadPricing();
+            await loadPlans(); // load plans
             bindCreateUser();
             bindBroadcastMessage();
             bindMaintenanceButtons();
-            bindPricingSave();
             const sendMsgBtn = document.getElementById('send-private-msg-btn');
             if (sendMsgBtn) sendMsgBtn.onclick = sendPrivateMessageFromUI;
+
+            // Add plan management button / card – we'll assume the card is already in HTML
+            // But we need to ensure the HTML has the card. We'll attach event to "add-plan-btn" if exists.
+            const addPlanBtn = document.getElementById('add-plan-btn');
+            if (addPlanBtn) {
+                addPlanBtn.onclick = () => showPlanModal(null);
+            }
+
             // Auto-refresh
             function refresh() {
                 if (!document.hidden) {
                     loadDashboardStats();
                     loadUsers();
                     loadPages();
+                    loadPlans();
                 }
             }
             if (refreshInterval) clearInterval(refreshInterval);
