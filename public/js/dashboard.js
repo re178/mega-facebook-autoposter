@@ -1,8 +1,11 @@
-// session.js – handles session, private messages, broadcasts, and plan management
+// dashboard.js – Full replacement with dynamic plan management
+
 let currentUser = null;
 let isLoggedIn = false;
 let userPlan = 'free';
 let intervals = [];
+let plansMap = {}; // plan name -> plan data
+let planFeatures = {}; // plan name -> feature object
 
 function escapeHtml(str) {
     if (!str) return '';
@@ -14,38 +17,72 @@ function escapeHtml(str) {
     });
 }
 
-// Feature matrix
-const FEATURES = {
-    aiTopics: { free: 1, pro: Infinity, enterprise: Infinity },
-    aiPostsPerMonth: { free: 5, pro: Infinity, enterprise: Infinity },
-    manualPostsPerMonth: { free: 10, pro: Infinity, enterprise: Infinity },
-    pagesAllowed: { free: 1, pro: 10, enterprise: Infinity },
-    templates: { free: 0, pro: 20, enterprise: Infinity },
-    ads: { free: false, pro: true, enterprise: true },
-    comments: { free: false, pro: true, enterprise: true },
-    analyticsAdvanced: { free: false, pro: true, enterprise: true },
-    pageProfile: { free: false, pro: true, enterprise: true },
-    reports: { free: false, pro: true, enterprise: true },
-    broadcastsSend: { free: false, pro: false, enterprise: true },
-    teamMembers: { free: 0, pro: 0, enterprise: 5 }
-};
+// ==================== DYNAMIC PLAN LOADING ====================
+
+async function loadPlans() {
+    try {
+        const res = await fetch('/api/plans', { credentials: 'include' });
+        if (!res.ok) throw new Error('Failed to fetch plans');
+        const plans = await res.json();
+        // Build maps
+        plansMap = {};
+        planFeatures = {};
+        plans.forEach(p => {
+            plansMap[p.name] = p;
+            planFeatures[p.name] = p.features || {};
+        });
+        window.plans = plans;
+        window.planFeatures = planFeatures;
+        return plans;
+    } catch (err) {
+        console.error('Failed to load plans:', err);
+        // Fallback to hardcoded defaults? Not needed if we have defaults seeded.
+        return null;
+    }
+}
+
+// ==================== FEATURE CHECKS (DYNAMIC) ====================
 
 function canAccess(feature, plan = userPlan) {
-    if (typeof FEATURES[feature] === 'boolean') {
-        return FEATURES[feature] === true || (FEATURES[feature] === true && plan !== 'free');
-    }
-    if (typeof FEATURES[feature] === 'number') {
-        return FEATURES[feature][plan] !== undefined && FEATURES[feature][plan] > 0;
-    }
+    const features = planFeatures[plan];
+    if (!features) return false;
+    const val = features[feature];
+    if (typeof val === 'boolean') return val;
+    if (typeof val === 'number') return val > 0 || val === -1; // -1 means unlimited
     return false;
 }
 
 function getFeatureLimit(feature, plan = userPlan) {
-    if (typeof FEATURES[feature] === 'number') {
-        return FEATURES[feature][plan] || 0;
+    const features = planFeatures[plan];
+    if (!features) return 0;
+    const val = features[feature];
+    if (typeof val === 'number') {
+        if (val === -1) return Infinity;
+        return val;
     }
-    return FEATURES[feature] ? Infinity : 0;
+    if (typeof val === 'boolean') return val ? Infinity : 0;
+    return 0;
 }
+
+function getPlanPrice(plan, currency = 'KES') {
+    const planData = plansMap[plan];
+    if (!planData) return 0;
+    return currency === 'KES' ? planData.priceKES : planData.priceUSD;
+}
+
+function getPlanDuration(plan) {
+    const planData = plansMap[plan];
+    if (!planData) return 30;
+    return planData.durationDays || 30;
+}
+
+function getPlanLabel(plan) {
+    const planData = plansMap[plan];
+    if (!planData) return plan.charAt(0).toUpperCase() + plan.slice(1);
+    return planData.label;
+}
+
+// ==================== SESSION ====================
 
 async function checkSession() {
     try {
@@ -57,12 +94,18 @@ async function checkSession() {
             currentUser = session;
             userPlan = session.subscription?.plan || 'free';
             window.userPlan = userPlan;
+
+            // Load plans from server
+            await loadPlans();
+
             // Update plan badge if present
             const badge = document.getElementById('planBadge');
             if (badge) {
+                const label = getPlanLabel(userPlan);
                 badge.className = `badge-${userPlan}`;
-                badge.textContent = userPlan.charAt(0).toUpperCase() + userPlan.slice(1);
+                badge.textContent = label;
             }
+
             await loadPrivateMessages();
             await checkNewBroadcasts();
             setupIntervals();
@@ -76,6 +119,8 @@ async function checkSession() {
         return false;
     }
 }
+
+// ==================== PRIVATE MESSAGES ====================
 
 async function loadPrivateMessages() {
     if (!isLoggedIn) return;
@@ -103,6 +148,8 @@ async function loadPrivateMessages() {
     } catch(err) { console.error(err); }
 }
 
+// ==================== BROADCASTS ====================
+
 const BROADCAST_STORAGE_KEY = 'lastBroadcastId';
 async function checkNewBroadcasts() {
     if (!isLoggedIn) return;
@@ -119,6 +166,8 @@ async function checkNewBroadcasts() {
     } catch(err) { console.error(err); }
 }
 
+// ==================== TOAST ====================
+
 function showToast(message, type = 'info') {
     const container = document.getElementById('toastContainer');
     if (!container) return;
@@ -130,6 +179,8 @@ function showToast(message, type = 'info') {
 }
 window.showToast = showToast;
 
+// ==================== INTERVALS ====================
+
 function setupIntervals() {
     intervals.forEach(i => clearInterval(i));
     intervals = [];
@@ -137,40 +188,58 @@ function setupIntervals() {
     intervals.push(setInterval(() => { if (isLoggedIn) checkNewBroadcasts(); }, 60000));
 }
 
-// Upgrade modal functions (will be used globally)
+// ==================== UPGRADE MODAL ====================
+
 async function showUpgradeModal() {
     const modal = document.getElementById('upgradeModal');
     if (!modal) return;
     modal.style.display = 'flex';
-    // Load pricing and balance
+
     try {
-        const pricing = await (await fetch('/api/pricing')).json();
-        const user = await (await fetch('/api/auth/profile', { credentials: 'include' })).json();
+        // Ensure plans are loaded
+        if (Object.keys(plansMap).length === 0) {
+            await loadPlans();
+        }
+
+        // Get user profile for wallet balance
+        const userRes = await fetch('/api/auth/profile', { credentials: 'include' });
+        if (!userRes.ok) throw new Error('Failed to fetch user');
+        const user = await userRes.json();
         document.getElementById('upgradeWalletBalance').textContent = (user.walletBalance || 0).toFixed(2);
+
+        // Render plan cards
         const plansContainer = document.getElementById('pricingPlans');
+        const activePlans = Object.values(plansMap).filter(p => p.isActive);
+        if (activePlans.length === 0) {
+            plansContainer.innerHTML = '<p>No plans available</p>';
+            return;
+        }
+
+        // Sort by order
+        activePlans.sort((a, b) => (a.order || 0) - (b.order || 0));
+
         plansContainer.innerHTML = '';
-        const planData = [
-            { id: 'pro', label: 'Pro', price: pricing.pro.priceKES, desc: 'Everything you need' },
-            { id: 'enterprise', label: 'Enterprise', price: pricing.enterprise.priceKES, desc: 'Full power + support' }
-        ];
-        planData.forEach(p => {
+        const currentPlan = userPlan;
+        activePlans.forEach(p => {
+            const isCurrent = p.name === currentPlan;
             const div = document.createElement('div');
-            div.className = `plan-card ${userPlan === p.id ? 'selected' : ''}`;
+            div.className = `plan-card ${isCurrent ? 'selected' : ''}`;
             div.style.cssText = `
-                border: 2px solid ${userPlan === p.id ? '#10b981' : '#e2e8f0'};
+                border: 2px solid ${isCurrent ? '#10b981' : '#e2e8f0'};
                 border-radius: 8px;
                 padding: 16px;
                 cursor: pointer;
                 transition: all 0.2s;
-                background: ${userPlan === p.id ? '#f0fdf4' : 'white'};
+                background: ${isCurrent ? '#f0fdf4' : 'white'};
             `;
+            div.dataset.plan = p.name;
+            const price = p.priceKES || 0;
             div.innerHTML = `
                 <h4 style="margin:0; color:#0f172a;">${p.label}</h4>
-                <p style="font-size:20px; font-weight:700; color:#10b981;">KES ${p.price}</p>
-                <p style="font-size:13px; color:#64748b;">${p.desc}</p>
-                ${userPlan === p.id ? '<span style="background:#10b981; color:white; padding:2px 8px; border-radius:12px; font-size:12px;">Current</span>' : ''}
+                <p style="font-size:20px; font-weight:700; color:#10b981;">KES ${price}</p>
+                <p style="font-size:13px; color:#64748b;">${p.features.pagesAllowed === -1 ? 'Unlimited' : p.features.pagesAllowed} pages, ${p.features.aiTopics === -1 ? 'Unlimited' : p.features.aiTopics} AI topics</p>
+                ${isCurrent ? '<span style="background:#10b981; color:white; padding:2px 8px; border-radius:12px; font-size:12px;">Current</span>' : ''}
             `;
-            div.dataset.plan = p.id;
             div.addEventListener('click', () => {
                 document.querySelectorAll('.plan-card').forEach(c => {
                     c.style.borderColor = '#e2e8f0';
@@ -178,14 +247,18 @@ async function showUpgradeModal() {
                 });
                 div.style.borderColor = '#10b981';
                 div.style.background = '#f0fdf4';
-                document.getElementById('upgradePriceDisplay').textContent = `KES ${p.price}`;
+                document.getElementById('upgradePriceDisplay').textContent = `KES ${price}`;
                 document.getElementById('confirmUpgradeBtn').disabled = false;
-                document.getElementById('confirmUpgradeBtn').dataset.plan = p.id;
+                document.getElementById('confirmUpgradeBtn').dataset.plan = p.name;
             });
             plansContainer.appendChild(div);
         });
+
+        // Reset selection
         document.getElementById('confirmUpgradeBtn').disabled = true;
         document.getElementById('confirmUpgradeBtn').dataset.plan = '';
+        document.getElementById('upgradePriceDisplay').textContent = 'Select a plan';
+
     } catch (err) {
         console.error('Failed to load upgrade data:', err);
         showToast('Failed to load pricing', 'error');
@@ -205,7 +278,7 @@ document.addEventListener('DOMContentLoaded', () => {
         confirmBtn.addEventListener('click', async function() {
             const plan = this.dataset.plan;
             if (!plan) return;
-            if (!confirm(`Upgrade to ${plan}? This will deduct KES from your wallet.`)) return;
+            if (!confirm(`Upgrade to ${getPlanLabel(plan)}? This will deduct KES from your wallet.`)) return;
             try {
                 const res = await fetch('/api/user/upgrade', {
                     method: 'POST',
@@ -215,7 +288,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 });
                 const data = await res.json();
                 if (data.success) {
-                    showToast(`🎉 Upgraded to ${plan}!`, 'success');
+                    showToast(`🎉 Upgraded to ${getPlanLabel(plan)}!`, 'success');
                     closeUpgradeModal();
                     setTimeout(() => location.reload(), 1500);
                 } else {
@@ -227,6 +300,17 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 });
+
+// ==================== EXPOSE GLOBALS ====================
+
+window.canAccess = canAccess;
+window.getFeatureLimit = getFeatureLimit;
+window.getPlanPrice = getPlanPrice;
+window.getPlanDuration = getPlanDuration;
+window.getPlanLabel = getPlanLabel;
+window.loadPlans = loadPlans;
+
+// ==================== INIT ====================
 
 document.addEventListener('DOMContentLoaded', () => {
     checkSession();
