@@ -1,17 +1,12 @@
-// admin.js – Full admin control with pricing management
+// admin.js – Full admin control with pricing management (USES GLOBAL apiFetch)
 (function() {
     let refreshInterval = null;
     let charts = { usersChart: null, postsChart: null };
 
-    // Helper to get CSRF token
-    function getCsrfToken() {
-        const meta = document.querySelector('meta[name="csrf-token"]');
-        return meta ? meta.getAttribute('content') : '';
-    }
-
-    // Central apiFetch (reuse from dashboard-api if available)
-    async function apiFetch(url, options = {}) {
-        const csrfToken = getCsrfToken();
+    // Use global apiFetch from api.js
+    const apiFetch = window.apiFetch || (async function(url, options = {}) {
+        console.warn('admin.js: window.apiFetch not found, using fallback');
+        const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
         const headers = {
             'Content-Type': 'application/json',
             ...(csrfToken ? { 'X-CSRF-Token': csrfToken } : {}),
@@ -31,7 +26,7 @@
             throw new Error(errText || `HTTP ${res.status}`);
         }
         return res.json();
-    }
+    });
 
     // DOM helpers
     function setText(id, value) {
@@ -597,7 +592,7 @@
         showToast('All logs cleared', 'success');
     }
 
-    // Pricing Management (NEW)
+    // Pricing Management
     async function loadPricing() {
         try {
             const pricing = await apiFetch('/api/admin/pricing');
