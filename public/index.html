@@ -254,6 +254,7 @@
     /* Badges */
     .badge-free { background: #e2e8f0; color: #475569; padding: 2px 10px; border-radius: 12px; font-size: 12px; font-weight: 500; }
     .badge-pro { background: #10b981; color: white; padding: 2px 10px; border-radius: 12px; font-size: 12px; font-weight: 500; }
+    .badge-premium { background: linear-gradient(135deg, #8b5cf6, #6d28d9); color: white; padding: 2px 10px; border-radius: 12px; font-size: 12px; font-weight: 500; }
     .badge-enterprise { background: linear-gradient(135deg, #fbbf24, #f59e0b); color: white; padding: 2px 10px; border-radius: 12px; font-size: 12px; font-weight: 500; }
 
     /* Glass Modal */
@@ -308,25 +309,6 @@
     }
     .quick-actions .btn { padding: 10px 18px; }
 
-    /* Wallet Card */
-    .wallet-card {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 20px;
-      align-items: center;
-      justify-content: space-between;
-    }
-    .wallet-balance {
-      font-size: 2rem;
-      font-weight: 700;
-      color: #0f172a;
-    }
-    .wallet-balance small {
-      font-size: 1rem;
-      font-weight: 400;
-      color: #64748b;
-    }
-
     /* Two-column layout */
     .two-col {
       display: grid;
@@ -335,6 +317,53 @@
     }
     @media (max-width: 992px) {
       .two-col { grid-template-columns: 1fr; }
+    }
+
+    /* Plan Card Styles for Upgrade Modal */
+    .plan-card {
+      border: 2px solid #e2e8f0;
+      border-radius: 8px;
+      padding: 16px;
+      cursor: pointer;
+      transition: all 0.2s;
+      background: white;
+      text-align: center;
+    }
+    .plan-card:hover {
+      border-color: #10b981;
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+    }
+    .plan-card.selected {
+      border-color: #10b981;
+      background: #f0fdf4;
+    }
+    .plan-card h4 {
+      margin: 0 0 4px 0;
+      color: #0f172a;
+      font-size: 16px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .plan-card .price {
+      font-size: 22px;
+      font-weight: 700;
+      color: #10b981;
+      margin: 4px 0;
+    }
+    .plan-card .desc {
+      font-size: 13px;
+      color: #64748b;
+      margin: 4px 0;
+    }
+    .plan-card .current-badge {
+      background: #10b981;
+      color: white;
+      padding: 2px 10px;
+      border-radius: 12px;
+      font-size: 11px;
+      display: inline-block;
+      margin-top: 4px;
     }
   </style>
 </head>
@@ -418,34 +447,12 @@
         <!-- JS will inject -->
       </section>
 
-      <!-- Wallet & Quick Actions -->
-      <div class="card" id="wallet-section">
-        <div class="wallet-card">
-          <div>
-            <h3 style="font-weight:400; color:#64748b; font-size:14px; margin-bottom:2px;"><i class="fas fa-wallet"></i> Wallet Balance</h3>
-            <span class="wallet-balance" id="walletBalanceDisplay">0.00</span>
-            <small>KES</small>
-          </div>
-          <div style="display:flex; flex-wrap:wrap; gap:10px;">
-            <input type="number" id="amountInput" min="1" placeholder="e.g. 100" style="background:#f8fafc; border:1px solid #e2e8f0; padding:10px 12px; border-radius:6px; width:140px; height:44px;">
-            <button id="payButton" class="btn btn-primary"><i class="fas fa-mobile-alt"></i> Pay with M-Pesa</button>
-            <button class="btn btn-secondary" onclick="showUpgradeModal()"><i class="fas fa-arrow-up"></i> Upgrade</button>
-          </div>
-        </div>
-        <small style="color:#94a3b8; display:block; margin-top:12px; border-top:1px solid #e2e8f0; padding-top:12px;">
-          <i class="fas fa-info-circle"></i> You will receive an STK Push prompt on your registered phone.
-          <span id="registeredPhoneDisplay" style="color:#10b981;">(Loading...)</span>
-        </small>
-        <input type="hidden" id="userId" value="">
-        <input type="hidden" id="userPhone" value="">
-      </div>
-
-      <!-- Quick Actions -->
+      <!-- Quick Actions (Wallet removed) -->
       <div class="quick-actions">
-        <button class="btn btn-primary" onclick="window.location.href='/pages'"><i class="fas fa-plus-circle"></i> New Post</button>
-        <button class="btn btn-secondary" onclick="window.location.href='/pages'"><i class="fas fa-robot"></i> AI Generate</button>
+        <button class="btn btn-primary" onclick="openPageSelector('new-post')"><i class="fas fa-plus-circle"></i> New Post</button>
+        <button class="btn btn-secondary" onclick="openPageSelector('ai-generate')"><i class="fas fa-robot"></i> AI Generate</button>
         <button class="btn btn-secondary" onclick="window.location.href='/connect-facebook'"><i class="fab fa-facebook"></i> Connect Page</button>
-        <button class="btn btn-secondary" onclick="window.location.href='/pages'"><i class="fas fa-list-ul"></i> View Pages</button>
+        <button class="btn btn-secondary" onclick="openPageSelector('view-pages')"><i class="fas fa-list-ul"></i> View Pages</button>
       </div>
 
       <!-- Two Column: Per-Page Stats + Activity Feed -->
@@ -508,18 +515,31 @@
 
   <!-- Upgrade Modal -->
   <div id="upgradeModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.3); z-index:2000; justify-content:center; align-items:center;">
-    <div class="modal-glass" style="max-width:560px; width:95%;">
+    <div class="modal-glass" style="max-width:560px; width:95%; max-height:90vh; overflow-y:auto;">
       <h3 style="color:#0f172a; margin-bottom:8px;"><i class="fas fa-crown" style="color:#f59e0b;"></i> Upgrade Your Plan</h3>
       <p style="color:#64748b; margin-bottom:20px;">Choose a plan that fits your needs.</p>
+
+      <!-- Phone Input -->
+      <div style="margin-bottom:16px;">
+        <label style="display:block; font-weight:500; margin-bottom:4px; color:#1e293b;">Phone Number (M-Pesa)</label>
+        <input type="tel" id="paymentPhoneInput" placeholder="e.g., 0712345678"
+               style="width:100%; padding:10px; border-radius:6px; border:1px solid #e2e8f0; background:#f8fafc; font-size:16px;">
+        <small style="color:#64748b;">Enter the phone number registered with M-Pesa</small>
+      </div>
+
       <div id="pricingPlans" style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:20px;">
         <!-- Plans injected by JS -->
       </div>
+
+      <div id="paymentStatus" style="display:none; padding:10px; border-radius:6px; margin-bottom:12px;"></div>
+
       <div style="display:flex; justify-content:space-between; align-items:center; padding:12px 0; border-top:1px solid #e2e8f0;">
+        <span style="font-weight:500;">Selected Plan: <span id="selectedPlanDisplay" style="color:#10b981;">None</span></span>
         <span style="font-weight:500;">Wallet Balance: <span id="upgradeWalletBalance">0.00</span> KES</span>
-        <span id="upgradePriceDisplay" style="font-weight:600; color:#10b981;">Select a plan</span>
       </div>
+
       <div style="display:flex; gap:8px; margin-top:16px;">
-        <button id="confirmUpgradeBtn" class="btn btn-primary" style="flex:1;" disabled>Confirm Upgrade</button>
+        <button id="confirmUpgradeBtn" class="btn btn-primary" style="flex:1;" disabled>Confirm Payment</button>
         <button onclick="closeUpgradeModal()" class="btn btn-secondary">Cancel</button>
       </div>
     </div>
@@ -535,14 +555,14 @@
   <!-- 2. Session & plan (window.showToast, window.showUpgradeModal, window.userPlan) -->
   <script src="js/dashboard.js"></script>
 
-  <!-- 3. Wallet (depends on dashboard.js for showToast) -->
+  <!-- 3. Wallet / Payment (depends on dashboard.js for showToast) -->
   <script src="js/lipaService.js"></script>
 
   <!-- 4. Master dashboard (depends on api.js and dashboard.js) -->
   <script src="js/master-new.js"></script>
 
   <!-- ===================================================== -->
-  <!-- INLINE SCRIPTS – Missing functions from master.js     -->
+  <!-- INLINE SCRIPTS – Missing functions                    -->
   <!-- ===================================================== -->
   <script>
     // ===== PROFILE FUNCTIONS (missing from master.js) =====
@@ -692,6 +712,86 @@
 
         document.addEventListener('click', function() {
           dropdownContent.style.display = 'none';
+        });
+      }
+    });
+
+    // ============================================================
+    // PAGE SELECTOR – Opens the page modal for action buttons
+    // ============================================================
+    let pendingAction = null;
+
+    function openPageSelector(action) {
+      pendingAction = action || 'view-pages';
+      const pages = window.pages || [];
+      if (!pages.length) {
+        showToast('No pages available. Please connect a Facebook page first.', 'warning');
+        return;
+      }
+
+      const modal = document.getElementById('page-select-modal');
+      const select = document.getElementById('page-select');
+      if (!modal || !select) return;
+
+      // Populate the select
+      select.innerHTML = '';
+      pages.forEach(function(p) {
+        const opt = document.createElement('option');
+        opt.value = p.pageId;
+        opt.textContent = p.name;
+        select.appendChild(opt);
+      });
+
+      modal.style.display = 'flex';
+
+      // Override the Go button behavior
+      const goBtn = document.getElementById('page-go');
+      const cancelBtn = document.getElementById('page-cancel');
+
+      // Remove old listeners by cloning
+      const newGoBtn = goBtn.cloneNode(true);
+      const newCancelBtn = cancelBtn.cloneNode(true);
+      goBtn.parentNode.replaceChild(newGoBtn, goBtn);
+      cancelBtn.parentNode.replaceChild(newCancelBtn, cancelBtn);
+
+      newCancelBtn.onclick = function() {
+        modal.style.display = 'none';
+        pendingAction = null;
+      };
+
+      newGoBtn.onclick = function() {
+        const selectedPageId = document.getElementById('page-select').value;
+        if (!selectedPageId) {
+          showToast('Please select a page', 'warning');
+          return;
+        }
+        modal.style.display = 'none';
+
+        const action = pendingAction || 'view-pages';
+        pendingAction = null;
+
+        switch (action) {
+          case 'new-post':
+          case 'ai-generate':
+          case 'view-pages':
+            window.location.href = '/pages?pageId=' + encodeURIComponent(selectedPageId);
+            break;
+          default:
+            window.location.href = '/pages?pageId=' + encodeURIComponent(selectedPageId);
+        }
+      };
+    }
+
+    // Make it globally accessible for onclick handlers
+    window.openPageSelector = openPageSelector;
+
+    // Also capture clicks on the sidebar "Pages" link to use the same modal
+    document.addEventListener('DOMContentLoaded', function() {
+      const pageLink = document.querySelector('.nav a[data-page="page"]');
+      if (pageLink) {
+        pageLink.addEventListener('click', function(e) {
+          e.preventDefault();
+          openPageSelector('view-pages');
         });
       }
     });
