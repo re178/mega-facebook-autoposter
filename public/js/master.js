@@ -53,11 +53,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     try {
         setProgress(1, 4, 'Fetching summary data...');
-        // Use the new unified endpoint (must be implemented on backend)
-        const summary = await getMasterSummary(); // from dashboard-api.js
+        const summary = await getMasterSummary();
 
         setProgress(2, 4, 'Rendering stats...');
-        // Render summary cards
         summaryContainer.innerHTML = '';
         const cards = [
             { title: 'Total Pages', value: summary.pages?.length || 0 },
@@ -72,7 +70,6 @@ document.addEventListener('DOMContentLoaded', async () => {
             summaryContainer.appendChild(div);
         });
 
-        // Render per-page stats
         const pageStats = summary.perPageStats || [];
         pageStatsBody.innerHTML = '';
         if (pageStats.length === 0) {
@@ -92,7 +89,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
 
         setProgress(3, 4, 'Loading activity feed...');
-        // Activity feed (replaces logs for clients)
         const activity = summary.recentActivity || [];
         logsContainer.innerHTML = '';
         if (activity.length === 0) {
@@ -111,10 +107,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             if (progressBar) progressBar.style.opacity = '0';
         }, 500);
 
-        // Store pages for modal
         window.pages = summary.pages || [];
 
-        // Update user name and plan badge
         const user = await (await fetch('/api/auth/profile', { credentials: 'include' })).json().catch(() => null);
         if (user) {
             const nameEl = document.getElementById('userNameDisplay');
@@ -126,7 +120,6 @@ document.addEventListener('DOMContentLoaded', async () => {
                 planBadge.className = `badge-${plan}`;
                 planBadge.textContent = plan.charAt(0).toUpperCase() + plan.slice(1);
             }
-            // Also update wallet balance if needed
             const balanceEl = document.getElementById('walletBalanceDisplay');
             if (balanceEl) balanceEl.textContent = (user.walletBalance || 0).toFixed(2);
             const phoneDisplay = document.getElementById('registeredPhoneDisplay');
