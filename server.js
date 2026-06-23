@@ -15,6 +15,7 @@ const os = require('os');
 // ==================== MODELS ====================
 const User = require('./models/User');
 const Page = require('./models/Page');
+const Plan = require('./models/Plan'); // 🆕 Added
 
 // ==================== SERVICES ====================
 const { startScheduler } = require('./services/scheduler');
@@ -26,12 +27,12 @@ const dashboardRoutes = require('./routes/dashboardRoutes');
 const pageFeaturesRoutes = require('./routes/pageFeaturesRoutes');
 const webhookRoutes = require('./routes/webhookRoutes');
 const aiRoutes = require('./routes/aiSchedulerRoutes');
-const adminRoutes = require('./routes/adminRoutes');
+const adminRoutes = require('./routes/adminRoutes'); // ✅ Should contain plan CRUD
 const userMessagesRoutes = require('./routes/userMessages');
 const authRoutes = require('./routes/authRoutes');
 const facebookAuthRoutes = require('./routes/facebookAuthRoutes');
-const lipaRoutes = require('./routes/lipaRoutes');
-const pricingRoutes = require('./routes/pricing');
+const lipaRoutes = require('./routes/lipaRoutes'); // ✅ Updated to use Plan model
+const pricingRoutes = require('./routes/pricing'); // legacy, kept for compatibility
 
 // ==================== APP INIT ====================
 const app = express();
@@ -40,7 +41,7 @@ app.set('trust proxy', 1);
 const PORT = process.env.PORT || 10000;
 const isProduction = process.env.NODE_ENV === 'production';
 
-// ==================== SECURITY HEADERS (FIXED) ====================
+// ==================== SECURITY HEADERS ====================
 app.use(
     helmet({
         contentSecurityPolicy: {
@@ -147,22 +148,27 @@ function requireLogin(req, res, next) {
 // Public webhook (no auth)
 app.use('/', webhookRoutes);
 
+// 🆕 Public plans (no auth)
+const planRoutes = require('./routes/plans'); // we'll create this file (public GET)
+app.use('/api/plans', planRoutes);
+
+// Legacy pricing (keep for backward compatibility)
 app.use('/api/pricing', pricingRoutes);
 
-// Public auth routes (no login required)
+// Public auth routes
 app.use('/api/auth', authRoutes);
 
-// Facebook OAuth routes (handle auth internally)
+// Facebook OAuth
 app.use('/api/facebook', facebookAuthRoutes);
 
-// M-Pesa Routes (public callback + authenticated endpoints)
+// M-Pesa / IntaSend routes
 app.use('/api/lipa', lipaRoutes);
 
 // Protected API routes (require login)
 app.use('/api/dashboard', requireLogin, dashboardRoutes);
 app.use('/api/dashboard', requireLogin, pageFeaturesRoutes);
 app.use('/api/ai', requireLogin, aiRoutes);
-app.use('/api/admin', requireLogin, adminRoutes);
+app.use('/api/admin', requireLogin, adminRoutes); // ✅ Admin routes with plan CRUD
 app.use('/api/user/messages', requireLogin, userMessagesRoutes);
 
 // ==================== STATIC FILES ====================
@@ -233,7 +239,6 @@ app.post('/login', async (req, res) => {
             return res.status(401).json({ error: 'Invalid account' });
         }
 
-        // Check if user is verified (new signups after Jan 1 2025)
         if (user.createdAt > new Date('2025-01-01') && !user.isVerified) {
             return res.status(401).json({ error: 'Please verify your email before logging in.' });
         }
@@ -345,6 +350,9 @@ mongoose
     .then(async () => {
         console.log('✅ MongoDB connected');
 
+        // 🆕 Seed default plans if none exist
+        await require('./routes/adminRoutes').ensureDefaultPlans();
+
         // Find admin user for page sync (if any)
         const admin = await User.findOne({ role: 'admin' });
         if (admin) {
@@ -384,6 +392,7 @@ mongoose
             console.log(`📡 Environment: ${isProduction ? 'PRODUCTION' : 'DEVELOPMENT'}`);
             console.log(`🧹 Auto Maintenance: Running every 30 minutes`);
             console.log(`💰 Pricing endpoint: /api/pricing`);
+            console.log(`📋 Plans endpoint: /api/plans`);
         });
     })
     .catch(err => {
