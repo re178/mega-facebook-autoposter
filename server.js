@@ -10,7 +10,7 @@ const bcrypt = require('bcrypt');
 const rateLimit = require('express-rate-limit');
 const helmet = require('helmet');
 const MongoStore = require('connect-mongo');
-const os = require('os'); // 🆕 Added for health endpoint
+const os = require('os');
 
 // ==================== MODELS ====================
 const User = require('./models/User');
@@ -19,10 +19,19 @@ const Page = require('./models/Page');
 // ==================== SERVICES ====================
 const { startScheduler } = require('./services/scheduler');
 const { startAiPostScheduler } = require('./services/aiPostScheduler');
-const { startAutoMaintenance } = require('./services/autoMaintenance'); // ADDED
+const { startAutoMaintenance } = require('./services/autoMaintenance');
 
-// ==================== 🚀 ADDED: MPESA ROUTES ====================
+// ==================== ROUTES (YOUR EXISTING NAMES) ====================
+const dashboardRoutes = require('./routes/dashboardRoutes');
+const pageFeaturesRoutes = require('./routes/pageFeaturesRoutes');
+const webhookRoutes = require('./routes/webhookRoutes');
+const aiRoutes = require('./routes/aiSchedulerRoutes');
+const adminRoutes = require('./routes/adminRoutes');
+const userMessagesRoutes = require('./routes/userMessages');
+const authRoutes = require('./routes/authRoutes');
+const facebookAuthRoutes = require('./routes/facebookAuthRoutes');
 const lipaRoutes = require('./routes/lipaRoutes');
+const pricingRoutes = require('./routes/pricing');
 
 // ==================== APP INIT ====================
 const app = express();
@@ -31,7 +40,7 @@ app.set('trust proxy', 1);
 const PORT = process.env.PORT || 10000;
 const isProduction = process.env.NODE_ENV === 'production';
 
-// ==================== SECURITY HEADERS ====================
+// ==================== SECURITY HEADERS (FIXED) ====================
 app.use(
     helmet({
         contentSecurityPolicy: {
@@ -39,8 +48,29 @@ app.use(
                 defaultSrc: ["'self'"],
                 scriptSrc: ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net"],
                 scriptSrcAttr: ["'unsafe-inline'"],
-                styleSrc: ["'self'", "'unsafe-inline'"],
-                imgSrc: ["'self'", "data:", "https://res.cloudinary.com", "https://*.cloudinary.com"],
+                styleSrc: [
+                    "'self'",
+                    "'unsafe-inline'",
+                    "https://fonts.googleapis.com",
+                    "https://cdnjs.cloudflare.com"
+                ],
+                styleSrcElem: [
+                    "'self'",
+                    "'unsafe-inline'",
+                    "https://fonts.googleapis.com",
+                    "https://cdnjs.cloudflare.com"
+                ],
+                fontSrc: [
+                    "'self'",
+                    "https://fonts.gstatic.com",
+                    "https://cdnjs.cloudflare.com"
+                ],
+                imgSrc: [
+                    "'self'",
+                    "data:",
+                    "https://res.cloudinary.com",
+                    "https://*.cloudinary.com"
+                ],
                 connectSrc: [
                     "'self'",
                     "https://graph.facebook.com",
@@ -63,7 +93,7 @@ app.use(
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// ==================== SESSION (STABLE FOR FACEBOOK OAUTH) ====================
+// ==================== SESSION ====================
 app.use(
     session({
         name: 'voxtra.sid',
@@ -113,17 +143,11 @@ function requireLogin(req, res, next) {
 }
 
 // ==================== ROUTES ====================
-const dashboardRoutes = require('./routes/dashboardRoutes');
-const pageFeaturesRoutes = require('./routes/pageFeaturesRoutes');
-const webhookRoutes = require('./routes/webhookRoutes');
-const aiRoutes = require('./routes/aiSchedulerRoutes');
-const adminRoutes = require('./routes/adminRoutes');
-const userMessagesRoutes = require('./routes/userMessages');
-const authRoutes = require('./routes/authRoutes');
-const facebookAuthRoutes = require('./routes/facebookAuthRoutes');
 
 // Public webhook (no auth)
 app.use('/', webhookRoutes);
+
+app.use('/api/pricing', pricingRoutes);
 
 // Public auth routes (no login required)
 app.use('/api/auth', authRoutes);
@@ -131,7 +155,7 @@ app.use('/api/auth', authRoutes);
 // Facebook OAuth routes (handle auth internally)
 app.use('/api/facebook', facebookAuthRoutes);
 
-// 🚀 ADDED: M-Pesa Routes (Mounted globally so Safaricom can hit the callback)
+// M-Pesa Routes (public callback + authenticated endpoints)
 app.use('/api/lipa', lipaRoutes);
 
 // Protected API routes (require login)
@@ -149,7 +173,7 @@ app.get('/login', (req, res) =>
     res.sendFile(path.join(__dirname, 'public/login.html'))
 );
 
-// Protected pages (no CSRF injection needed)
+// Protected pages
 app.get('/connect-facebook', requireLogin, (req, res) =>
     res.sendFile(path.join(__dirname, 'public/connect-facebook.html'))
 );
@@ -258,33 +282,29 @@ app.get('/api/session', (req, res) => {
     });
 });
 
-// ==================== HEALTH CHECK (PUBLIC) ====================
+// ==================== HEALTH CHECK ====================
 app.get('/health', (req, res) => {
     res.status(200).json({
         success: true,
         status: 'healthy',
         service: 'Viraloop Socials',
-
         process: {
             pid: process.pid,
             uptime: Math.floor(process.uptime()),
             node: process.version
         },
-
         system: {
             hostname: os.hostname(),
             platform: os.platform(),
             arch: os.arch(),
             cpus: os.cpus().length
         },
-
         memory: {
             rss: process.memoryUsage().rss,
             heapUsed: process.memoryUsage().heapUsed,
             heapTotal: process.memoryUsage().heapTotal,
             external: process.memoryUsage().external
         },
-
         timestamp: new Date().toISOString()
     });
 });
@@ -320,7 +340,6 @@ async function syncPagesFromEnv(adminId) {
 }
 
 // ==================== START ALL SCHEDULERS ====================
-// DATABASE CONNECTION & SERVER START
 mongoose
     .connect(process.env.MONGO_URI)
     .then(async () => {
@@ -348,15 +367,15 @@ mongoose
             console.error('❌ AI Post scheduler error:', err.message);
         }
 
-        // Start Auto Maintenance (NEW)
+        // Start Auto Maintenance
         try {
             startAutoMaintenance();
             console.log('✅ Auto Maintenance started');
         } catch (err) {
             console.error('❌ Auto Maintenance error:', err.message);
         }
-        
-        // 🚀 KEEP YOUR EXISTING autoGeneration REQUIRE
+
+        // Auto Generation service
         require('./services/autoGeneration');
 
         // Start server
@@ -364,6 +383,7 @@ mongoose
             console.log(`🚀 Server running on port ${PORT}`);
             console.log(`📡 Environment: ${isProduction ? 'PRODUCTION' : 'DEVELOPMENT'}`);
             console.log(`🧹 Auto Maintenance: Running every 30 minutes`);
+            console.log(`💰 Pricing endpoint: /api/pricing`);
         });
     })
     .catch(err => {
