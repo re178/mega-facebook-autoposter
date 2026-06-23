@@ -12,6 +12,7 @@ const AiScheduledPost = require('../models/AiScheduledPost');
 const SystemSettings = require('../models/SystemSettings');
 const AdminMessage = require('../models/AdminMessage');
 const BroadcastMessage = require('../models/BroadcastMessage');
+const Plan = require('../models/Plan'); // 🆕 ADDED
 
 // Middleware (fixed versions – return JSON 401 for API routes)
 const requireLogin = require('../middleware/requireLogin');
@@ -408,7 +409,7 @@ router.patch('/maintenance/off', async (req, res) => {
 });
 
 /* =====================================================
-   NEW: PRICING MANAGEMENT
+   PRICING MANAGEMENT (LEGACY – KEPT FOR BACKWARD COMPATIBILITY)
 ===================================================== */
 router.get('/pricing', async (req, res) => {
     try {
@@ -438,5 +439,248 @@ router.put('/pricing', async (req, res) => {
         res.status(500).json({ error: err.message });
     }
 });
+
+/* =====================================================
+   🆕 PLAN MANAGEMENT (DYNAMIC PLANS)
+===================================================== */
+
+// GET all plans (including inactive)
+router.get('/plans', async (req, res) => {
+    try {
+        const plans = await Plan.find().sort({ order: 1 });
+        res.json(plans);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// GET a single plan by ID
+router.get('/plans/:id', async (req, res) => {
+    try {
+        const plan = await Plan.findById(req.params.id);
+        if (!plan) return res.status(404).json({ error: 'Plan not found' });
+        res.json(plan);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// CREATE a new plan
+router.post('/plans', async (req, res) => {
+    try {
+        const { name, label, priceUSD, priceKES, durationDays, features, isActive, isDefault, order } = req.body;
+        
+        // Validate required fields
+        if (!name || !label) {
+            return res.status(400).json({ error: 'Name and label are required' });
+        }
+        
+        // Check for duplicate name
+        const existing = await Plan.findOne({ name });
+        if (existing) {
+            return res.status(400).json({ error: 'Plan name already exists' });
+        }
+
+        const plan = await Plan.create({
+            name,
+            label,
+            priceUSD: priceUSD || 0,
+            priceKES: priceKES || 0,
+            durationDays: durationDays || 30,
+            features: features || {},
+            isActive: isActive !== undefined ? isActive : true,
+            isDefault: isDefault || false,
+            order: order || 0
+        });
+        
+        res.status(201).json(plan);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// UPDATE an existing plan
+router.put('/plans/:id', async (req, res) => {
+    try {
+        const { name, label, priceUSD, priceKES, durationDays, features, isActive, isDefault, order } = req.body;
+        
+        const plan = await Plan.findById(req.params.id);
+        if (!plan) {
+            return res.status(404).json({ error: 'Plan not found' });
+        }
+        
+        // Prevent renaming the 'free' plan
+        if (plan.name === 'free' && name && name !== 'free') {
+            return res.status(400).json({ error: 'Cannot rename the "free" plan' });
+        }
+        
+        // Check for duplicate name (excluding self)
+        if (name && name !== plan.name) {
+            const duplicate = await Plan.findOne({ name });
+            if (duplicate) {
+                return res.status(400).json({ error: 'Plan name already exists' });
+            }
+        }
+
+        const updated = await Plan.findByIdAndUpdate(
+            req.params.id,
+            {
+                name: name || plan.name,
+                label: label || plan.label,
+                priceUSD: priceUSD !== undefined ? priceUSD : plan.priceUSD,
+                priceKES: priceKES !== undefined ? priceKES : plan.priceKES,
+                durationDays: durationDays || plan.durationDays,
+                features: features || plan.features,
+                isActive: isActive !== undefined ? isActive : plan.isActive,
+                isDefault: isDefault || plan.isDefault,
+                order: order !== undefined ? order : plan.order
+            },
+            { new: true }
+        );
+        
+        res.json(updated);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// DELETE (soft delete – sets isActive = false)
+router.delete('/plans/:id', async (req, res) => {
+    try {
+        const plan = await Plan.findById(req.params.id);
+        if (!plan) {
+            return res.status(404).json({ error: 'Plan not found' });
+        }
+        
+        // Prevent deleting the 'free' plan
+        if (plan.name === 'free') {
+            return res.status(400).json({ error: 'Cannot delete the "free" plan' });
+        }
+        
+        // Soft delete – set inactive
+        plan.isActive = false;
+        await plan.save();
+        
+        res.json({ success: true, message: 'Plan deactivated' });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+/* =====================================================
+   SEED DEFAULT PLANS (if none exist)
+===================================================== */
+// This function should be called on server startup (e.g., in app.js)
+const ensureDefaultPlans = async () => {
+    const count = await Plan.countDocuments();
+    if (count === 0) {
+        const defaultPlans = [
+            {
+                name: 'free',
+                label: 'Free',
+                priceUSD: 0,
+                priceKES: 0,
+                durationDays: 30,
+                features: {
+                    aiTopics: 1,
+                    aiPostsPerMonth: 5,
+                    manualPostsPerMonth: 10,
+                    pagesAllowed: 1,
+                    templates: 0,
+                    ads: false,
+                    comments: false,
+                    analyticsAdvanced: false,
+                    pageProfile: false,
+                    reports: false,
+                    broadcastsSend: false,
+                    teamMembers: 0
+                },
+                isActive: true,
+                isDefault: true,
+                order: 0
+            },
+            {
+                name: 'pro',
+                label: 'Pro',
+                priceUSD: 29,
+                priceKES: 3500,
+                durationDays: 30,
+                features: {
+                    aiTopics: -1,
+                    aiPostsPerMonth: -1,
+                    manualPostsPerMonth: -1,
+                    pagesAllowed: 10,
+                    templates: 20,
+                    ads: true,
+                    comments: true,
+                    analyticsAdvanced: true,
+                    pageProfile: true,
+                    reports: true,
+                    broadcastsSend: false,
+                    teamMembers: 0
+                },
+                isActive: true,
+                isDefault: false,
+                order: 1
+            },
+            {
+                name: 'premium',
+                label: 'Premium',
+                priceUSD: 59,
+                priceKES: 7000,
+                durationDays: 30,
+                features: {
+                    aiTopics: -1,
+                    aiPostsPerMonth: -1,
+                    manualPostsPerMonth: -1,
+                    pagesAllowed: 50,
+                    templates: 50,
+                    ads: true,
+                    comments: true,
+                    analyticsAdvanced: true,
+                    pageProfile: true,
+                    reports: true,
+                    broadcastsSend: true,
+                    teamMembers: 3
+                },
+                isActive: true,
+                isDefault: false,
+                order: 2
+            },
+            {
+                name: 'enterprise',
+                label: 'Enterprise',
+                priceUSD: 99,
+                priceKES: 12000,
+                durationDays: 30,
+                features: {
+                    aiTopics: -1,
+                    aiPostsPerMonth: -1,
+                    manualPostsPerMonth: -1,
+                    pagesAllowed: -1,
+                    templates: -1,
+                    ads: true,
+                    comments: true,
+                    analyticsAdvanced: true,
+                    pageProfile: true,
+                    reports: true,
+                    broadcastsSend: true,
+                    teamMembers: 5
+                },
+                isActive: true,
+                isDefault: false,
+                order: 3
+            }
+        ];
+        await Plan.insertMany(defaultPlans);
+        console.log('✅ Default plans seeded successfully.');
+    }
+};
+
+// Export the seed function so it can be called from app.js
+router.ensureDefaultPlans = ensureDefaultPlans;
 
 module.exports = router;
