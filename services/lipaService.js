@@ -1,4 +1,4 @@
-// services/lipaService.js – IntaSend API wrapper (no pricing logic)
+// services/lipaService.js – IntaSend API wrapper
 const axios = require('axios');
 const crypto = require('crypto');
 
@@ -15,9 +15,6 @@ class IntaSendService {
         ).toString('base64');
     }
 
-    /**
-     * Initiate STK Push via IntaSend
-     */
     async initiateSTKPush({ phoneNumber, email, amount, narrative, apiRef }) {
         const url = `${this.baseUrl}v1/collection/mpesa_stk_push/`;
         const payload = {
@@ -52,9 +49,6 @@ class IntaSendService {
         }
     }
 
-    /**
-     * Check payment status by invoice ID
-     */
     async checkPaymentStatus(invoiceId) {
         const url = `${this.baseUrl}v1/collection/status/${invoiceId}/`;
         try {
@@ -78,9 +72,6 @@ class IntaSendService {
         }
     }
 
-    /**
-     * Verify webhook signature (HMAC-SHA256)
-     */
     verifyWebhookSignature(signature, body) {
         if (!signature || !body) return false;
         const webhookSecret = process.env.INTASEND_WEBHOOK_SECRET;
@@ -98,9 +89,6 @@ class IntaSendService {
         );
     }
 
-    /**
-     * Format phone to 254XXXXXXXX
-     */
     formatPhoneNumber(phone) {
         let cleaned = phone.replace(/\D/g, '');
         if (cleaned.startsWith('0')) {
