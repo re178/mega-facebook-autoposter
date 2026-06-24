@@ -1,6 +1,5 @@
-// services/lipaService.js – IntaSend API wrapper (FIXED URL)
-const axios = require('axios');
-const crypto = require('crypto');
+// services/lipaService.js – Using Official IntaSend Node.js SDK
+const IntaSend = require('intasend-node');
 
 class IntaSendService {
     constructor() {
@@ -8,83 +7,75 @@ class IntaSendService {
         this.secretKey = process.env.INTASEND_SECRET_KEY;
         this.testMode = process.env.INTASEND_TEST === 'true';
 
-        // ✅ FIXED: base URL without '/api/'
-        this.baseUrl = this.testMode
-            ? 'https://sandbox.intasend.com/'
-            : 'https://payment.intasend.com/';
+        // ✅ Initialize the official SDK
+        this.intasend = new IntaSend(
+            this.publishableKey,
+            this.secretKey,
+            this.testMode  // true = sandbox, false = production
+        );
 
-        this.authToken = Buffer.from(
-            `${this.publishableKey}:${this.secretKey}`
-        ).toString('base64');
+        // Get the collection API client
+        this.collection = this.intasend.collection();
     }
 
     /**
-     * Initiate STK Push via IntaSend
+     * Initiate STK Push using the official SDK
      */
     async initiateSTKPush({ phoneNumber, email, amount, narrative, apiRef }) {
-        // ✅ FIXED: correct API path – remove duplicate '/api/'
-        const url = `${this.baseUrl}api/v1/collection/mpesa_stk_push/`;
-
-        const payload = {
-            phone_number: phoneNumber,
-            email,
-            amount,
-            currency: 'KES',
-            narrative: narrative || 'Subscription Payment',
-            api_ref: apiRef || `SUB_${Date.now()}`
-        };
-
         try {
-            const response = await axios.post(url, payload, {
-                headers: {
-                    'Authorization': `Basic ${this.authToken}`,
-                    'Content-Type': 'application/json'
-                }
+            // ✅ SDK handles the correct URL, authentication, and formatting
+            const response = await this.collection.mpesaStkPush({
+                first_name: 'Customer',
+                last_name: '',
+                email: email,
+                amount: amount,
+                phone_number: phoneNumber, // Format: 2547XXXXXXXX
+                api_ref: apiRef || `SUB_${Date.now()}`,
+                // Optional: host for callback
+                // host: 'https://viraloopsocials.onrender.com'
             });
+
+            console.log('✅ STK Push SDK Response:', response);
+
             return {
                 success: true,
-                data: response.data,
-                invoiceId: response.data.invoice?.id || response.data.invoice_id,
-                trackingId: response.data.tracking_id
+                data: response,
+                invoiceId: response.invoice?.id || response.invoice_id,
+                trackingId: response.tracking_id
             };
         } catch (error) {
-            console.error('IntaSend STK Push error:', error.response?.data || error.message);
+            console.error('❌ IntaSend SDK STK Push error:', error);
             return {
                 success: false,
-                error: error.response?.data?.message || error.message,
-                details: error.response?.data
+                error: error.message || 'STK Push failed',
+                details: error
             };
         }
     }
 
     /**
-     * Check payment status by invoice ID
+     * Check payment status using the official SDK
      */
     async checkPaymentStatus(invoiceId) {
-        const url = `${this.baseUrl}api/v1/collection/status/${invoiceId}/`;
         try {
-            const response = await axios.get(url, {
-                headers: {
-                    'Authorization': `Basic ${this.authToken}`,
-                    'Content-Type': 'application/json'
-                }
-            });
+            // ✅ SDK handles the correct URL
+            const response = await this.collection.status(invoiceId);
             return {
                 success: true,
-                status: response.data.invoice?.state || response.data.state,
-                data: response.data
+                status: response.invoice?.state || response.state,
+                data: response
             };
         } catch (error) {
-            console.error('IntaSend status error:', error.response?.data || error.message);
+            console.error('❌ IntaSend SDK status error:', error);
             return {
                 success: false,
-                error: error.response?.data?.message || error.message
+                error: error.message || 'Status check failed'
             };
         }
     }
 
     /**
-     * Verify webhook signature (HMAC-SHA256)
+     * Verify webhook signature – same as before
      */
     verifyWebhookSignature(signature, body) {
         if (!signature || !body) return false;
@@ -93,11 +84,11 @@ class IntaSendService {
             console.warn('Webhook secret not set – skipping verification');
             return true;
         }
+        const crypto = require('crypto');
         const expected = crypto
             .createHmac('sha256', webhookSecret)
             .update(JSON.stringify(body))
             .digest('hex');
-        // Constant‑time comparison
         return crypto.timingSafeEqual(
             Buffer.from(signature),
             Buffer.from(expected)
@@ -105,7 +96,7 @@ class IntaSendService {
     }
 
     /**
-     * Format phone number to IntaSend format (2547XXXXXXXX)
+     * Format phone number – same as before
      */
     formatPhoneNumber(phone) {
         let cleaned = phone.replace(/\D/g, '');
