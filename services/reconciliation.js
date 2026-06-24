@@ -40,8 +40,9 @@ async function reconcilePayments() {
                 const state = invoiceData.state || statusResult.status;
 
                 if (state === 'COMPLETE') {
-                    // Verify fields
-                    const amountMatches = Number(invoiceData.amount) === tx.amount;
+                    // Verify fields – use gross amount (value)
+                    const grossAmount = Number(invoiceData.value) || Number(invoiceData.amount);
+                    const amountMatches = grossAmount === tx.amount;
                     const currencyMatches = invoiceData.currency === 'KES';
                     const providerMatches = invoiceData.provider === 'MPESA' || invoiceData.provider === 'M-PESA';
                     const apiRefMatches = invoiceData.api_ref === tx.apiRef;
@@ -143,7 +144,7 @@ cron.schedule('* * * * *', async () => {
     await reconcilePayments();
 });
 
-// ✅ Run expiry downgrade once daily at midnight (00:00)
+// Run expiry downgrade once daily at midnight (00:00)
 cron.schedule('0 0 * * *', async () => {
     await downgradeExpired();
 });
