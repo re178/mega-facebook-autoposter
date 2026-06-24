@@ -1,4 +1,4 @@
-// routes/lipaRoutes.js – Resilient webhook using api_ref
+// routes/lipaRoutes.js – Resilient webhook using api_ref (amount fix)
 const express = require('express');
 const router = express.Router();
 const User = require('../models/User');
@@ -76,9 +76,11 @@ router.post('/callback', async (req, res) => {
         const invoiceData = statusResult.data.invoice || statusResult.data;
         const state = invoiceData.state || statusResult.status;
 
-        // 7. Verify all critical fields
+        // 7. Verify all critical fields – use gross amount (value) not net_amount
         const isComplete = state === 'COMPLETE';
-        const amountMatches = Number(invoiceData.amount) === tx.amount;
+        // Use 'value' (gross) if present, otherwise fallback to 'amount'
+        const grossAmount = Number(invoiceData.value) || Number(invoiceData.amount);
+        const amountMatches = grossAmount === tx.amount;
         const currencyMatches = invoiceData.currency === 'KES';
         const providerMatches = invoiceData.provider === 'M-PESA' || invoiceData.provider === 'MPESA';
         const apiRefMatches = invoiceData.api_ref === tx.apiRef;
@@ -118,7 +120,7 @@ router.post('/callback', async (req, res) => {
         } else {
             const reasons = [];
             if (!isComplete) reasons.push('state not COMPLETE');
-            if (!amountMatches) reasons.push('amount mismatch');
+            if (!amountMatches) reasons.push(`amount mismatch: expected ${tx.amount}, got ${grossAmount}`);
             if (!currencyMatches) reasons.push('currency mismatch');
             if (!providerMatches) reasons.push('provider mismatch');
             if (!apiRefMatches) reasons.push('api_ref mismatch');
@@ -267,8 +269,9 @@ router.get('/status/:transactionId', requireLogin, async (req, res) => {
                 const state = invoiceData.state || statusResult.status;
 
                 if (state === 'COMPLETE' && !tx.subscriptionActivated) {
-                    // Verify fields
-                    const amountMatches = Number(invoiceData.amount) === tx.amount;
+                    // Verify fields – use gross amount
+                    const grossAmount = Number(invoiceData.value) || Number(invoiceData.amount);
+                    const amountMatches = grossAmount === tx.amount;
                     const currencyMatches = invoiceData.currency === 'KES';
                     const providerMatches = invoiceData.provider === 'M-PESA' || invoiceData.provider === 'MPESA';
                     const apiRefMatches = invoiceData.api_ref === tx.apiRef;
