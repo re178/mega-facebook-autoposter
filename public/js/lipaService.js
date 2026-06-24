@@ -1,4 +1,4 @@
-// frontend/js/lipaService.js – Complete with button disable, spinner, idempotency
+// frontend/js/lipaService.js – Complete with phone validation
 console.log('✅ lipaService.js loaded (IntaSend)');
 
 let isProcessing = false;
@@ -61,7 +61,7 @@ async function loadWalletData() {
 
 // ===== INITIATE PAYMENT =====
 async function initiatePayment(plan, phoneNumber) {
-    const payBtn = document.getElementById('payButton');
+    const payBtn = document.getElementById('confirmUpgradeBtn');
     const statusEl = document.getElementById('paymentStatus');
     const msgEl = document.getElementById('statusMessage');
 
@@ -87,12 +87,11 @@ async function initiatePayment(plan, phoneNumber) {
     }
 
     if (statusEl) {
-        statusEl.style.display = 'block';
+        statusEl.style.display = 'flex';
         msgEl.textContent = 'Initiating payment...';
         statusEl.className = 'status-info';
     }
 
-    // Generate idempotency key
     const userId = document.getElementById('userId')?.value || 'unknown';
     const idempotencyKey = `${userId}_${plan}_${Date.now()}`;
 
@@ -132,7 +131,7 @@ async function initiatePayment(plan, phoneNumber) {
         isProcessing = false;
         if (payBtn) {
             payBtn.disabled = false;
-            payBtn.innerHTML = '💳 Pay Now';
+            payBtn.innerHTML = 'Confirm Payment';
             payBtn.style.opacity = '1';
         }
     }
@@ -162,6 +161,9 @@ function startStatusPolling(transactionId) {
                 if (statusEl) {
                     msgEl.textContent = '🎉 Payment successful! Subscription activated.';
                     statusEl.className = 'status-success';
+                    // Remove spinner
+                    const spinner = statusEl.querySelector('.spinner');
+                    if (spinner) spinner.style.display = 'none';
                 }
                 showToast('🎉 Subscription activated!', 'success');
                 await loadWalletData();
@@ -236,13 +238,31 @@ async function showUpgradeModal() {
         `;
     }).join('');
 
+    // Reset selection
     selectedPlan = null;
     document.getElementById('selectedPlanDisplay').textContent = 'Select a plan';
     document.getElementById('confirmUpgradeBtn').disabled = true;
+
+    // Add input listener to enable/disable button
+    const phoneInput = document.getElementById('paymentPhoneInput');
+    if (phoneInput) {
+        phoneInput.addEventListener('input', updateConfirmButtonState);
+        // Also check on load
+        updateConfirmButtonState();
+    }
+
+    // Reset payment status
+    const statusEl = document.getElementById('paymentStatus');
+    if (statusEl) statusEl.style.display = 'none';
 }
 
 function closeUpgradeModal() {
     document.getElementById('upgradeModal').style.display = 'none';
+    // Remove listeners to avoid duplicates
+    const phoneInput = document.getElementById('paymentPhoneInput');
+    if (phoneInput) {
+        phoneInput.removeEventListener('input', updateConfirmButtonState);
+    }
 }
 
 function selectPlan(plan) {
@@ -258,20 +278,32 @@ function selectPlan(plan) {
         const price = priceEl ? priceEl.textContent : '';
         display.textContent = `${plan.toUpperCase()} – ${price}`;
     }
-    document.getElementById('confirmUpgradeBtn').disabled = false;
+    updateConfirmButtonState();
+}
+
+function updateConfirmButtonState() {
+    const phoneInput = document.getElementById('paymentPhoneInput');
+    const phone = phoneInput ? phoneInput.value.trim() : '';
+    const hasPhone = phone.length >= 10;
+    const btn = document.getElementById('confirmUpgradeBtn');
+    if (btn) {
+        btn.disabled = !(selectedPlan && hasPhone);
+    }
 }
 
 async function confirmUpgrade() {
+    // Validate again
+    const phoneInput = document.getElementById('paymentPhoneInput');
+    const phone = phoneInput ? phoneInput.value.trim() : '';
     if (!selectedPlan) {
         showToast('Please select a plan', 'warning');
         return;
     }
-    const phoneInput = document.getElementById('paymentPhoneInput');
-    const phone = phoneInput?.value || '';
     if (!phone || phone.length < 10) {
-        showToast('Valid phone number required', 'warning');
+        showToast('Valid phone number required (e.g., 0712345678)', 'warning');
         return;
     }
+    // Close modal and initiate payment
     closeUpgradeModal();
     await initiatePayment(selectedPlan, phone);
 }
@@ -283,16 +315,14 @@ window.showUpgradeModal = showUpgradeModal;
 window.closeUpgradeModal = closeUpgradeModal;
 window.selectPlan = selectPlan;
 window.confirmUpgrade = confirmUpgrade;
+window.updateConfirmButtonState = updateConfirmButtonState;
 
 // ===== AUTO-LOAD =====
 document.addEventListener('DOMContentLoaded', () => {
     loadWalletData();
-    const payBtn = document.getElementById('payButton');
-    if (payBtn) {
-        payBtn.addEventListener('click', function(e) {
-            const plan = document.querySelector('input[name="plan"]:checked')?.value || 'pro';
-            const phone = document.getElementById('paymentPhoneInput')?.value || '';
-            initiatePayment(plan, phone);
-        });
+    // Set up phone input listener (if modal is already open)
+    const phoneInput = document.getElementById('paymentPhoneInput');
+    if (phoneInput) {
+        phoneInput.addEventListener('input', updateConfirmButtonState);
     }
 });
