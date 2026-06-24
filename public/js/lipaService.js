@@ -1,4 +1,4 @@
-// frontend/js/lipaService.js – Complete with phone validation
+// lipaService.js – Complete with success handling, no page reload
 console.log('✅ lipaService.js loaded (IntaSend)');
 
 let isProcessing = false;
@@ -6,8 +6,8 @@ let currentTransactionId = null;
 let statusPollInterval = null;
 let selectedPlan = null;
 
-// ===== LOAD SUBSCRIPTION DATA =====
-async function loadWalletData() {
+// ===== LOAD USER DATA (update badge, balance, expiry) =====
+async function loadUserData() {
     try {
         const res = await fetch('/api/lipa/subscription', { credentials: 'include' });
         if (!res.ok) {
@@ -16,6 +16,7 @@ async function loadWalletData() {
         }
         const data = await res.json();
 
+        // Update plan badge
         const badge = document.getElementById('planBadge');
         if (badge && data.subscription) {
             const plan = data.subscription.plan || 'free';
@@ -23,11 +24,13 @@ async function loadWalletData() {
             badge.textContent = plan.charAt(0).toUpperCase() + plan.slice(1);
         }
 
+        // Update wallet balance
         const balanceEl = document.getElementById('walletBalanceDisplay');
         if (balanceEl) {
             balanceEl.textContent = (data.walletBalance || 0).toFixed(2);
         }
 
+        // Update expiry display
         const expiryEl = document.getElementById('subscriptionExpiryDisplay');
         if (expiryEl && data.subscription?.expiryDate) {
             const expiry = new Date(data.subscription.expiryDate);
@@ -37,6 +40,7 @@ async function loadWalletData() {
             expiryEl.textContent = 'No active subscription';
         }
 
+        // Update hidden user fields
         const userIdEl = document.getElementById('userId');
         if (userIdEl) userIdEl.value = data.userId || '';
 
@@ -54,9 +58,23 @@ async function loadWalletData() {
 
         return data;
     } catch (e) {
-        console.error('Load subscription error:', e);
+        console.error('Load user data error:', e);
     }
     return null;
+}
+
+// ===== SUCCESS HANDLER – NO PAGE RELOAD =====
+function handlePaymentSuccess(planName) {
+    // Show success toast
+    showToast(`🎉 Subscription activated! You are now on ${planName.toUpperCase()} plan.`, 'success');
+    
+    // Refresh user data (badge, wallet, expiry)
+    loadUserData().then(() => {
+        // Also refresh dashboard stats if master.js has a refresh function
+        if (typeof window.refreshDashboard === 'function') {
+            window.refreshDashboard();
+        }
+    });
 }
 
 // ===== INITIATE PAYMENT =====
@@ -159,15 +177,18 @@ function startStatusPolling(transactionId) {
                 clearInterval(statusPollInterval);
                 statusPollInterval = null;
                 if (statusEl) {
-                    msgEl.textContent = '🎉 Payment successful! Subscription activated.';
+                    msgEl.textContent = '🎉 Payment successful!';
                     statusEl.className = 'status-success';
                     // Remove spinner
                     const spinner = statusEl.querySelector('.spinner');
                     if (spinner) spinner.style.display = 'none';
                 }
-                showToast('🎉 Subscription activated!', 'success');
-                await loadWalletData();
-                setTimeout(() => location.reload(), 2000);
+                // ✅ Handle success without page reload
+                handlePaymentSuccess(tx.plan || 'pro');
+                // Reset modal status after a moment
+                setTimeout(() => {
+                    if (statusEl) statusEl.style.display = 'none';
+                }, 5000);
             } else if (tx.status === 'failed') {
                 clearInterval(statusPollInterval);
                 statusPollInterval = null;
@@ -205,7 +226,7 @@ async function showUpgradeModal() {
     const modal = document.getElementById('upgradeModal');
     if (!modal) return;
     modal.style.display = 'flex';
-    await loadWalletData();
+    await loadUserData();
 
     const plansContainer = document.getElementById('pricingPlans');
     if (!plansContainer) return;
@@ -247,7 +268,6 @@ async function showUpgradeModal() {
     const phoneInput = document.getElementById('paymentPhoneInput');
     if (phoneInput) {
         phoneInput.addEventListener('input', updateConfirmButtonState);
-        // Also check on load
         updateConfirmButtonState();
     }
 
@@ -258,7 +278,6 @@ async function showUpgradeModal() {
 
 function closeUpgradeModal() {
     document.getElementById('upgradeModal').style.display = 'none';
-    // Remove listeners to avoid duplicates
     const phoneInput = document.getElementById('paymentPhoneInput');
     if (phoneInput) {
         phoneInput.removeEventListener('input', updateConfirmButtonState);
@@ -292,7 +311,6 @@ function updateConfirmButtonState() {
 }
 
 async function confirmUpgrade() {
-    // Validate again
     const phoneInput = document.getElementById('paymentPhoneInput');
     const phone = phoneInput ? phoneInput.value.trim() : '';
     if (!selectedPlan) {
@@ -303,13 +321,12 @@ async function confirmUpgrade() {
         showToast('Valid phone number required (e.g., 0712345678)', 'warning');
         return;
     }
-    // Close modal and initiate payment
     closeUpgradeModal();
     await initiatePayment(selectedPlan, phone);
 }
 
 // ===== GLOBAL EXPOSURES =====
-window.loadWalletData = loadWalletData;
+window.loadUserData = loadUserData;
 window.initiatePayment = initiatePayment;
 window.showUpgradeModal = showUpgradeModal;
 window.closeUpgradeModal = closeUpgradeModal;
@@ -317,12 +334,15 @@ window.selectPlan = selectPlan;
 window.confirmUpgrade = confirmUpgrade;
 window.updateConfirmButtonState = updateConfirmButtonState;
 
-// ===== AUTO-LOAD =====
+// ===== AUTO‑LOAD =====
 document.addEventListener('DOMContentLoaded', () => {
-    loadWalletData();
-    // Set up phone input listener (if modal is already open)
-    const phoneInput = document.getElementById('paymentPhoneInput');
-    if (phoneInput) {
-        phoneInput.addEventListener('input', updateConfirmButtonState);
+    loadUserData();
+    const payBtn = document.getElementById('payButton');
+    if (payBtn) {
+        payBtn.addEventListener('click', function(e) {
+            const plan = document.querySelector('input[name="plan"]:checked')?.value || 'pro';
+            const phone = document.getElementById('paymentPhoneInput')?.value || '';
+            initiatePayment(plan, phone);
+        });
     }
 });
