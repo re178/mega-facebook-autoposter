@@ -394,6 +394,15 @@ mongoose
             console.log(`💰 Pricing endpoint: /api/pricing`);
             console.log(`📋 Plans endpoint: /api/plans`);
         });
+
+        // 🆕 Start Reconciliation Service (safety net for missed webhooks)
+        try {
+            require('./services/reconciliation');
+            console.log('✅ Reconciliation service started (cron job)');
+        } catch (err) {
+            console.error('❌ Reconciliation service error:', err.message);
+        }
+
     })
     .catch(err => {
         console.error('❌ MongoDB connection error:', err.message);
