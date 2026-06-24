@@ -1,4 +1,4 @@
-// routes/lipaRoutes.js – Complete with challenge, idempotency, webhook handling
+// routes/lipaRoutes.js – IntaSend routes with multi‑layer confirmation
 const express = require('express');
 const router = express.Router();
 const User = require('../models/User');
@@ -20,36 +20,60 @@ router.get('/callback', (req, res) => {
     res.status(400).send('Challenge not provided');
 });
 
-// ========== WEBHOOK EVENT (POST) ==========
+// ========== WEBHOOK EVENT (POST) – Multi‑Layer Verification ==========
 router.post('/callback', async (req, res) => {
     try {
+        // 1. Optional signature verification – log if invalid, but do not reject
         const signature = req.headers['x-webhook-signature'] || req.headers['x-intasend-signature'];
-        if (!intasendService.verifyWebhookSignature(signature, req.body)) {
-            console.warn('Webhook: Invalid signature');
-            return res.status(401).json({ error: 'Invalid signature' });
+        const isSignatureValid = intasendService.verifyWebhookSignature(signature, req.body);
+        if (!isSignatureValid) {
+            console.warn('⚠️ Webhook: Invalid signature, but proceeding with API verification.');
         }
 
+        // 2. Extract invoice_id from webhook payload
         const invoiceId = req.body.invoice?.id || req.body.invoice_id;
-        const state = req.body.invoice?.state || req.body.state;
-
         if (!invoiceId) {
-            console.warn('Webhook: No invoice ID');
+            console.warn('⚠️ Webhook: No invoice ID');
             return res.status(200).json({ received: true });
         }
 
+        // 3. Find the pending transaction in the database
         const user = await User.findOne({ 'transactions.invoiceId': invoiceId });
         if (!user) {
-            console.warn(`Webhook: Transaction not found for invoice ${invoiceId}`);
+            console.warn(`⚠️ Webhook: Transaction not found for invoice ${invoiceId}`);
             return res.status(200).json({ received: true });
         }
 
         const tx = user.transactions.find(t => t.invoiceId === invoiceId);
-        if (!tx) return res.status(200).json({ received: true });
+        if (!tx) {
+            return res.status(200).json({ received: true });
+        }
 
-        tx.webhookReceived = true;
-        tx.webhookData = req.body;
+        // 4. Idempotency: if already completed, ignore
+        if (tx.status === 'completed') {
+            return res.status(200).json({ received: true });
+        }
 
-        if (state === 'COMPLETE' && tx.status !== 'completed') {
+        // 5. Call IntaSend Status API – the authoritative source
+        const statusResult = await intasendService.checkPaymentStatus(invoiceId);
+        if (!statusResult.success) {
+            console.error('❌ Status API error:', statusResult.error);
+            return res.status(200).json({ received: true });
+        }
+
+        // 6. Extract invoice data from the status API response
+        const invoiceData = statusResult.data.invoice || statusResult.data;
+        const state = invoiceData.state || statusResult.status;
+
+        // 7. Verify all critical fields match the pending transaction
+        const isComplete = state === 'COMPLETE';
+        const amountMatches = Number(invoiceData.amount) === tx.amount;
+        const currencyMatches = invoiceData.currency === 'KES';
+        const providerMatches = invoiceData.provider === 'MPESA'; // adjust if needed
+        const apiRefMatches = invoiceData.api_ref === tx.trackingId; // stored when creating transaction
+
+        // 8. If everything matches, activate the subscription
+        if (isComplete && amountMatches && currencyMatches && providerMatches && apiRefMatches) {
             const planData = await Plan.findOne({ name: tx.plan });
             const durationDays = planData?.durationDays || 30;
             const expiry = new Date();
@@ -65,30 +89,44 @@ router.post('/callback', async (req, res) => {
             tx.status = 'completed';
             tx.subscriptionActivated = true;
             tx.subscriptionExpiry = expiry;
+            await user.save();
+
             console.log(`✅ Subscription activated for ${user.email}: ${tx.plan} until ${expiry.toISOString()}`);
-        } else if (state === 'FAILED' || state === 'CANCELLED') {
-            tx.status = 'failed';
-        } else if (state === 'PROCESSING') {
-            tx.status = 'processing';
+        } else {
+            // Log why activation was skipped
+            const reasons = [];
+            if (!isComplete) reasons.push('state not COMPLETE');
+            if (!amountMatches) reasons.push('amount mismatch');
+            if (!currencyMatches) reasons.push('currency mismatch');
+            if (!providerMatches) reasons.push('provider mismatch');
+            if (!apiRefMatches) reasons.push('api_ref mismatch');
+            console.warn('⚠️ Webhook activation skipped:', reasons.join(', '));
         }
 
-        await user.save();
+        // Always acknowledge receipt
         res.status(200).json({ received: true });
 
     } catch (error) {
-        console.error('Webhook error:', error);
+        console.error('❌ Webhook error:', error);
+        // Always return 200 – IntaSend will retry if we return error
         res.status(200).json({ received: true });
     }
 });
 
-// ========== INITIATE PAYMENT ==========
+// =====================================================
+// 1. INITIATE PAYMENT (STK Push)
+// =====================================================
 router.post('/stk-push', requireLogin, async (req, res) => {
     try {
         const { plan, phoneNumber, idempotencyKey } = req.body;
         const userId = req.session.userId;
 
-        if (!userId) return res.status(401).json({ success: false, error: 'Unauthorized' });
-        if (!plan) return res.status(400).json({ success: false, error: 'Plan required' });
+        if (!userId) {
+            return res.status(401).json({ success: false, error: 'Unauthorized' });
+        }
+        if (!plan) {
+            return res.status(400).json({ success: false, error: 'Plan required' });
+        }
         if (!phoneNumber || phoneNumber.length < 10) {
             return res.status(400).json({ success: false, error: 'Valid phone number required' });
         }
@@ -96,7 +134,7 @@ router.post('/stk-push', requireLogin, async (req, res) => {
             return res.status(400).json({ success: false, error: 'Idempotency key required' });
         }
 
-        // Check for duplicate request
+        // Check for duplicate request using idempotencyKey
         const existingUser = await User.findOne({ 'transactions.idempotencyKey': idempotencyKey });
         if (existingUser) {
             const tx = existingUser.transactions.find(t => t.idempotencyKey === idempotencyKey);
@@ -109,17 +147,24 @@ router.post('/stk-push', requireLogin, async (req, res) => {
         }
 
         const planData = await Plan.findOne({ name: plan, isActive: true });
-        if (!planData) return res.status(400).json({ success: false, error: 'Invalid plan' });
+        if (!planData) {
+            return res.status(400).json({ success: false, error: 'Invalid plan' });
+        }
 
         const amount = planData.priceKES || 0;
-        if (amount <= 0) return res.status(400).json({ success: false, error: 'Plan price not set' });
+        if (amount <= 0) {
+            return res.status(400).json({ success: false, error: 'Plan price not set' });
+        }
 
         const user = await User.findById(userId);
-        if (!user) return res.status(404).json({ success: false, error: 'User not found' });
+        if (!user) {
+            return res.status(404).json({ success: false, error: 'User not found' });
+        }
 
         const formattedPhone = intasendService.formatPhoneNumber(phoneNumber);
         const apiRef = `SUB_${userId}_${Date.now()}`;
 
+        // Create transaction record
         const transaction = {
             type: 'subscription',
             amount,
@@ -136,6 +181,7 @@ router.post('/stk-push', requireLogin, async (req, res) => {
 
         const txId = user.transactions[user.transactions.length - 1]._id;
 
+        // Call IntaSend SDK
         const result = await intasendService.initiateSTKPush({
             phoneNumber: formattedPhone,
             email: user.email,
@@ -151,6 +197,7 @@ router.post('/stk-push', requireLogin, async (req, res) => {
             return res.status(400).json({ success: false, error: result.error });
         }
 
+        // Update transaction with invoice details
         const lastTx = user.transactions.id(txId);
         if (lastTx) {
             lastTx.invoiceId = result.invoiceId;
@@ -173,38 +220,56 @@ router.post('/stk-push', requireLogin, async (req, res) => {
     }
 });
 
-// ========== STATUS CHECK ==========
+// =====================================================
+// 2. GET TRANSACTION STATUS (Used by frontend polling)
+// =====================================================
 router.get('/status/:transactionId', requireLogin, async (req, res) => {
     try {
         const userId = req.session.userId;
         const { transactionId } = req.params;
 
         const user = await User.findById(userId);
-        if (!user) return res.status(404).json({ success: false, error: 'User not found' });
+        if (!user) {
+            return res.status(404).json({ success: false, error: 'User not found' });
+        }
 
         const tx = user.transactions.id(transactionId);
-        if (!tx) return res.status(404).json({ success: false, error: 'Transaction not found' });
+        if (!tx) {
+            return res.status(404).json({ success: false, error: 'Transaction not found' });
+        }
 
-        if (tx.status === 'processing' && tx.invoiceId) {
+        // If still pending/processing, check with IntaSend
+        if ((tx.status === 'pending' || tx.status === 'processing') && tx.invoiceId) {
             const statusResult = await intasendService.checkPaymentStatus(tx.invoiceId);
             if (statusResult.success) {
-                const state = statusResult.data.invoice?.state || statusResult.data.state;
+                const invoiceData = statusResult.data.invoice || statusResult.data;
+                const state = invoiceData.state || statusResult.status;
+
+                // If completed, activate (also verify fields)
                 if (state === 'COMPLETE' && !tx.subscriptionActivated) {
-                    const planData = await Plan.findOne({ name: tx.plan });
-                    const durationDays = planData?.durationDays || 30;
-                    const expiry = new Date();
-                    expiry.setDate(expiry.getDate() + durationDays);
-                    user.subscription = {
-                        plan: tx.plan,
-                        startDate: new Date(),
-                        expiryDate: expiry,
-                        updatedAt: new Date(),
-                        autoRenew: false
-                    };
-                    tx.status = 'completed';
-                    tx.subscriptionActivated = true;
-                    tx.subscriptionExpiry = expiry;
-                    await user.save();
+                    const amountMatches = Number(invoiceData.amount) === tx.amount;
+                    const currencyMatches = invoiceData.currency === 'KES';
+                    const providerMatches = invoiceData.provider === 'MPESA';
+                    const apiRefMatches = invoiceData.api_ref === tx.trackingId;
+
+                    if (amountMatches && currencyMatches && providerMatches && apiRefMatches) {
+                        const planData = await Plan.findOne({ name: tx.plan });
+                        const durationDays = planData?.durationDays || 30;
+                        const expiry = new Date();
+                        expiry.setDate(expiry.getDate() + durationDays);
+                        user.subscription = {
+                            plan: tx.plan,
+                            startDate: new Date(),
+                            expiryDate: expiry,
+                            updatedAt: new Date(),
+                            autoRenew: false
+                        };
+                        tx.status = 'completed';
+                        tx.subscriptionActivated = true;
+                        tx.subscriptionExpiry = expiry;
+                        await user.save();
+                        console.log(`✅ Status activation for ${user.email}: ${tx.plan}`);
+                    }
                 } else if (state === 'FAILED' || state === 'CANCELLED') {
                     tx.status = 'failed';
                     await user.save();
@@ -232,12 +297,16 @@ router.get('/status/:transactionId', requireLogin, async (req, res) => {
     }
 });
 
-// ========== SUBSCRIPTION INFO ==========
+// =====================================================
+// 3. GET SUBSCRIPTION & WALLET INFO
+// =====================================================
 router.get('/subscription', requireLogin, async (req, res) => {
     try {
         const userId = req.session.userId;
         const user = await User.findById(userId).select('subscription walletBalance paymentPhone email transactions');
-        if (!user) return res.status(404).json({ success: false, error: 'User not found' });
+        if (!user) {
+            return res.status(404).json({ success: false, error: 'User not found' });
+        }
 
         const now = new Date();
         const isActive = user.subscription?.expiryDate && new Date(user.subscription.expiryDate) > now;
