@@ -1,16 +1,12 @@
-// frontend/js/lipaService.js – IntaSend integration
+// frontend/js/lipaService.js – Complete with button disable, spinner, idempotency
 console.log('✅ lipaService.js loaded (IntaSend)');
 
-// =====================================================
-// GLOBALS
-// =====================================================
+let isProcessing = false;
 let currentTransactionId = null;
 let statusPollInterval = null;
 let selectedPlan = null;
 
-// =====================================================
-// LOAD SUBSCRIPTION DATA (replaces wallet data)
-// =====================================================
+// ===== LOAD SUBSCRIPTION DATA =====
 async function loadWalletData() {
     try {
         const res = await fetch('/api/lipa/subscription', { credentials: 'include' });
@@ -20,7 +16,6 @@ async function loadWalletData() {
         }
         const data = await res.json();
 
-        // Update plan badge
         const badge = document.getElementById('planBadge');
         if (badge && data.subscription) {
             const plan = data.subscription.plan || 'free';
@@ -28,13 +23,11 @@ async function loadWalletData() {
             badge.textContent = plan.charAt(0).toUpperCase() + plan.slice(1);
         }
 
-        // Update wallet balance display (if you still want to show it)
         const balanceEl = document.getElementById('walletBalanceDisplay');
         if (balanceEl) {
             balanceEl.textContent = (data.walletBalance || 0).toFixed(2);
         }
 
-        // Update expiry display (if you have an element)
         const expiryEl = document.getElementById('subscriptionExpiryDisplay');
         if (expiryEl && data.subscription?.expiryDate) {
             const expiry = new Date(data.subscription.expiryDate);
@@ -44,7 +37,6 @@ async function loadWalletData() {
             expiryEl.textContent = 'No active subscription';
         }
 
-        // Store user ID and phone
         const userIdEl = document.getElementById('userId');
         if (userIdEl) userIdEl.value = data.userId || '';
 
@@ -53,7 +45,6 @@ async function loadWalletData() {
             userPhoneEl.value = data.paymentPhone;
         }
 
-        // Update registered phone display
         const phoneDisplay = document.getElementById('registeredPhoneDisplay');
         if (phoneDisplay && data.paymentPhone) {
             phoneDisplay.textContent = `(${data.paymentPhone})`;
@@ -68,12 +59,16 @@ async function loadWalletData() {
     return null;
 }
 
-// =====================================================
-// INITIATE PAYMENT (POST /api/lipa/stk-push)
-// =====================================================
+// ===== INITIATE PAYMENT =====
 async function initiatePayment(plan, phoneNumber) {
     const payBtn = document.getElementById('payButton');
     const statusEl = document.getElementById('paymentStatus');
+    const msgEl = document.getElementById('statusMessage');
+
+    if (isProcessing) {
+        showToast('Payment already in progress', 'warning');
+        return;
+    }
 
     if (!plan) {
         showToast('Please select a plan', 'warning');
@@ -84,7 +79,7 @@ async function initiatePayment(plan, phoneNumber) {
         return;
     }
 
-    // Disable button
+    isProcessing = true;
     if (payBtn) {
         payBtn.disabled = true;
         payBtn.innerHTML = '⏳ Sending...';
@@ -92,17 +87,21 @@ async function initiatePayment(plan, phoneNumber) {
     }
 
     if (statusEl) {
-        statusEl.textContent = 'Initiating payment...';
-        statusEl.className = 'status-info';
         statusEl.style.display = 'block';
+        msgEl.textContent = 'Initiating payment...';
+        statusEl.className = 'status-info';
     }
+
+    // Generate idempotency key
+    const userId = document.getElementById('userId')?.value || 'unknown';
+    const idempotencyKey = `${userId}_${plan}_${Date.now()}`;
 
     try {
         const res = await fetch('/api/lipa/stk-push', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             credentials: 'include',
-            body: JSON.stringify({ plan, phoneNumber })
+            body: JSON.stringify({ plan, phoneNumber, idempotencyKey })
         });
 
         const data = await res.json();
@@ -110,14 +109,14 @@ async function initiatePayment(plan, phoneNumber) {
         if (data.success) {
             currentTransactionId = data.transactionId;
             if (statusEl) {
-                statusEl.textContent = '✅ STK Push sent! Check your phone and enter PIN.';
+                msgEl.textContent = '✅ STK Push sent! Check your phone and enter PIN.';
                 statusEl.className = 'status-success';
             }
             showToast('📱 STK Push sent! Check your phone.', 'success');
             startStatusPolling(currentTransactionId);
         } else {
             if (statusEl) {
-                statusEl.textContent = '❌ ' + (data.error || 'Payment initiation failed');
+                msgEl.textContent = '❌ ' + (data.error || 'Payment initiation failed');
                 statusEl.className = 'status-error';
             }
             showToast('❌ ' + (data.error || 'Payment failed'), 'error');
@@ -125,11 +124,12 @@ async function initiatePayment(plan, phoneNumber) {
     } catch (err) {
         console.error('Payment error:', err);
         if (statusEl) {
-            statusEl.textContent = '❌ Network error. Try again.';
+            msgEl.textContent = '❌ Network error. Try again.';
             statusEl.className = 'status-error';
         }
         showToast('Network error', 'error');
     } finally {
+        isProcessing = false;
         if (payBtn) {
             payBtn.disabled = false;
             payBtn.innerHTML = '💳 Pay Now';
@@ -138,9 +138,7 @@ async function initiatePayment(plan, phoneNumber) {
     }
 }
 
-// =====================================================
-// POLL PAYMENT STATUS
-// =====================================================
+// ===== POLL PAYMENT STATUS =====
 function startStatusPolling(transactionId) {
     if (statusPollInterval) clearInterval(statusPollInterval);
     let attempts = 0;
@@ -156,12 +154,13 @@ function startStatusPolling(transactionId) {
 
             const tx = data.transaction;
             const statusEl = document.getElementById('paymentStatus');
+            const msgEl = document.getElementById('statusMessage');
 
             if (tx.status === 'completed' || tx.subscriptionActivated) {
                 clearInterval(statusPollInterval);
                 statusPollInterval = null;
                 if (statusEl) {
-                    statusEl.textContent = '🎉 Payment successful! Subscription activated.';
+                    msgEl.textContent = '🎉 Payment successful! Subscription activated.';
                     statusEl.className = 'status-success';
                 }
                 showToast('🎉 Subscription activated!', 'success');
@@ -171,13 +170,13 @@ function startStatusPolling(transactionId) {
                 clearInterval(statusPollInterval);
                 statusPollInterval = null;
                 if (statusEl) {
-                    statusEl.textContent = '❌ Payment failed. Please try again.';
+                    msgEl.textContent = '❌ Payment failed. Please try again.';
                     statusEl.className = 'status-error';
                 }
                 showToast('❌ Payment failed', 'error');
             } else if (tx.status === 'processing') {
                 if (statusEl) {
-                    statusEl.textContent = `⏳ Processing... (${attempts}/${maxAttempts})`;
+                    msgEl.textContent = `⏳ Processing... (${attempts}/${maxAttempts})`;
                     statusEl.className = 'status-info';
                 }
             }
@@ -189,8 +188,9 @@ function startStatusPolling(transactionId) {
             clearInterval(statusPollInterval);
             statusPollInterval = null;
             const statusEl = document.getElementById('paymentStatus');
+            const msgEl = document.getElementById('statusMessage');
             if (statusEl) {
-                statusEl.textContent = '⏳ Payment is still processing. You will be notified.';
+                msgEl.textContent = '⏳ Payment is still processing. You will be notified.';
                 statusEl.className = 'status-warning';
             }
             showToast('Payment still processing', 'warning');
@@ -198,9 +198,7 @@ function startStatusPolling(transactionId) {
     }, 3000);
 }
 
-// =====================================================
-// UPGRADE MODAL HANDLERS
-// =====================================================
+// ===== UPGRADE MODAL =====
 async function showUpgradeModal() {
     const modal = document.getElementById('upgradeModal');
     if (!modal) return;
@@ -210,27 +208,34 @@ async function showUpgradeModal() {
     const plansContainer = document.getElementById('pricingPlans');
     if (!plansContainer) return;
 
-    // Fetch plan prices from meta tags or environment
-    const prices = {
-        pro: parseInt(document.querySelector('meta[name="plan-price-pro"]')?.content) || 3500,
-        enterprise: parseInt(document.querySelector('meta[name="plan-price-enterprise"]')?.content) || 12000,
-        premium: parseInt(document.querySelector('meta[name="plan-price-premium"]')?.content) || 7000
-    };
+    // Fetch plans from public endpoint
+    let plans;
+    try {
+        const res = await fetch('/api/plans', { credentials: 'include' });
+        const data = await res.json();
+        plans = data.filter(p => p.isActive);
+    } catch (e) {
+        showToast('Failed to load plans', 'error');
+        return;
+    }
 
     const currentPlan = window.userPlan || 'free';
-    plansContainer.innerHTML = Object.entries(prices).map(([plan, price]) => `
-        <div class="plan-card ${currentPlan === plan ? 'selected' : ''}" 
-             data-plan="${plan}" 
-             onclick="selectPlan('${plan}')"
-             style="border:2px solid ${currentPlan === plan ? '#10b981' : '#e2e8f0'}; border-radius:8px; padding:12px; cursor:pointer; background:${currentPlan === plan ? '#f0fdf4' : 'white'};">
-            <h4 style="margin:0; text-transform:uppercase;">${plan}</h4>
-            <p style="font-size:20px; font-weight:bold; color:#10b981;">KES ${price}</p>
-            <p style="font-size:12px; color:#64748b;">${plan === 'pro' ? '10 pages, unlimited posts' : plan === 'premium' ? '50 pages, unlimited posts' : 'Unlimited pages, full features'}</p>
-            ${currentPlan === plan ? '<span style="background:#10b981; color:white; padding:2px 8px; border-radius:12px; font-size:10px;">Current</span>' : ''}
-        </div>
-    `).join('');
+    plansContainer.innerHTML = plans.map(p => {
+        const price = p.priceKES || 0;
+        const isCurrent = p.name === currentPlan;
+        return `
+            <div class="plan-card ${isCurrent ? 'selected' : ''}" 
+                 data-plan="${p.name}" 
+                 onclick="selectPlan('${p.name}')"
+                 style="border:2px solid ${isCurrent ? '#10b981' : '#e2e8f0'}; border-radius:8px; padding:12px; cursor:pointer; background:${isCurrent ? '#f0fdf4' : 'white'}; text-align:center;">
+                <h4 style="margin:0; text-transform:uppercase;">${p.label}</h4>
+                <p style="font-size:20px; font-weight:bold; color:#10b981;">KES ${price}</p>
+                <p style="font-size:12px; color:#64748b;">${p.features.pagesAllowed === -1 ? 'Unlimited' : p.features.pagesAllowed} pages, ${p.features.aiTopics === -1 ? 'Unlimited' : p.features.aiTopics} AI topics</p>
+                ${isCurrent ? '<span style="background:#10b981; color:white; padding:2px 8px; border-radius:12px; font-size:10px;">Current</span>' : ''}
+            </div>
+        `;
+    }).join('');
 
-    // Reset selection
     selectedPlan = null;
     document.getElementById('selectedPlanDisplay').textContent = 'Select a plan';
     document.getElementById('confirmUpgradeBtn').disabled = true;
@@ -249,12 +254,9 @@ function selectPlan(plan) {
     });
     const display = document.getElementById('selectedPlanDisplay');
     if (display) {
-        const prices = {
-            pro: parseInt(document.querySelector('meta[name="plan-price-pro"]')?.content) || 3500,
-            enterprise: parseInt(document.querySelector('meta[name="plan-price-enterprise"]')?.content) || 12000,
-            premium: parseInt(document.querySelector('meta[name="plan-price-premium"]')?.content) || 7000
-        };
-        display.textContent = `${plan.toUpperCase()} – KES ${prices[plan]}`;
+        const priceEl = document.querySelector(`.plan-card[data-plan="${plan}"] .price`);
+        const price = priceEl ? priceEl.textContent : '';
+        display.textContent = `${plan.toUpperCase()} – ${price}`;
     }
     document.getElementById('confirmUpgradeBtn').disabled = false;
 }
@@ -274,9 +276,7 @@ async function confirmUpgrade() {
     await initiatePayment(selectedPlan, phone);
 }
 
-// =====================================================
-// GLOBAL EXPOSURES
-// =====================================================
+// ===== GLOBAL EXPOSURES =====
 window.loadWalletData = loadWalletData;
 window.initiatePayment = initiatePayment;
 window.showUpgradeModal = showUpgradeModal;
@@ -284,12 +284,9 @@ window.closeUpgradeModal = closeUpgradeModal;
 window.selectPlan = selectPlan;
 window.confirmUpgrade = confirmUpgrade;
 
-// =====================================================
-// AUTO-LOAD
-// =====================================================
+// ===== AUTO-LOAD =====
 document.addEventListener('DOMContentLoaded', () => {
     loadWalletData();
-    // Attach pay button if present (for legacy)
     const payBtn = document.getElementById('payButton');
     if (payBtn) {
         payBtn.addEventListener('click', function(e) {
