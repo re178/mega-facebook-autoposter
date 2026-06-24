@@ -64,6 +64,14 @@ const UserSchema = new mongoose.Schema({
   },
 
   /* =====================================================
+     PAYMENT PHONE (separate from general phone)
+  ===================================================== */
+  paymentPhone: {
+    type: String,
+    default: null
+  },
+
+  /* =====================================================
      LEGAL AGREEMENTS
   ===================================================== */
   acceptedTerms: {
@@ -83,14 +91,14 @@ const UserSchema = new mongoose.Schema({
      SUBSCRIPTION
   ===================================================== */
   subscription: {
+    plan: {
+      type: String,
+      default: 'free'   // 'free' | 'pro' | 'premium' | 'enterprise'
+    },
     status: {
       type: String,
       enum: ['free', 'active', 'expired'],
       default: 'free'
-    },
-    plan: {
-      type: String,
-      default: 'free'   // 'free' | 'pro' | 'enterprise'
     },
     startDate: {
       type: Date,
@@ -100,10 +108,13 @@ const UserSchema = new mongoose.Schema({
       type: Date,
       default: null
     },
-    // ✅ NEW: field required by frontend to track last upgrade date
     updatedAt: {
       type: Date,
       default: Date.now
+    },
+    autoRenew: {
+      type: Boolean,
+      default: false
     }
   },
 
@@ -132,6 +143,14 @@ const UserSchema = new mongoose.Schema({
   suspensionReason: {
     type: String,
     default: null
+  },
+
+  /* =====================================================
+     AI LOCK
+  ===================================================== */
+  aiLocked: {
+    type: Boolean,
+    default: false
   },
 
   /* =====================================================
@@ -178,7 +197,7 @@ const UserSchema = new mongoose.Schema({
   },
 
   /* =====================================================
-     🚀 MPESA WALLET & TRANSACTIONS (SAFE ADDITION)
+     🚀 WALLET & TRANSACTIONS (UPDATED ENUM)
   ===================================================== */
   walletBalance: {
     type: Number,
@@ -189,7 +208,7 @@ const UserSchema = new mongoose.Schema({
     {
       type: {
         type: String,
-        enum: ['deposit', 'payment', 'refund'],
+        enum: ['deposit', 'payment', 'refund', 'subscription'], // ✅ ADDED 'subscription'
         default: 'deposit'
       },
       amount: {
@@ -205,14 +224,58 @@ const UserSchema = new mongoose.Schema({
         type: String,
         index: true
       },
+      invoiceId: {
+        type: String,
+        index: true,
+        sparse: true
+      },
+      trackingId: {
+        type: String,
+        index: true,
+        sparse: true
+      },
+      idempotencyKey: {
+        type: String,
+        index: true,
+        sparse: true
+      },
+      plan: {
+        type: String,
+        enum: ['free', 'pro', 'premium', 'enterprise'],
+        default: null
+      },
+      subscriptionActivated: {
+        type: Boolean,
+        default: false
+      },
+      subscriptionExpiry: {
+        type: Date,
+        default: null
+      },
       status: {
         type: String,
-        enum: ['pending', 'completed', 'failed'],
+        enum: ['pending', 'processing', 'completed', 'failed', 'cancelled'],
         default: 'pending'
       },
       description: {
         type: String,
         default: 'M-Pesa deposit'
+      },
+      phoneNumber: {
+        type: String,
+        default: null
+      },
+      webhookReceived: {
+        type: Boolean,
+        default: false
+      },
+      webhookData: {
+        type: mongoose.Schema.Types.Mixed,
+        default: null
+      },
+      intasendResponse: {
+        type: mongoose.Schema.Types.Mixed,
+        default: null
       },
       date: {
         type: Date,
@@ -240,7 +303,6 @@ const UserSchema = new mongoose.Schema({
 ===================================================== */
 UserSchema.pre('save', async function(next) {
   this.updatedAt = Date.now();
-  // Also update subscription.updatedAt if not set
   if (this.subscription && !this.subscription.updatedAt) {
     this.subscription.updatedAt = Date.now();
   }
