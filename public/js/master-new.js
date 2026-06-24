@@ -1,9 +1,5 @@
-// master.js – Complete rewrite, clean and bulletproof
+// master-new.js 
 document.addEventListener('DOMContentLoaded', function() {
-
-    // ========================================
-    // DOM ELEMENTS
-    // ========================================
     const summaryContainer = document.getElementById('summary-cards');
     const logsContainer = document.getElementById('recent-logs');
     const pageStatsBody = document.getElementById('page-stats-body');
@@ -11,15 +7,11 @@ document.addEventListener('DOMContentLoaded', function() {
     const progressText = document.getElementById('loading-text');
     const planBadge = document.getElementById('planBadge');
 
-    // Stop if critical elements are missing
     if (!summaryContainer || !logsContainer || !pageStatsBody) {
         console.error('Dashboard containers missing');
         return;
     }
 
-    // ========================================
-    // HELPER FUNCTIONS
-    // ========================================
     function escapeHtml(str) {
         if (!str) return '';
         return str.replace(/[&<>]/g, function(m) {
@@ -31,12 +23,20 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     function showSkeletons() {
-        summaryContainer.innerHTML =
-            '<div class="card skeleton"><div class="skeleton-title"></div><div class="skeleton-value"></div></div>'.repeat(4);
-        pageStatsBody.innerHTML =
-            '<tr><td colspan="5"><div class="skeleton-table"><div class="skeleton-row"></div><div class="skeleton-row"></div><div class="skeleton-row"></div></div></td></tr>';
-        logsContainer.innerHTML =
-            '<div class="skeleton-log"></div><div class="skeleton-log"></div><div class="skeleton-log"></div>';
+        summaryContainer.innerHTML = Array(4).fill(`
+            <div class="card skeleton">
+                <div class="skeleton-title"></div>
+                <div class="skeleton-value"></div>
+            </div>
+        `).join('');
+        pageStatsBody.innerHTML = `
+            <tr><td colspan="5"><div class="skeleton-table"><div class="skeleton-row"></div><div class="skeleton-row"></div><div class="skeleton-row"></div></div></td></tr>
+        `;
+        logsContainer.innerHTML = `
+            <div class="skeleton-log"></div>
+            <div class="skeleton-log"></div>
+            <div class="skeleton-log"></div>
+        `;
     }
 
     function updateProgress(pct, label) {
@@ -61,7 +61,7 @@ document.addEventListener('DOMContentLoaded', function() {
             summaryContainer.appendChild(div);
         }
 
-        // Render per-page stats
+        // Render per‑page stats
         var stats = summary.perPageStats || [];
         pageStatsBody.innerHTML = '';
         if (stats.length === 0) {
@@ -95,98 +95,76 @@ document.addEventListener('DOMContentLoaded', function() {
         window.pages = summary.pages || [];
     }
 
-    // ========================================
-    // LOAD USER PROFILE
-    // ========================================
-    function loadUserProfile() {
-        var profileUrl = '/api/auth/profile';
-        fetch(profileUrl, { credentials: 'include' })
-            .then(function(response) {
-                if (!response.ok) return null;
-                return response.json();
-            })
-            .then(function(user) {
-                if (!user) return;
+    // ===== LOAD DASHBOARD DATA (no page reload) =====
+    async function loadDashboard() {
+        try {
+            showSkeletons();
+            updateProgress(10, 'Loading dashboard...');
 
-                // Update user name
-                var nameEl = document.getElementById('userNameDisplay');
-                if (nameEl) {
-                    nameEl.textContent = user.name || user.email || 'User';
-                }
+            const res = await fetch('/api/dashboard/master-summary', { credentials: 'include' });
+            if (!res.ok) {
+                throw new Error('Server returned ' + res.status);
+            }
+            const summary = await res.json();
 
-                // Update email
-                var emailEl = document.getElementById('userEmailDisplay');
-                if (emailEl) {
-                    emailEl.textContent = user.email || 'Account';
-                }
-
-                // Update plan badge
-                if (planBadge) {
-                    var plan = user.subscription ? user.subscription.plan : 'free';
-                    planBadge.className = 'badge-' + plan;
-                    planBadge.textContent = plan.charAt(0).toUpperCase() + plan.slice(1);
-                }
-
-                // Update wallet balance
-                var balanceEl = document.getElementById('walletBalanceDisplay');
-                if (balanceEl) {
-                    balanceEl.textContent = (user.walletBalance || 0).toFixed(2);
-                }
-
-                // Update phone display
-                var phoneDisplay = document.getElementById('registeredPhoneDisplay');
-                if (phoneDisplay) {
-                    phoneDisplay.textContent = user.phone ? '(' + user.phone + ')' : '⚠️ Update phone';
-                }
-
-                // Store user ID and phone in hidden fields
-                var userIdEl = document.getElementById('userId');
-                if (userIdEl) userIdEl.value = user._id || '';
-
-                var userPhoneEl = document.getElementById('userPhone');
-                if (userPhoneEl) userPhoneEl.value = user.phone || '';
-            })
-            .catch(function(err) {
-                console.warn('Could not load user profile:', err);
-            });
+            updateProgress(70, 'Rendering dashboard...');
+            renderStats(summary);
+            updateProgress(100, 'Done!');
+            setTimeout(function() {
+                if (progressBar) progressBar.style.opacity = '0';
+            }, 500);
+        } catch (err) {
+            console.error('Dashboard load error:', err);
+            summaryContainer.innerHTML = '<div class="error">Failed to load dashboard. Please refresh.</div>';
+            logsContainer.innerHTML = '<div class="log">Error loading activity</div>';
+            updateProgress(100, 'Error loading');
+        }
     }
 
-    // ========================================
-    // LOAD DASHBOARD DATA
-    // ========================================
-    function loadDashboard() {
-        showSkeletons();
-        updateProgress(10, 'Loading dashboard...');
+    // ===== LOAD USER PROFILE =====
+    async function loadUserProfile() {
+        try {
+            const res = await fetch('/api/auth/profile', { credentials: 'include' });
+            if (!res.ok) return;
+            const user = await res.json();
 
-        var summaryUrl = '/api/dashboard/master-summary';
+            const nameEl = document.getElementById('userNameDisplay');
+            if (nameEl) {
+                nameEl.textContent = user.name || user.email || 'User';
+            }
 
-        fetch(summaryUrl, { credentials: 'include' })
-            .then(function(response) {
-                updateProgress(40, 'Fetching data...');
-                if (!response.ok) {
-                    throw new Error('Server returned ' + response.status);
-                }
-                return response.json();
-            })
-            .then(function(summary) {
-                updateProgress(70, 'Rendering dashboard...');
-                renderStats(summary);
-                updateProgress(100, 'Done!');
-                setTimeout(function() {
-                    if (progressBar) progressBar.style.opacity = '0';
-                }, 500);
-            })
-            .catch(function(err) {
-                console.error('Dashboard load error:', err);
-                summaryContainer.innerHTML = '<div class="error">Failed to load dashboard. Please refresh.</div>';
-                logsContainer.innerHTML = '<div class="log">Error loading activity</div>';
-                updateProgress(100, 'Error loading');
-            });
+            const emailEl = document.getElementById('userEmailDisplay');
+            if (emailEl) {
+                emailEl.textContent = user.email || 'Account';
+            }
+
+            if (planBadge) {
+                var plan = user.subscription ? user.subscription.plan : 'free';
+                planBadge.className = 'badge-' + plan;
+                planBadge.textContent = plan.charAt(0).toUpperCase() + plan.slice(1);
+            }
+
+            const balanceEl = document.getElementById('walletBalanceDisplay');
+            if (balanceEl) {
+                balanceEl.textContent = (user.walletBalance || 0).toFixed(2);
+            }
+
+            const phoneDisplay = document.getElementById('registeredPhoneDisplay');
+            if (phoneDisplay) {
+                phoneDisplay.textContent = user.phone ? '(' + user.phone + ')' : '⚠️ Update phone';
+            }
+
+            const userIdEl = document.getElementById('userId');
+            if (userIdEl) userIdEl.value = user._id || '';
+
+            const userPhoneEl = document.getElementById('userPhone');
+            if (userPhoneEl) userPhoneEl.value = user.phone || '';
+        } catch (err) {
+            console.warn('Could not load user profile:', err);
+        }
     }
 
-    // ========================================
-    // PAGE SELECTOR MODAL
-    // ========================================
+    // ===== PAGE SELECTOR MODAL =====
     function setupPageModal() {
         var pageNavLink = document.querySelector('.nav a[data-page="page"]');
         if (!pageNavLink) return;
@@ -239,38 +217,40 @@ document.addEventListener('DOMContentLoaded', function() {
         };
     }
 
-    // ========================================
-    // AUTO REFRESH
-    // ========================================
-    function setupAutoRefresh() {
-        var refreshInterval = setInterval(function() {
-            if (!document.hidden) {
-                location.reload();
-            }
-        }, 60000);
+    // ===== EXPOSE REFRESH FUNCTION FOR OTHER COMPONENTS =====
+    window.refreshDashboard = function() {
+        loadDashboard();
+        loadUserProfile();
+    };
 
-        window.addEventListener('beforeunload', function() {
+    // ===== AUTO‑REFRESH (data reload, NOT page reload) =====
+    let refreshInterval = setInterval(function() {
+        if (!document.hidden) {
+            console.log('🔄 Auto‑refresh: reloading dashboard data...');
+            loadDashboard();
+            loadUserProfile();
+        }
+    }, 60000);
+
+    window.addEventListener('beforeunload', function() {
+        clearInterval(refreshInterval);
+    });
+
+    document.addEventListener('visibilitychange', function() {
+        if (document.hidden) {
             clearInterval(refreshInterval);
-        });
+        } else {
+            refreshInterval = setInterval(function() {
+                console.log('🔄 Auto‑refresh: reloading dashboard data...');
+                loadDashboard();
+                loadUserProfile();
+            }, 60000);
+        }
+    });
 
-        document.addEventListener('visibilitychange', function() {
-            if (document.hidden) {
-                clearInterval(refreshInterval);
-            } else {
-                refreshInterval = setInterval(function() {
-                    location.reload();
-                }, 60000);
-            }
-        });
-    }
-
-    // ========================================
-    // INIT
-    // ========================================
+    // ===== INIT =====
     loadDashboard();
     loadUserProfile();
     setupPageModal();
-    setupAutoRefresh();
-
-    console.log('✅ Master dashboard loaded');
+    console.log('✅ Master dashboard loaded (no page reload on auto‑refresh)');
 });
