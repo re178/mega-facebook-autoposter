@@ -6,7 +6,7 @@ let currentTransactionId = null;
 let statusPollInterval = null;
 let selectedPlan = null;
 
-// ===== LOAD USER DATA (update badge, balance, expiry) =====
+// ===== LOAD USER DATA (update badge, balance, expiry, AND window.userPlan) =====
 async function loadUserData() {
     try {
         const res = await fetch('/api/lipa/subscription', { credentials: 'include' });
@@ -15,6 +15,12 @@ async function loadUserData() {
             throw new Error('Failed to load subscription');
         }
         const data = await res.json();
+
+        // ✅ UPDATE GLOBAL PLAN STATE
+        if (data.subscription) {
+            const plan = data.subscription.plan || 'free';
+            window.userPlan = plan;  // <-- THIS FIXES THE BUG
+        }
 
         // Update plan badge
         const badge = document.getElementById('planBadge');
@@ -68,12 +74,15 @@ function handlePaymentSuccess(planName) {
     // Show success toast
     showToast(`🎉 Subscription activated! You are now on ${planName.toUpperCase()} plan.`, 'success');
     
-    // Refresh user data (badge, wallet, expiry)
+    // ✅ Refresh user data AND update window.userPlan
     loadUserData().then(() => {
-        // Also refresh dashboard stats if master.js has a refresh function
+        // Refresh dashboard stats
         if (typeof window.refreshDashboard === 'function') {
             window.refreshDashboard();
         }
+        // ✅ Close the modal if it's still open
+        const modal = document.getElementById('upgradeModal');
+        if (modal) modal.style.display = 'none';
     });
 }
 
@@ -242,7 +251,9 @@ async function showUpgradeModal() {
         return;
     }
 
+    // ✅ USE UPDATED window.userPlan (which we just refreshed)
     const currentPlan = window.userPlan || 'free';
+
     plansContainer.innerHTML = plans.map(p => {
         const price = p.priceKES || 0;
         const isCurrent = p.name === currentPlan;
