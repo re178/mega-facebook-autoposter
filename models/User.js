@@ -197,7 +197,7 @@ const UserSchema = new mongoose.Schema({
   },
 
   /* =====================================================
-     🚀 WALLET & TRANSACTIONS (UPDATED ENUM)
+     🚀 WALLET & TRANSACTIONS (UPDATED)
   ===================================================== */
   walletBalance: {
     type: Number,
@@ -208,7 +208,7 @@ const UserSchema = new mongoose.Schema({
     {
       type: {
         type: String,
-        enum: ['deposit', 'payment', 'refund', 'subscription'], // ✅ ADDED 'subscription'
+        enum: ['deposit', 'payment', 'refund', 'subscription'],
         default: 'deposit'
       },
       amount: {
@@ -222,13 +222,28 @@ const UserSchema = new mongoose.Schema({
       },
       checkoutRequestID: {
         type: String,
-        index: true
+        index: true,
+        sparse: true
       },
+      // ✅ NEW: apiRef – your own reference, stored before payment
+      apiRef: {
+        type: String,
+        index: true,
+        sparse: true
+      },
+      // ✅ NEW: intasendTrackingId – IntaSend's tracking ID
+      intasendTrackingId: {
+        type: String,
+        index: true,
+        sparse: true
+      },
+      // Keep invoiceId (IntaSend's invoice ID)
       invoiceId: {
         type: String,
         index: true,
         sparse: true
       },
+      // Deprecated: trackingId will be replaced by the above, but keep for backward compatibility
       trackingId: {
         type: String,
         index: true,
