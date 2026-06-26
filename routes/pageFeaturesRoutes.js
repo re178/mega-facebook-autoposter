@@ -12,7 +12,7 @@ const Ad = require('../models/Ad');
 
 const { postToFacebook, sendMessengerReply, replyToComment } = require('../services/facebookService');
 
-// ✅ Add requireFeature middleware
+
 const requireFeature = require('../middleware/requireFeature');
 
 // ---------------------------
