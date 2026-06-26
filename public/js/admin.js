@@ -1,9 +1,15 @@
-// admin.js – Full admin control with dynamic plan management
+// admin.js – Full admin control with dynamic plan management, pagination, search, restrictions, overrides, global auto-gen, email broadcast
 
 (function() {
     let refreshInterval = null;
     let charts = { usersChart: null, postsChart: null };
     let editingPlanId = null;
+
+    // Pagination state
+    let currentPage = 0;
+    const pageSize = 20;
+    let searchQuery = '';
+    let totalUsers = 0;
 
     // Use global apiFetch from api.js
     const apiFetch = window.apiFetch || (async function(url, options = {}) {
@@ -47,10 +53,10 @@
     // ========== DASHBOARD STATS (unchanged) ==========
     async function reloadAdmin() {
         await loadDashboardStats();
-        await loadUsers();
+        await loadUsersPaginated(currentPage, searchQuery);
         await loadPages();
         await loadCharts();
-        await loadPlans(); // new
+        await loadPlans();
     }
 
     async function loadDashboardStats() {
@@ -68,14 +74,26 @@
         }
     }
 
-    // ========== USERS (unchanged) ==========
-    async function loadUsers() {
+    // ========== USERS (with pagination and search) ==========
+    async function loadUsersPaginated(page = 0, search = '') {
         try {
-            const users = await apiFetch('/api/admin/users');
+            const skip = page * pageSize;
+            const res = await apiFetch(`/api/admin/users?skip=${skip}&limit=${pageSize}&search=${encodeURIComponent(search)}`);
+            const { users, total } = res;
+            totalUsers = total;
             const tbody = document.getElementById('admin-users-table');
             if (!tbody) return;
             tbody.innerHTML = '';
             users.forEach(user => {
+                const restrictions = user.restrictions || {};
+                let restrictionBadges = '';
+                if (restrictions.postingRestricted) restrictionBadges += '🚫 Posts ';
+                if (restrictions.commentingRestricted) restrictionBadges += '🚫 Comments ';
+                if (restrictions.messagingRestricted) restrictionBadges += '🚫 Messages ';
+                if (restrictions.templatesLocked) restrictionBadges += '🔒 Templates ';
+                if (restrictions.adsLocked) restrictionBadges += '🔒 Ads ';
+                if (restrictions.autoGenerationLocked) restrictionBadges += '🤖 Auto-gen ';
+                if (!restrictionBadges) restrictionBadges = '✅ Allowed';
                 const tr = document.createElement('tr');
                 tr.innerHTML = `
                     <td>${escapeHtml(user.email)}</td>
@@ -84,6 +102,7 @@
                     <td>${escapeHtml(user.subscription?.plan || 'free')}</td>
                     <td>${user.isActive ? '✅ Active' : '❌ Suspended'}</td>
                     <td>${user.aiLocked ? '🔒 Locked' : '🟢 Open'}</td>
+                    <td>${restrictionBadges}</td>
                     <td>
                         <button class="edit-user btn btn-secondary btn-sm" data-id="${user._id}">Edit</button>
                         <button class="reset-password btn btn-secondary btn-sm" data-id="${user._id}">Reset PW</button>
@@ -97,9 +116,37 @@
                 tbody.appendChild(tr);
             });
             bindUserButtons();
+            renderPaginationControls();
         } catch (err) {
             console.error('Failed to load users:', err);
         }
+    }
+
+    function renderPaginationControls() {
+        const totalPages = Math.ceil(totalUsers / pageSize);
+        const container = document.getElementById('pagination-controls');
+        if (!container) return;
+        container.innerHTML = `
+            <button ${currentPage === 0 ? 'disabled' : ''} onclick="loadUsersPaginated(${currentPage - 1}, '${searchQuery}')" class="btn btn-secondary btn-sm">Previous</button>
+            <span>Page ${currentPage + 1} of ${totalPages || 1}</span>
+            <button ${currentPage >= totalPages - 1 ? 'disabled' : ''} onclick="loadUsersPaginated(${currentPage + 1}, '${searchQuery}')" class="btn btn-secondary btn-sm">Next</button>
+            <span style="margin-left:12px;">Total: ${totalUsers} users</span>
+        `;
+    }
+
+    // Search handler
+    window.searchUsers = function() {
+        const input = document.getElementById('user-search');
+        if (input) {
+            searchQuery = input.value;
+            currentPage = 0;
+            loadUsersPaginated(currentPage, searchQuery);
+        }
+    };
+
+    // Keep old loadUsers for backward compatibility (but override it)
+    async function loadUsers() {
+        return loadUsersPaginated(currentPage, searchQuery);
     }
 
     function bindUserButtons() {
@@ -150,50 +197,146 @@
             btn.onclick = async () => {
                 const userId = btn.dataset.id;
                 const user = await apiFetch(`/api/admin/users/${userId}`);
-                const oldModal = document.getElementById('editUserModal');
-                if (oldModal) oldModal.remove();
-                const modal = document.createElement('div');
-                modal.id = 'editUserModal';
-                modal.style.cssText = 'position:fixed;top:20%;left:30%;background:white;padding:20px;border:1px solid #ccc;z-index:9999;box-shadow:0 0 10px rgba(0,0,0,0.5);border-radius:8px;';
-                modal.innerHTML = `
-                    <h3>Edit User</h3>
-                    <label>Email: <input id="edit-email" type="email" style="width:100%; padding:6px; margin-bottom:8px; border:1px solid #e2e8f0; border-radius:4px;"></label>
-                    <label>Role: <select id="edit-role" style="width:100%; padding:6px; margin-bottom:8px; border:1px solid #e2e8f0; border-radius:4px;"><option>user</option><option>admin</option></select></label>
-                    <label>Phone: <input id="edit-phone" style="width:100%; padding:6px; margin-bottom:8px; border:1px solid #e2e8f0; border-radius:4px;"></label>
-                    <label>Subscription: <select id="edit-subscription" style="width:100%; padding:6px; margin-bottom:8px; border:1px solid #e2e8f0; border-radius:4px;"><option>free</option><option>pro</option><option>enterprise</option></select></label>
-                    <label>Status: <select id="edit-active" style="width:100%; padding:6px; margin-bottom:8px; border:1px solid #e2e8f0; border-radius:4px;"><option value="true">Active</option><option value="false">Suspended</option></select></label>
-                    <label>AI Lock: <select id="edit-aiLock" style="width:100%; padding:6px; margin-bottom:8px; border:1px solid #e2e8f0; border-radius:4px;"><option value="false">Unlocked</option><option value="true">Locked</option></select></label>
-                    <button id="save-user-edit" class="btn btn-primary" style="margin-right:8px;">Save</button>
-                    <button id="close-user-modal" class="btn btn-secondary">Cancel</button>
-                `;
-                document.body.appendChild(modal);
-                document.getElementById('edit-email').value = user.email;
-                document.getElementById('edit-role').value = user.role;
-                document.getElementById('edit-phone').value = user.phone || '';
-                document.getElementById('edit-subscription').value = user.subscription?.plan || 'free';
-                document.getElementById('edit-active').value = user.isActive ? 'true' : 'false';
-                document.getElementById('edit-aiLock').value = user.aiLocked ? 'true' : 'false';
-                modal.style.display = 'block';
-                document.getElementById('save-user-edit').onclick = async () => {
-                    const payload = {
-                        email: document.getElementById('edit-email').value,
-                        role: document.getElementById('edit-role').value,
-                        phone: document.getElementById('edit-phone').value,
-                        subscription: { plan: document.getElementById('edit-subscription').value },
-                        isActive: document.getElementById('edit-active').value === 'true',
-                        aiLocked: document.getElementById('edit-aiLock').value === 'true'
-                    };
-                    await apiFetch(`/api/admin/users/${userId}`, {
-                        method: 'PUT',
-                        body: JSON.stringify(payload)
-                    });
-                    modal.remove();
-                    await reloadAdmin();
-                    showToast('User updated', 'success');
-                };
-                document.getElementById('close-user-modal').onclick = () => modal.remove();
+                showEditUserModal(user);
             };
         });
+    }
+
+    // ========== EDIT USER MODAL (with restrictions and overrides) ==========
+    function showEditUserModal(user) {
+        const oldModal = document.getElementById('editUserModal');
+        if (oldModal) oldModal.remove();
+        const modal = document.createElement('div');
+        modal.id = 'editUserModal';
+        modal.style.cssText = 'position:fixed;top:10%;left:20%;width:60%;max-height:80vh;overflow-y:auto;background:white;padding:24px;border-radius:12px;z-index:9999;box-shadow:0 0 30px rgba(0,0,0,0.3);';
+
+        const restrictions = user.restrictions || {};
+        const overrides = user.featureOverrides || {};
+
+        modal.innerHTML = `
+            <h3>Edit User: ${escapeHtml(user.email)}</h3>
+            <form id="editUserForm">
+                <label>Email: <input type="email" id="edit-email" value="${escapeHtml(user.email)}" style="width:100%; padding:6px; margin-bottom:8px; border:1px solid #e2e8f0; border-radius:4px;"></label>
+                <label>Role: <select id="edit-role" style="width:100%; padding:6px; margin-bottom:8px; border:1px solid #e2e8f0; border-radius:4px;">
+                    <option value="user" ${user.role === 'user' ? 'selected' : ''}>User</option>
+                    <option value="moderator" ${user.role === 'moderator' ? 'selected' : ''}>Moderator</option>
+                    <option value="admin" ${user.role === 'admin' ? 'selected' : ''}>Admin</option>
+                </select></label>
+                <label>Phone: <input type="text" id="edit-phone" value="${escapeHtml(user.phone || '')}" style="width:100%; padding:6px; margin-bottom:8px; border:1px solid #e2e8f0; border-radius:4px;"></label>
+                <label>Subscription: <select id="edit-subscription" style="width:100%; padding:6px; margin-bottom:8px; border:1px solid #e2e8f0; border-radius:4px;">
+                    <option value="free" ${user.subscription?.plan === 'free' ? 'selected' : ''}>Free</option>
+                    <option value="pro" ${user.subscription?.plan === 'pro' ? 'selected' : ''}>Pro</option>
+                    <option value="premium" ${user.subscription?.plan === 'premium' ? 'selected' : ''}>Premium</option>
+                    <option value="enterprise" ${user.subscription?.plan === 'enterprise' ? 'selected' : ''}>Enterprise</option>
+                </select></label>
+                <label>Status: <select id="edit-active" style="width:100%; padding:6px; margin-bottom:8px; border:1px solid #e2e8f0; border-radius:4px;">
+                    <option value="true" ${user.isActive ? 'selected' : ''}>Active</option>
+                    <option value="false" ${!user.isActive ? 'selected' : ''}>Suspended</option>
+                </select></label>
+                <label>AI Lock: <select id="edit-aiLock" style="width:100%; padding:6px; margin-bottom:8px; border:1px solid #e2e8f0; border-radius:4px;">
+                    <option value="false" ${!user.aiLocked ? 'selected' : ''}>Unlocked</option>
+                    <option value="true" ${user.aiLocked ? 'selected' : ''}>Locked</option>
+                </select></label>
+
+                <hr>
+                <h4>Restrictions</h4>
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+                    <label><input type="checkbox" id="restrict-posting" ${restrictions.postingRestricted ? 'checked' : ''}> Posting</label>
+                    <label><input type="checkbox" id="restrict-commenting" ${restrictions.commentingRestricted ? 'checked' : ''}> Commenting</label>
+                    <label><input type="checkbox" id="restrict-messaging" ${restrictions.messagingRestricted ? 'checked' : ''}> Messaging</label>
+                    <label><input type="checkbox" id="restrict-templates" ${restrictions.templatesLocked ? 'checked' : ''}> Templates</label>
+                    <label><input type="checkbox" id="restrict-ads" ${restrictions.adsLocked ? 'checked' : ''}> Ads</label>
+                    <label><input type="checkbox" id="restrict-autoGen" ${restrictions.autoGenerationLocked ? 'checked' : ''}> Auto-Generation</label>
+                </div>
+
+                <hr>
+                <h4>Feature Overrides</h4>
+                <p style="font-size:12px; color:#64748b;">Override plan limits for specific features (leave blank to use plan defaults).</p>
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+                    <label>AI Topics: <input type="number" id="override-aiTopics" value="${overrides.aiTopics !== undefined ? overrides.aiTopics : ''}" step="1" style="width:100%; padding:4px;"></label>
+                    <label>AI Posts/Month: <input type="number" id="override-aiPostsPerMonth" value="${overrides.aiPostsPerMonth !== undefined ? overrides.aiPostsPerMonth : ''}" step="1" style="width:100%; padding:4px;"></label>
+                    <label>Manual Posts/Month: <input type="number" id="override-manualPostsPerMonth" value="${overrides.manualPostsPerMonth !== undefined ? overrides.manualPostsPerMonth : ''}" step="1" style="width:100%; padding:4px;"></label>
+                    <label>Pages Allowed: <input type="number" id="override-pagesAllowed" value="${overrides.pagesAllowed !== undefined ? overrides.pagesAllowed : ''}" step="1" style="width:100%; padding:4px;"></label>
+                    <label>Templates: <input type="number" id="override-templates" value="${overrides.templates !== undefined ? overrides.templates : ''}" step="1" style="width:100%; padding:4px;"></label>
+                    <label>Team Members: <input type="number" id="override-teamMembers" value="${overrides.teamMembers !== undefined ? overrides.teamMembers : ''}" step="1" style="width:100%; padding:4px;"></label>
+                    <label style="grid-column: span 2;">
+                        <input type="checkbox" id="override-ads" ${overrides.ads === true ? 'checked' : ''}> Ads (boolean)
+                    </label>
+                    <label style="grid-column: span 2;">
+                        <input type="checkbox" id="override-comments" ${overrides.comments === true ? 'checked' : ''}> Comments (boolean)
+                    </label>
+                </div>
+
+                <div style="margin-top:16px; text-align:right;">
+                    <button type="button" class="btn btn-primary" id="save-user-edit">Save</button>
+                    <button type="button" class="btn btn-secondary" onclick="this.closest('#editUserModal').remove()">Cancel</button>
+                </div>
+            </form>
+        `;
+        document.body.appendChild(modal);
+
+        document.getElementById('save-user-edit').onclick = async () => {
+            // Build restrictions payload
+            const restrictionsPayload = {
+                postingRestricted: document.getElementById('restrict-posting').checked,
+                commentingRestricted: document.getElementById('restrict-commenting').checked,
+                messagingRestricted: document.getElementById('restrict-messaging').checked,
+                templatesLocked: document.getElementById('restrict-templates').checked,
+                adsLocked: document.getElementById('restrict-ads').checked,
+                autoGenerationLocked: document.getElementById('restrict-autoGen').checked
+            };
+
+            // Build overrides payload
+            const overridesPayload = {};
+            const overrideFields = ['aiTopics', 'aiPostsPerMonth', 'manualPostsPerMonth', 'pagesAllowed', 'templates', 'teamMembers', 'ads', 'comments'];
+            for (const field of overrideFields) {
+                const el = document.getElementById(`override-${field}`);
+                if (el) {
+                    const val = el.type === 'checkbox' ? el.checked : (el.value ? parseFloat(el.value) : undefined);
+                    if (val !== undefined && val !== '') {
+                        overridesPayload[field] = val;
+                    }
+                }
+            }
+
+            // Save main user data
+            const userData = {
+                email: document.getElementById('edit-email').value,
+                role: document.getElementById('edit-role').value,
+                phone: document.getElementById('edit-phone').value,
+                subscription: { plan: document.getElementById('edit-subscription').value },
+                isActive: document.getElementById('edit-active').value === 'true',
+                aiLocked: document.getElementById('edit-aiLock').value === 'true'
+            };
+
+            try {
+                // Update user main info
+                await apiFetch(`/api/admin/users/${user._id}`, {
+                    method: 'PUT',
+                    body: JSON.stringify(userData)
+                });
+
+                // Update restrictions
+                await apiFetch(`/api/admin/users/${user._id}/restrictions`, {
+                    method: 'PATCH',
+                    body: JSON.stringify(restrictionsPayload)
+                });
+
+                // Update overrides one by one (or send all at once? We'll use the PATCH /override endpoint for each)
+                for (const [feature, value] of Object.entries(overridesPayload)) {
+                    await apiFetch(`/api/admin/users/${user._id}/override`, {
+                        method: 'PATCH',
+                        body: JSON.stringify({ feature, value })
+                    });
+                }
+
+                modal.remove();
+                await reloadAdmin();
+                showToast('User updated successfully', 'success');
+            } catch (err) {
+                showToast('Failed to update user: ' + err.message, 'error');
+            }
+        };
     }
 
     // ========== PAGES (unchanged) ==========
@@ -594,10 +737,7 @@
         showToast('All logs cleared', 'success');
     }
 
-    // ========== PRICING MANAGEMENT (REMOVED) – Replaced by Plan Management ==========
-
-    // ========== 🔥 NEW: PLAN MANAGEMENT ==========
-
+    // ========== PLAN MANAGEMENT (unchanged) ==========
     async function loadPlans() {
         try {
             const plans = await apiFetch('/api/admin/plans');
@@ -756,10 +896,87 @@
                 modal.remove();
                 loadPlans();
                 showToast('Plan saved successfully', 'success');
-                // Also reload plans in session
                 if (window.loadPlans) window.loadPlans();
             } catch (err) {
                 showToast('Failed to save plan: ' + err.message, 'error');
+            }
+        };
+    }
+
+    // ========== NEW: GLOBAL AUTO-GENERATION TOGGLE ==========
+    async function toggleGlobalAutoGen() {
+        try {
+            const current = document.getElementById('global-auto-gen-toggle')?.checked;
+            if (current === undefined) return;
+            const enabled = current;
+            await apiFetch('/api/admin/auto-generation/global', {
+                method: 'PUT',
+                body: JSON.stringify({ enabled })
+            });
+            showToast(`Global auto-generation ${enabled ? 'enabled' : 'disabled'}`, 'success');
+        } catch (err) {
+            showToast('Failed to toggle: ' + err.message, 'error');
+        }
+    }
+
+    // ========== NEW: ADMIN EMAIL BROADCAST ==========
+    function showEmailModal() {
+        const oldModal = document.getElementById('emailModal');
+        if (oldModal) oldModal.remove();
+        const modal = document.createElement('div');
+        modal.id = 'emailModal';
+        modal.style.cssText = 'position:fixed;top:10%;left:20%;width:60%;max-height:80vh;overflow-y:auto;background:white;padding:24px;border-radius:12px;z-index:9999;box-shadow:0 0 30px rgba(0,0,0,0.3);';
+        modal.innerHTML = `
+            <h3>📧 Send Email to Users</h3>
+            <form id="emailForm">
+                <label>Recipients: 
+                    <select id="email-recipients" style="width:100%; padding:6px; margin-bottom:8px; border:1px solid #e2e8f0; border-radius:4px;">
+                        <option value="all">All Users</option>
+                        <option value="selected">Selected Users (comma-separated emails)</option>
+                    </select>
+                </label>
+                <div id="email-users-list" style="display:none;">
+                    <input type="text" id="email-users-input" placeholder="user1@example.com, user2@example.com" style="width:100%; padding:6px; margin-bottom:8px; border:1px solid #e2e8f0; border-radius:4px;">
+                </div>
+                <label>Subject: <input type="text" id="email-subject" style="width:100%; padding:6px; margin-bottom:8px; border:1px solid #e2e8f0; border-radius:4px;" required></label>
+                <label>Message: <textarea id="email-message" rows="5" style="width:100%; padding:6px; margin-bottom:8px; border:1px solid #e2e8f0; border-radius:4px;" required></textarea></label>
+                <div style="text-align:right;">
+                    <button type="button" class="btn btn-primary" id="send-email-btn">Send</button>
+                    <button type="button" class="btn btn-secondary" onclick="this.closest('#emailModal').remove()">Cancel</button>
+                </div>
+            </form>
+        `;
+        document.body.appendChild(modal);
+
+        // Toggle selected users input
+        document.getElementById('email-recipients').onchange = function() {
+            document.getElementById('email-users-list').style.display = this.value === 'selected' ? 'block' : 'none';
+        };
+
+        document.getElementById('send-email-btn').onclick = async () => {
+            const recipients = document.getElementById('email-recipients').value;
+            const subject = document.getElementById('email-subject').value;
+            const message = document.getElementById('email-message').value;
+            if (!subject || !message) return showToast('Subject and message required', 'warning');
+            let userIds = 'all';
+            if (recipients === 'selected') {
+                const emails = document.getElementById('email-users-input').value.split(',').map(s => s.trim()).filter(s => s);
+                if (!emails.length) return showToast('Enter at least one email', 'warning');
+                // Find user IDs by email
+                const users = await apiFetch('/api/admin/users');
+                const found = users.filter(u => emails.includes(u.email));
+                if (!found.length) return showToast('No matching users found', 'error');
+                userIds = found.map(u => u._id);
+            }
+            try {
+                await apiFetch('/api/admin/email/send', {
+                    method: 'POST',
+                    body: JSON.stringify({ userIds, subject, htmlContent: `<p>${message.replace(/\n/g, '<br>')}</p>` })
+                });
+                showToast('Email sent successfully', 'success');
+                modal.remove();
+            } catch (err) {
+                showToast('Failed to send email: ' + err.message, 'error');
             }
         };
     }
@@ -780,32 +997,49 @@
                 return;
             }
             await loadDashboardStats();
-            await loadUsers();
+            await loadUsersPaginated(0, '');
             await loadPages();
             await loadSystemLogs();
             await loadBroadcasts();
             await populateUserDatalist('private-message-user-email', 'user-datalist-pm');
             await loadPrivateMessages('');
             await loadCharts();
-            await loadPlans(); // load plans
+            await loadPlans();
             bindCreateUser();
             bindBroadcastMessage();
             bindMaintenanceButtons();
             const sendMsgBtn = document.getElementById('send-private-msg-btn');
             if (sendMsgBtn) sendMsgBtn.onclick = sendPrivateMessageFromUI;
 
-            // Add plan management button / card – we'll assume the card is already in HTML
-            // But we need to ensure the HTML has the card. We'll attach event to "add-plan-btn" if exists.
             const addPlanBtn = document.getElementById('add-plan-btn');
-            if (addPlanBtn) {
-                addPlanBtn.onclick = () => showPlanModal(null);
+            if (addPlanBtn) addPlanBtn.onclick = () => showPlanModal(null);
+
+            // Add global auto-gen toggle
+            const toggleBtn = document.getElementById('global-auto-gen-toggle');
+            if (toggleBtn) {
+                // Load current setting and set checked state (optional)
+                toggleBtn.onchange = toggleGlobalAutoGen;
+            }
+
+            // Add email broadcast button
+            const emailBtn = document.getElementById('admin-email-btn');
+            if (emailBtn) emailBtn.onclick = showEmailModal;
+
+            // Add search listener
+            const searchInput = document.getElementById('user-search');
+            if (searchInput) {
+                searchInput.addEventListener('input', function() {
+                    searchQuery = this.value;
+                    currentPage = 0;
+                    loadUsersPaginated(currentPage, searchQuery);
+                });
             }
 
             // Auto-refresh
             function refresh() {
                 if (!document.hidden) {
                     loadDashboardStats();
-                    loadUsers();
+                    loadUsersPaginated(currentPage, searchQuery);
                     loadPages();
                     loadPlans();
                 }
@@ -817,6 +1051,9 @@
             });
             window.clearAllLogs = clearAllLogs;
             window.showAddPageModal = showAddPageModal;
+            // Expose pagination functions globally
+            window.loadUsersPaginated = loadUsersPaginated;
+            window.searchUsers = searchUsers;
         } catch (err) {
             console.error('Admin init failed:', err);
         }
