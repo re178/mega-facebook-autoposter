@@ -4,42 +4,83 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const path = require('path');
-const fs = require('fs');
 const session = require('express-session');
 const bcrypt = require('bcrypt');
 const rateLimit = require('express-rate-limit');
 const helmet = require('helmet');
 const MongoStore = require('connect-mongo');
-const os = require('os');
 
 // ==================== MODELS ====================
 const User = require('./models/User');
 const Page = require('./models/Page');
-const Plan = require('./models/Plan'); // 🆕 Added
+// Note: Plan is not used directly in server.js – imported in adminRoutes and aiSchedulerRoutes.
+// const Plan = require('./models/Plan');
 
 // ==================== SERVICES ====================
 const { startScheduler } = require('./services/scheduler');
 const { startAiPostScheduler } = require('./services/aiPostScheduler');
 const { startAutoMaintenance } = require('./services/autoMaintenance');
 
-// ==================== ROUTES (YOUR EXISTING NAMES) ====================
+// ==================== ROUTES ====================
 const dashboardRoutes = require('./routes/dashboardRoutes');
 const pageFeaturesRoutes = require('./routes/pageFeaturesRoutes');
 const webhookRoutes = require('./routes/webhookRoutes');
 const aiRoutes = require('./routes/aiSchedulerRoutes');
-const adminRoutes = require('./routes/adminRoutes'); // ✅ Should contain plan CRUD
+const adminRoutes = require('./routes/adminRoutes');
 const userMessagesRoutes = require('./routes/userMessages');
 const authRoutes = require('./routes/authRoutes');
 const facebookAuthRoutes = require('./routes/facebookAuthRoutes');
-const lipaRoutes = require('./routes/lipaRoutes'); // ✅ Updated to use Plan model
-const pricingRoutes = require('./routes/pricing'); // legacy, kept for compatibility
+const lipaRoutes = require('./routes/lipaRoutes');
+const pricingRoutes = require('./routes/pricing');
+const planRoutes = require('./routes/plans');
+const emailRoutes = require('./routes/email');
+
+// ==================== MIDDLEWARE ====================
+const requireLogin = require('./middleware/requireLogin');
+const requireAdmin = require('./middleware/requireAdmin');
 
 // ==================== APP INIT ====================
 const app = express();
 app.set('trust proxy', 1);
+app.disable('x-powered-by'); // Explicitly hide Express
+
+// ⚠️ IMPORTANT: Do NOT add app.use(express.static('public')) here.
+// It would expose protected HTML files (index.html, page.html, etc.)
+// and bypass the requireLogin middleware.
+// Protected pages are served via explicit routes with requireLogin below.
 
 const PORT = process.env.PORT || 10000;
 const isProduction = process.env.NODE_ENV === 'production';
+const serverStartTime = Date.now();
+
+// ==================== STARTUP VALIDATION ====================
+const requiredEnvVars = [
+    'SESSION_SECRET',
+    'MONGO_URI',
+    'CLIENT_ORIGIN',
+    'APP_URL',
+    'INTASEND_PUBLISHABLE_KEY',
+    'INTASEND_SECRET_KEY'
+];
+const missingVars = requiredEnvVars.filter(key => !process.env[key]);
+if (missingVars.length > 0) {
+    console.error('❌ Missing required environment variables:');
+    missingVars.forEach(key => console.error(`   - ${key}`));
+    process.exit(1);
+}
+
+// Optional validation (uncomment if you have these)
+// const optionalVars = ['EMAIL_USER', 'EMAIL_PASS', 'OPENAI_API_KEY', 'FB_APP_ID', 'FB_APP_SECRET'];
+// optionalVars.forEach(key => {
+//     if (!process.env[key]) console.warn(`⚠️ Optional env var ${key} is not set.`);
+// });
+
+// CORS origins – allow multiple origins
+const allowedOrigins = (
+    process.env.ALLOWED_ORIGINS ||
+    process.env.CLIENT_ORIGIN ||
+    'http://localhost:10000'
+).split(',').map(o => o.trim());
 
 // ==================== SECURITY HEADERS ====================
 app.use(
@@ -82,10 +123,19 @@ app.use(
     })
 );
 
-// ==================== CORS ====================
+// ==================== CORS (allow-list with clean error) ====================
 app.use(
     cors({
-        origin: process.env.CLIENT_ORIGIN || 'http://localhost:10000',
+        origin: function (origin, callback) {
+            if (!origin) return callback(null, true);
+            if (allowedOrigins.includes(origin) || allowedOrigins.includes('*')) {
+                return callback(null, true);
+            }
+            // Return a clean 403 error (not passed to global error handler)
+            const err = new Error('Not allowed by CORS');
+            err.status = 403;
+            return callback(err, false);
+        },
         credentials: true
     })
 );
@@ -103,7 +153,9 @@ app.use(
         saveUninitialized: false,
         rolling: true,
         store: MongoStore.create({
-            mongoUrl: process.env.MONGO_URI
+            mongoUrl: process.env.MONGO_URI,
+            ttl: 2 * 60 * 60, // 2 hours (matches cookie maxAge)
+            autoRemove: 'native'
         }),
         cookie: {
             httpOnly: true,
@@ -133,67 +185,86 @@ app.post('/api/auth/signup', authLimiter);
 app.post('/api/auth/forgot-password', authLimiter);
 app.post('/api/auth/reset-password', authLimiter);
 
-// ==================== AUTH MIDDLEWARE ====================
-function requireLogin(req, res, next) {
-    if (req.session?.userId) return next();
+// ==================== WEBHOOKS (BEFORE CSRF) ====================
+// Public webhooks must be registered BEFORE CSRF protection
+app.use('/', webhookRoutes);
+app.use('/api/lipa', lipaRoutes); // Lipa webhook and endpoints
 
-    if (req.path.startsWith('/api')) {
-        return res.status(401).json({ error: 'Unauthorized' });
+// ==================== CSRF PROTECTION (Origin/Referer Check) ====================
+const csrfProtection = (req, res, next) => {
+    if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return next();
+    if (req.path === '/login') return next();
+    if (req.path.startsWith('/api/lipa/callback')) return next();
+    if (req.path.startsWith('/webhook')) return next();
+    if (req.path.startsWith('/api/facebook/callback')) return next();
+
+    const origin = req.get('Origin');
+    const referer = req.get('Referer');
+    const host = req.get('Host');
+
+    try {
+        if (origin) {
+            const originHost = new URL(origin).host;
+            const appHost = process.env.APP_URL?.replace(/^https?:\/\//, '');
+            if (originHost === host || originHost === appHost) return next();
+        }
+        if (referer) {
+            const refererHost = new URL(referer).host;
+            const appHost = process.env.APP_URL?.replace(/^https?:\/\//, '');
+            if (refererHost === host || refererHost === appHost) return next();
+        }
+    } catch {
+        return res.status(403).json({ error: 'Invalid request origin' });
     }
-    return res.redirect('/login');
-}
+
+    if (!origin && !referer) {
+        if (req.session?.userId) return next();
+        return res.status(403).json({ error: 'Missing origin/referer' });
+    }
+
+    return res.status(403).json({ error: 'Invalid request origin' });
+};
+
+app.use(csrfProtection);
 
 // ==================== ROUTES ====================
 
-// Public webhook (no auth)
-app.use('/', webhookRoutes);
-
-// 🆕 Public plans (no auth)
-const planRoutes = require('./routes/plans'); // we'll create this file (public GET)
 app.use('/api/plans', planRoutes);
-
-// Legacy pricing (keep for backward compatibility)
 app.use('/api/pricing', pricingRoutes);
-
-// Public auth routes
 app.use('/api/auth', authRoutes);
-
-// Facebook OAuth
 app.use('/api/facebook', facebookAuthRoutes);
+app.use('/api/email', emailRoutes);
 
-// M-Pesa / IntaSend routes
-app.use('/api/lipa', lipaRoutes);
-
-// Protected API routes (require login)
 app.use('/api/dashboard', requireLogin, dashboardRoutes);
 app.use('/api/dashboard', requireLogin, pageFeaturesRoutes);
 app.use('/api/ai', requireLogin, aiRoutes);
-app.use('/api/admin', requireLogin, adminRoutes); // ✅ Admin routes with plan CRUD
 app.use('/api/user/messages', requireLogin, userMessagesRoutes);
+app.use('/api/admin', requireLogin, requireAdmin, adminRoutes);
 
-// ==================== STATIC FILES ====================
-app.use(express.static(path.join(__dirname, 'public')));
+// ==================== STATIC FILES (SECURE) ====================
+// Serve only specific folders – NOT the whole public directory
+app.use('/css', express.static(path.join(__dirname, 'public/css')));
+app.use('/js', express.static(path.join(__dirname, 'public/js')));
+app.use('/images', express.static(path.join(__dirname, 'public/images')));
+app.use('/fonts', express.static(path.join(__dirname, 'public/fonts')));
+// ⚠️ DO NOT expose /uploads unless all files are intentionally public.
+// app.use('/uploads', express.static(path.join(__dirname, 'public/uploads')));
 
-// ==================== FRONTEND PAGES ====================
+// Public static files
+app.get('/favicon.ico', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public/favicon.ico'));
+});
+app.get('/robots.txt', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public/robots.txt'));
+});
+app.get('/manifest.json', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public/manifest.json'));
+});
+
+// Auth pages (public)
 app.get('/login', (req, res) =>
     res.sendFile(path.join(__dirname, 'public/login.html'))
 );
-
-// Protected pages
-app.get('/connect-facebook', requireLogin, (req, res) =>
-    res.sendFile(path.join(__dirname, 'public/connect-facebook.html'))
-);
-app.get('/index.html', requireLogin, (req, res) =>
-    res.sendFile(path.join(__dirname, 'public/index.html'))
-);
-app.get('/pages', requireLogin, (req, res) =>
-    res.sendFile(path.join(__dirname, 'public/page.html'))
-);
-app.get('/schedule', requireLogin, (req, res) =>
-    res.sendFile(path.join(__dirname, 'public/schedule.html'))
-);
-
-// Auth pages
 app.get('/signup', (req, res) =>
     res.sendFile(path.join(__dirname, 'public/signup.html'))
 );
@@ -207,7 +278,7 @@ app.get('/verify-email', (req, res) =>
     res.sendFile(path.join(__dirname, 'public/verify-email.html'))
 );
 
-// Legal pages
+// Legal pages (public)
 app.get('/privacy', (req, res) =>
     res.sendFile(path.join(__dirname, 'public/privacy.html'))
 );
@@ -223,6 +294,29 @@ app.get('/data-deletion', (req, res) =>
 app.get('/community-guidelines', (req, res) =>
     res.sendFile(path.join(__dirname, 'public/community-guidelines.html'))
 );
+
+// Protected pages – served via explicit routes with requireLogin
+app.get('/index.html', requireLogin, (req, res) =>
+    res.sendFile(path.join(__dirname, 'public/index.html'))
+);
+app.get('/pages', requireLogin, (req, res) =>
+    res.sendFile(path.join(__dirname, 'public/page.html'))
+);
+app.get('/schedule', requireLogin, (req, res) =>
+    res.sendFile(path.join(__dirname, 'public/schedule.html'))
+);
+app.get('/connect-facebook', requireLogin, (req, res) =>
+    res.sendFile(path.join(__dirname, 'public/connect-facebook.html'))
+);
+
+// Redirect root
+app.get('/', (req, res) => {
+    if (req.session?.userId) {
+        res.redirect('/index.html');
+    } else {
+        res.redirect('/login');
+    }
+});
 
 // ==================== LOGIN ====================
 app.post('/login', async (req, res) => {
@@ -249,15 +343,25 @@ app.post('/login', async (req, res) => {
             return res.status(401).json({ error: 'Invalid credentials' });
         }
 
-        req.session.userId = user._id;
-        req.session.userRole = user.role;
+        req.session.regenerate((err) => {
+            if (err) {
+                console.error('Session regeneration error:', err);
+                return res.status(500).json({ error: 'Session error' });
+            }
 
-        req.session.save(err => {
-            if (err) return res.status(500).json({ error: 'Session error' });
+            req.session.userId = user._id;
+            req.session.userRole = user.role;
 
-            res.json({
-                success: true,
-                redirect: '/index.html'
+            req.session.save((err) => {
+                if (err) {
+                    console.error('Session save error:', err);
+                    return res.status(500).json({ error: 'Session error' });
+                }
+
+                res.json({
+                    success: true,
+                    redirect: '/index.html'
+                });
             });
         });
 
@@ -270,6 +374,7 @@ app.post('/login', async (req, res) => {
 // ==================== LOGOUT ====================
 app.get('/logout', (req, res) => {
     req.session.destroy(() => {
+        res.clearCookie('voxtra.sid');
         res.redirect('/login');
     });
 });
@@ -288,30 +393,41 @@ app.get('/api/session', (req, res) => {
 });
 
 // ==================== HEALTH CHECK ====================
+const serverStartTime = Date.now();
 app.get('/health', (req, res) => {
     res.status(200).json({
-        success: true,
         status: 'healthy',
-        service: 'Viraloop Socials',
-        process: {
-            pid: process.pid,
-            uptime: Math.floor(process.uptime()),
-            node: process.version
-        },
-        system: {
-            hostname: os.hostname(),
-            platform: os.platform(),
-            arch: os.arch(),
-            cpus: os.cpus().length
-        },
-        memory: {
-            rss: process.memoryUsage().rss,
-            heapUsed: process.memoryUsage().heapUsed,
-            heapTotal: process.memoryUsage().heapTotal,
-            external: process.memoryUsage().external
-        },
+        uptime: Math.floor((Date.now() - serverStartTime) / 1000),
         timestamp: new Date().toISOString()
     });
+});
+
+// ==================== 404 HANDLER ====================
+app.use((req, res) => {
+    res.status(404).json({
+        error: 'Not found',
+        path: req.path
+    });
+});
+
+// ==================== GLOBAL ERROR HANDLER ====================
+app.use((err, req, res, next) => {
+    console.error('Unhandled error:', err);
+    const message = isProduction ? 'Internal server error' : err.message;
+    res.status(err.status || 500).json({
+        error: message
+    });
+});
+
+// ==================== GLOBAL PROCESS HANDLERS ====================
+process.on('uncaughtException', (err) => {
+    console.error('🔥 Uncaught Exception:', err);
+    process.exit(1);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('🔥 Unhandled Rejection:', reason);
+    process.exit(1);
 });
 
 // ==================== ENV PAGE SYNC ====================
@@ -350,16 +466,13 @@ mongoose
     .then(async () => {
         console.log('✅ MongoDB connected');
 
-        // 🆕 Seed default plans if none exist
         await require('./routes/adminRoutes').ensureDefaultPlans();
 
-        // Find admin user for page sync (if any)
         const admin = await User.findOne({ role: 'admin' });
         if (admin) {
             await syncPagesFromEnv(admin._id);
         }
 
-        // Start Regular Scheduler
         try {
             startScheduler();
             console.log('✅ Regular scheduler started');
@@ -367,7 +480,6 @@ mongoose
             console.error('❌ Regular scheduler error:', err.message);
         }
 
-        // Start AI Post Scheduler
         try {
             startAiPostScheduler();
             console.log('✅ AI Post scheduler started');
@@ -375,7 +487,6 @@ mongoose
             console.error('❌ AI Post scheduler error:', err.message);
         }
 
-        // Start Auto Maintenance
         try {
             startAutoMaintenance();
             console.log('✅ Auto Maintenance started');
@@ -383,25 +494,38 @@ mongoose
             console.error('❌ Auto Maintenance error:', err.message);
         }
 
-        // Auto Generation service
-        require('./services/autoGeneration');
+        // ✅ Protected service loads – each wrapped in try/catch so one failure doesn't crash the server
+        try {
+            require('./services/autoGeneration');
+            console.log('✅ Auto Generation service loaded');
+        } catch (err) {
+            console.error('❌ Auto Generation service error:', err.message);
+        }
 
-        // Start server
+        try {
+            require('./services/reconciliation');
+            console.log('✅ Reconciliation service loaded');
+        } catch (err) {
+            console.error('❌ Reconciliation service error:', err.message);
+        }
+
+        try {
+            require('./services/monthlyReset');
+            console.log('✅ Monthly Reset service loaded');
+        } catch (err) {
+            console.error('❌ Monthly Reset service error:', err.message);
+        }
+
         app.listen(PORT, () => {
             console.log(`🚀 Server running on port ${PORT}`);
             console.log(`📡 Environment: ${isProduction ? 'PRODUCTION' : 'DEVELOPMENT'}`);
             console.log(`🧹 Auto Maintenance: Running every 30 minutes`);
             console.log(`💰 Pricing endpoint: /api/pricing`);
             console.log(`📋 Plans endpoint: /api/plans`);
+            console.log(`📧 Email routes mounted at /api/email`);
+            console.log(`🔒 Admin routes protected with requireAdmin`);
+            console.log(`✅ CORS allowed origins: ${allowedOrigins.join(', ')}`);
         });
-
-        // 🆕 Start Reconciliation Service (safety net for missed webhooks)
-        try {
-            require('./services/reconciliation');
-            console.log('✅ Reconciliation service started (cron job)');
-        } catch (err) {
-            console.error('❌ Reconciliation service error:', err.message);
-        }
 
     })
     .catch(err => {
