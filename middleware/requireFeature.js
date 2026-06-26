@@ -111,7 +111,7 @@ function getUsage(user, featureName) {
         aiPostsPerMonth: user.usage?.aiPostsThisMonth || 0,
         imagesPerMonth: user.usage?.imagesThisMonth || 0,
         videosPerMonth: user.usage?.videosThisMonth || 0,
-        pagesAllowed: () => user.pages?.length || 0, // if you track pages array
+        pagesAllowed: () => user.pages?.length || 0, 
         templates: () => user.templates?.length || 0,
         teamMembers: () => user.teamMembers?.length || 0,
     };
