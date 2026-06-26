@@ -12,6 +12,7 @@ module.exports = function requirePlan(minPlan) {
             const user = await User.findById(userId);
             if (!user) return res.status(404).json({ error: 'User not found' });
 
+            // Admins bypass all checks
             if (user.role === 'admin') return next();
 
             const userPlan = user.subscription?.plan || 'free';
