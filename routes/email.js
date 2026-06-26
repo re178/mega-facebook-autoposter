@@ -7,7 +7,7 @@ const Plan = require('../models/Plan');
 const requireLogin = require('../middleware/requireLogin');
 const requireAdmin = require('../middleware/requireAdmin');
 
-// Helper to wrap HTML emails (reuse emailService's wrapper if needed, but we'll build our own here)
+// Helper to wrap HTML emails
 function getEmailWrapper(content, title) {
     const APP_NAME = 'VIRALOOP';
     const APP_URL = process.env.APP_URL || 'https://voxtraapp.com';
@@ -38,7 +38,6 @@ body { font-family: Arial, sans-serif; background:#f5f5f5; margin:0; padding:0; 
 
 // ========== TEMPLATES ==========
 
-// Template: Subscription Activated
 function subscriptionActivatedTemplate(planLabel, expiryDate, userName) {
     const expiry = new Date(expiryDate).toLocaleDateString();
     return `
@@ -51,7 +50,6 @@ function subscriptionActivatedTemplate(planLabel, expiryDate, userName) {
     `;
 }
 
-// Template: Subscription Expired
 function subscriptionExpiredTemplate(planLabel, userName) {
     return `
         <h2>Your Subscription Has Expired</h2>
@@ -62,7 +60,6 @@ function subscriptionExpiredTemplate(planLabel, userName) {
     `;
 }
 
-// Template: Admin Broadcast
 function adminBroadcastTemplate(message) {
     return `
         <h2>📢 Announcement from VIRALOOP</h2>
@@ -75,7 +72,7 @@ function adminBroadcastTemplate(message) {
 // Trigger: Send subscription activated email (called from webhook/reconciliation)
 router.post('/trigger/subscription-activated', requireLogin, async (req, res) => {
     try {
-        const { userId, plan } = req.body; // plan name, e.g., 'pro'
+        const { userId, plan } = req.body;
         const user = await User.findById(userId);
         if (!user) return res.status(404).json({ error: 'User not found' });
 
@@ -113,10 +110,10 @@ router.post('/trigger/subscription-expired', requireLogin, async (req, res) => {
     }
 });
 
-// Admin: Send broadcast (this is also available in adminRoutes, but we can keep a separate endpoint)
+// Admin: Send broadcast (also available in adminRoutes, but we keep a separate endpoint)
 router.post('/broadcast', requireLogin, requireAdmin, async (req, res) => {
     try {
-        const { subject, message, recipientEmails } = req.body; // recipientEmails: array or 'all'
+        const { subject, message, recipientEmails } = req.body;
         let emails = [];
         if (recipientEmails === 'all') {
             const users = await User.find({}).select('email');
