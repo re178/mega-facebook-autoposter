@@ -119,14 +119,84 @@ const UserSchema = new mongoose.Schema({
   },
 
   /* =====================================================
-     USAGE TRACKING
+     USAGE TRACKING (ENHANCED)
   ===================================================== */
   usage: {
+    // Existing fields
     postsToday: {
       type: Number,
       default: 0
     },
-    lastPostDate: Date
+    lastPostDate: Date,
+
+    // NEW: Monthly counters for feature limits
+    manualPostsThisMonth: {
+      type: Number,
+      default: 0
+    },
+    aiPostsThisMonth: {
+      type: Number,
+      default: 0
+    },
+    imagesThisMonth: {
+      type: Number,
+      default: 0
+    },
+    videosThisMonth: {
+      type: Number,
+      default: 0
+    },
+    lastResetDate: {
+      type: Date,
+      default: Date.now
+    }
+  },
+
+  /* =====================================================
+     RESTRICTIONS (NEW: granular per-user locks)
+  ===================================================== */
+  restrictions: {
+    postingRestricted: {
+      type: Boolean,
+      default: false
+    },
+    commentingRestricted: {
+      type: Boolean,
+      default: false
+    },
+    messagingRestricted: {
+      type: Boolean,
+      default: false
+    },
+    templatesLocked: {
+      type: Boolean,
+      default: false
+    },
+    adsLocked: {
+      type: Boolean,
+      default: false
+    },
+    autoGenerationLocked: {
+      type: Boolean,
+      default: false
+    }
+  },
+
+  /* =====================================================
+     FEATURE OVERRIDES (NEW: admin overrides per user)
+  ===================================================== */
+  featureOverrides: {
+    type: Map,
+    of: mongoose.Schema.Types.Mixed,
+    default: new Map()
+  },
+
+  /* =====================================================
+     ONBOARDING (NEW: track if user completed tour)
+  ===================================================== */
+  onboardingCompleted: {
+    type: Boolean,
+    default: false
   },
 
   /* =====================================================
@@ -197,7 +267,7 @@ const UserSchema = new mongoose.Schema({
   },
 
   /* =====================================================
-     🚀 WALLET & TRANSACTIONS (UPDATED)
+     WALLET & TRANSACTIONS (UPDATED)
   ===================================================== */
   walletBalance: {
     type: Number,
@@ -225,25 +295,21 @@ const UserSchema = new mongoose.Schema({
         index: true,
         sparse: true
       },
-      // ✅ NEW: apiRef – your own reference, stored before payment
       apiRef: {
         type: String,
         index: true,
         sparse: true
       },
-      // ✅ NEW: intasendTrackingId – IntaSend's tracking ID
       intasendTrackingId: {
         type: String,
         index: true,
         sparse: true
       },
-      // Keep invoiceId (IntaSend's invoice ID)
       invoiceId: {
         type: String,
         index: true,
         sparse: true
       },
-      // Deprecated: trackingId will be replaced by the above, but keep for backward compatibility
       trackingId: {
         type: String,
         index: true,
