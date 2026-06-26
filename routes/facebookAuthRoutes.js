@@ -2,6 +2,7 @@ const express = require('express');
 const axios = require('axios');
 const crypto = require('crypto');
 const Page = require('../models/Page');
+const requireFeature = require('../middleware/requireFeature'); // ✅ Added
 
 const router = express.Router();
 
@@ -132,8 +133,9 @@ router.get('/temp-pages', requireLogin, (req, res) => {
 
 /* =====================================================
    SAVE PAGES (FIXED - USE SESSION ONLY)
+   ✅ Added requireFeature('pagesAllowed') to enforce plan limits
 ===================================================== */
-router.post('/save-pages', requireLogin, async (req, res) => {
+router.post('/save-pages', requireLogin, requireFeature('pagesAllowed'), async (req, res) => {
   try {
     const userId = req.session.userId;
     const sessionPages = req.session.fb_pages;
