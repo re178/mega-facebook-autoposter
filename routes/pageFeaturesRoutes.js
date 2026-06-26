@@ -12,6 +12,9 @@ const Ad = require('../models/Ad');
 
 const { postToFacebook, sendMessengerReply, replyToComment } = require('../services/facebookService');
 
+// ✅ Add requireFeature middleware
+const requireFeature = require('../middleware/requireFeature');
+
 // ---------------------------
 // LOGS
 // ---------------------------
@@ -33,7 +36,7 @@ router.get('/page/:pageId/logs', async (req, res) => {
 });
 
 // ---------------------------
-// MESSAGES / INBOX
+// MESSAGES / INBOX (Free for all)
 // ---------------------------
 router.get('/page/:pageId/messages', async (req, res) => {
   try {
@@ -63,9 +66,9 @@ router.post('/page/:pageId/message', async (req, res) => {
 });
 
 // ---------------------------
-// TEMPLATES / AUTO-REPLIES
+// TEMPLATES / AUTO-REPLIES (PRO+)
 // ---------------------------
-router.get('/page/:pageId/templates', async (req, res) => {
+router.get('/page/:pageId/templates', requireFeature('templates'), async (req, res) => {
   try {
     const templates = await Template.find({ pageId: req.params.pageId });
     res.json(templates);
@@ -74,7 +77,7 @@ router.get('/page/:pageId/templates', async (req, res) => {
   }
 });
 
-router.post('/page/:pageId/templates', async (req, res) => {
+router.post('/page/:pageId/templates', requireFeature('templates'), async (req, res) => {
   try {
     const template = await Template.create({ pageId: req.params.pageId, ...req.body });
     res.json(template);
@@ -83,7 +86,7 @@ router.post('/page/:pageId/templates', async (req, res) => {
   }
 });
 
-router.put('/template/:templateId', async (req, res) => {
+router.put('/template/:templateId', requireFeature('templates'), async (req, res) => {
   try {
     const template = await Template.findByIdAndUpdate(req.params.templateId, req.body, { new: true });
     res.json(template);
@@ -92,7 +95,7 @@ router.put('/template/:templateId', async (req, res) => {
   }
 });
 
-router.delete('/template/:templateId', async (req, res) => {
+router.delete('/template/:templateId', requireFeature('templates'), async (req, res) => {
   try {
     await Template.findByIdAndDelete(req.params.templateId);
     res.json({ success: true });
@@ -102,9 +105,9 @@ router.delete('/template/:templateId', async (req, res) => {
 });
 
 // ---------------------------
-// ADS / CAMPAIGNS
+// ADS / CAMPAIGNS (PRO+)
 // ---------------------------
-router.get('/page/:pageId/ads', async (req, res) => {
+router.get('/page/:pageId/ads', requireFeature('ads'), async (req, res) => {
   try {
     const ads = await Ad.find({ pageId: req.params.pageId });
     res.json(ads);
@@ -113,7 +116,7 @@ router.get('/page/:pageId/ads', async (req, res) => {
   }
 });
 
-router.post('/page/:pageId/ad', async (req, res) => {
+router.post('/page/:pageId/ad', requireFeature('ads'), async (req, res) => {
   try {
     const ad = await Ad.create({ pageId: req.params.pageId, ...req.body });
     res.json(ad);
@@ -122,7 +125,7 @@ router.post('/page/:pageId/ad', async (req, res) => {
   }
 });
 
-router.put('/page/:adId/ad', async (req, res) => {
+router.put('/page/:adId/ad', requireFeature('ads'), async (req, res) => {
   try {
     const ad = await Ad.findByIdAndUpdate(req.params.adId, req.body, { new: true });
     res.json(ad);
@@ -131,7 +134,7 @@ router.put('/page/:adId/ad', async (req, res) => {
   }
 });
 
-router.delete('/page/:adId/ad', async (req, res) => {
+router.delete('/page/:adId/ad', requireFeature('ads'), async (req, res) => {
   try {
     await Ad.findByIdAndDelete(req.params.adId);
     res.json({ success: true });
@@ -141,9 +144,9 @@ router.delete('/page/:adId/ad', async (req, res) => {
 });
 
 // ---------------------------
-// COMMENTS / MODERATION
+// COMMENTS / MODERATION (PRO+)
 // ---------------------------
-router.get('/page/:pageId/comments', async (req, res) => {
+router.get('/page/:pageId/comments', requireFeature('comments'), async (req, res) => {
   try {
     const comments = await Comment.find({ pageId: req.params.pageId }).sort({ createdAt: -1 });
     res.json(comments);
@@ -152,7 +155,7 @@ router.get('/page/:pageId/comments', async (req, res) => {
   }
 });
 
-router.put('/page/:commentId/comment', async (req, res) => {
+router.put('/page/:commentId/comment', requireFeature('comments'), async (req, res) => {
   try {
     const comment = await Comment.findByIdAndUpdate(req.params.commentId, req.body, { new: true });
     res.json(comment);
@@ -161,7 +164,7 @@ router.put('/page/:commentId/comment', async (req, res) => {
   }
 });
 
-router.post('/page/:commentId/comment/reply', async (req, res) => {
+router.post('/page/:commentId/comment/reply', requireFeature('comments'), async (req, res) => {
   try {
     const { replyText } = req.body;
     const comment = await Comment.findById(req.params.commentId);
@@ -180,7 +183,7 @@ router.post('/page/:commentId/comment/reply', async (req, res) => {
 });
 
 // ---------------------------
-// ANALYTICS / REPORTS
+// ANALYTICS / REPORTS (PRO+ for reports)
 // ---------------------------
 router.get('/page/:pageId/insights', async (req, res) => {
   try {
@@ -199,7 +202,7 @@ router.get('/page/:pageId/insights', async (req, res) => {
   }
 });
 
-router.get('/page/:pageId/report', async (req, res) => {
+router.get('/page/:pageId/report', requireFeature('reports'), async (req, res) => {
   try {
     const pageId = req.params.pageId;
     const format = req.query.format || 'pdf';
