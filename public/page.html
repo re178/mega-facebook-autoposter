@@ -286,7 +286,7 @@
       </section>
 
       <!-- ===================================================== -->
-      <!-- ADMIN SECTION – WITH PLAN MANAGEMENT ADDED           -->
+      <!-- ADMIN SECTION – UPDATED WITH NEW FEATURES            -->
       <!-- ===================================================== -->
       <section class="card" id="admin-section">
         <h2>Admin Control Center</h2>
@@ -317,7 +317,23 @@
 
         <div class="admin-card">
           <h3>Users</h3>
-          <div class="table-wrapper"><table class="admin-table"><thead><tr><th>Email</th><th>Role</th><th>Phone</th><th>Subscription</th><th>Status</th><th>AI</th><th>Actions</th></tr></thead><tbody id="admin-users-table"></tbody></table></div>
+          <!-- SEARCH & PAGINATION CONTROLS (ADDED) -->
+          <div style="display:flex; align-items:center; gap:12px; margin-bottom:12px; flex-wrap:wrap;">
+            <input type="text" id="user-search" placeholder="Search by email, name, phone..." style="flex:1; min-width:200px; padding:6px; border-radius:4px; border:1px solid #e2e8f0; background:#f8fafc;">
+            <span id="pagination-controls" style="display:flex; align-items:center; gap:8px;"></span>
+          </div>
+          <div class="table-wrapper">
+            <table class="admin-table">
+              <thead>
+                <tr>
+                  <th>Email</th><th>Role</th><th>Phone</th><th>Subscription</th><th>Status</th><th>AI</th>
+                  <th>Restrictions</th> <!-- ADDED -->
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="admin-users-table"></tbody>
+            </table>
+          </div>
         </div>
 
         <div class="admin-card">
@@ -395,6 +411,25 @@
               </tbody>
             </table>
           </div>
+        </div>
+
+        <!-- ===================================================== -->
+        <!-- 🆕 NEW: GLOBAL AUTO-GENERATION TOGGLE                -->
+        <!-- ===================================================== -->
+        <div class="admin-card">
+          <h3>🤖 Global Auto-Generation</h3>
+          <label style="display:flex; align-items:center; gap:8px;">
+            <input type="checkbox" id="global-auto-gen-toggle" checked> Enable auto-generation globally
+          </label>
+          <p style="font-size:12px; color:#64748b;">If disabled, auto-generation will not run for any page.</p>
+        </div>
+
+        <!-- ===================================================== -->
+        <!-- 🆕 NEW: ADMIN EMAIL BROADCAST                        -->
+        <!-- ===================================================== -->
+        <div class="admin-card">
+          <h3>📧 Send Email to Users</h3>
+          <button id="admin-email-btn" class="btn btn-primary">Compose Email</button>
         </div>
 
         <datalist id="user-datalist-pm"></datalist>
@@ -623,8 +658,6 @@
         });
       }
     });
-
-    // ===== PLAN MANAGEMENT – ADD PLAN BUTTON =====
   </script>
 
 </body>
