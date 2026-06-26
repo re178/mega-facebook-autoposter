@@ -13,8 +13,6 @@ const MongoStore = require('connect-mongo');
 // ==================== MODELS ====================
 const User = require('./models/User');
 const Page = require('./models/Page');
-// Note: Plan is not used directly in server.js – imported in adminRoutes and aiSchedulerRoutes.
-// const Plan = require('./models/Plan');
 
 // ==================== SERVICES ====================
 const { startScheduler } = require('./services/scheduler');
@@ -42,7 +40,7 @@ const requireAdmin = require('./middleware/requireAdmin');
 // ==================== APP INIT ====================
 const app = express();
 app.set('trust proxy', 1);
-app.disable('x-powered-by'); // Explicitly hide Express
+app.disable('x-powered-by');
 
 // ⚠️ IMPORTANT: Do NOT add app.use(express.static('public')) here.
 // It would expose protected HTML files (index.html, page.html, etc.)
@@ -51,7 +49,7 @@ app.disable('x-powered-by'); // Explicitly hide Express
 
 const PORT = process.env.PORT || 10000;
 const isProduction = process.env.NODE_ENV === 'production';
-const serverStartTime = Date.now();
+const serverStartTime = Date.now(); // ✅ declared once here
 
 // ==================== STARTUP VALIDATION ====================
 const requiredEnvVars = [
@@ -68,12 +66,6 @@ if (missingVars.length > 0) {
     missingVars.forEach(key => console.error(`   - ${key}`));
     process.exit(1);
 }
-
-// Optional validation (uncomment if you have these)
-// const optionalVars = ['EMAIL_USER', 'EMAIL_PASS', 'OPENAI_API_KEY', 'FB_APP_ID', 'FB_APP_SECRET'];
-// optionalVars.forEach(key => {
-//     if (!process.env[key]) console.warn(`⚠️ Optional env var ${key} is not set.`);
-// });
 
 // CORS origins – allow multiple origins
 const allowedOrigins = (
@@ -123,7 +115,7 @@ app.use(
     })
 );
 
-// ==================== CORS (allow-list with clean error) ====================
+// ==================== CORS ====================
 app.use(
     cors({
         origin: function (origin, callback) {
@@ -131,7 +123,6 @@ app.use(
             if (allowedOrigins.includes(origin) || allowedOrigins.includes('*')) {
                 return callback(null, true);
             }
-            // Return a clean 403 error (not passed to global error handler)
             const err = new Error('Not allowed by CORS');
             err.status = 403;
             return callback(err, false);
@@ -154,7 +145,7 @@ app.use(
         rolling: true,
         store: MongoStore.create({
             mongoUrl: process.env.MONGO_URI,
-            ttl: 2 * 60 * 60, // 2 hours (matches cookie maxAge)
+            ttl: 2 * 60 * 60, // 2 hours
             autoRemove: 'native'
         }),
         cookie: {
@@ -186,11 +177,10 @@ app.post('/api/auth/forgot-password', authLimiter);
 app.post('/api/auth/reset-password', authLimiter);
 
 // ==================== WEBHOOKS (BEFORE CSRF) ====================
-// Public webhooks must be registered BEFORE CSRF protection
 app.use('/', webhookRoutes);
-app.use('/api/lipa', lipaRoutes); // Lipa webhook and endpoints
+app.use('/api/lipa', lipaRoutes);
 
-// ==================== CSRF PROTECTION (Origin/Referer Check) ====================
+// ==================== CSRF PROTECTION ====================
 const csrfProtection = (req, res, next) => {
     if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return next();
     if (req.path === '/login') return next();
@@ -228,7 +218,6 @@ const csrfProtection = (req, res, next) => {
 app.use(csrfProtection);
 
 // ==================== ROUTES ====================
-
 app.use('/api/plans', planRoutes);
 app.use('/api/pricing', pricingRoutes);
 app.use('/api/auth', authRoutes);
@@ -241,16 +230,13 @@ app.use('/api/ai', requireLogin, aiRoutes);
 app.use('/api/user/messages', requireLogin, userMessagesRoutes);
 app.use('/api/admin', requireLogin, requireAdmin, adminRoutes);
 
-// ==================== STATIC FILES (SECURE) ====================
-// Serve only specific folders – NOT the whole public directory
+// ==================== STATIC FILES ====================
 app.use('/css', express.static(path.join(__dirname, 'public/css')));
 app.use('/js', express.static(path.join(__dirname, 'public/js')));
 app.use('/images', express.static(path.join(__dirname, 'public/images')));
 app.use('/fonts', express.static(path.join(__dirname, 'public/fonts')));
-// ⚠️ DO NOT expose /uploads unless all files are intentionally public.
 // app.use('/uploads', express.static(path.join(__dirname, 'public/uploads')));
 
-// Public static files
 app.get('/favicon.ico', (req, res) => {
     res.sendFile(path.join(__dirname, 'public/favicon.ico'));
 });
@@ -261,7 +247,6 @@ app.get('/manifest.json', (req, res) => {
     res.sendFile(path.join(__dirname, 'public/manifest.json'));
 });
 
-// Auth pages (public)
 app.get('/login', (req, res) =>
     res.sendFile(path.join(__dirname, 'public/login.html'))
 );
@@ -278,7 +263,6 @@ app.get('/verify-email', (req, res) =>
     res.sendFile(path.join(__dirname, 'public/verify-email.html'))
 );
 
-// Legal pages (public)
 app.get('/privacy', (req, res) =>
     res.sendFile(path.join(__dirname, 'public/privacy.html'))
 );
@@ -295,7 +279,6 @@ app.get('/community-guidelines', (req, res) =>
     res.sendFile(path.join(__dirname, 'public/community-guidelines.html'))
 );
 
-// Protected pages – served via explicit routes with requireLogin
 app.get('/index.html', requireLogin, (req, res) =>
     res.sendFile(path.join(__dirname, 'public/index.html'))
 );
@@ -309,7 +292,6 @@ app.get('/connect-facebook', requireLogin, (req, res) =>
     res.sendFile(path.join(__dirname, 'public/connect-facebook.html'))
 );
 
-// Redirect root
 app.get('/', (req, res) => {
     if (req.session?.userId) {
         res.redirect('/index.html');
@@ -393,11 +375,10 @@ app.get('/api/session', (req, res) => {
 });
 
 // ==================== HEALTH CHECK ====================
-const serverStartTime = Date.now();
 app.get('/health', (req, res) => {
     res.status(200).json({
         status: 'healthy',
-        uptime: Math.floor((Date.now() - serverStartTime) / 1000),
+        uptime: Math.floor((Date.now() - serverStartTime) / 1000), // uses the declared variable
         timestamp: new Date().toISOString()
     });
 });
@@ -494,7 +475,6 @@ mongoose
             console.error('❌ Auto Maintenance error:', err.message);
         }
 
-        // ✅ Protected service loads – each wrapped in try/catch so one failure doesn't crash the server
         try {
             require('./services/autoGeneration');
             console.log('✅ Auto Generation service loaded');
