@@ -12,7 +12,7 @@ const AiScheduledPost = require('../models/AiScheduledPost');
 const SystemSettings = require('../models/SystemSettings');
 const AdminMessage = require('../models/AdminMessage');
 const BroadcastMessage = require('../models/BroadcastMessage');
-const Plan = require('../models/Plan'); // 🆕 ADDED
+const Plan = require('../models/Plan');
 
 // Middleware (fixed versions – return JSON 401 for API routes)
 const requireLogin = require('../middleware/requireLogin');
@@ -52,10 +52,25 @@ router.get('/stats', async (req, res) => {
 /* =====================================================
    USERS
 ===================================================== */
+// GET /admin/users (with pagination and search)
 router.get('/users', async (req, res) => {
     try {
-        const users = await User.find().select('-password').sort({ createdAt: -1 });
-        res.json(users);
+        const { skip = 0, limit = 20, search = '' } = req.query;
+        const filter = {};
+        if (search) {
+            filter.$or = [
+                { email: { $regex: search, $options: 'i' } },
+                { fullName: { $regex: search, $options: 'i' } },
+                { phone: { $regex: search, $options: 'i' } }
+            ];
+        }
+        const users = await User.find(filter)
+            .select('-password')
+            .sort({ createdAt: -1 })
+            .skip(parseInt(skip))
+            .limit(parseInt(limit));
+        const total = await User.countDocuments(filter);
+        res.json({ users, total });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -176,6 +191,57 @@ router.patch('/users/:userId/lock-ai', async (req, res) => {
 router.patch('/users/:userId/unlock-ai', async (req, res) => {
     try {
         await User.findByIdAndUpdate(req.params.userId, { aiLocked: false });
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// PATCH /admin/users/:userId/restrictions
+router.patch('/users/:userId/restrictions', async (req, res) => {
+    try {
+        const { postingRestricted, commentingRestricted, messagingRestricted, templatesLocked, adsLocked, autoGenerationLocked } = req.body;
+        const updates = {};
+        if (postingRestricted !== undefined) updates['restrictions.postingRestricted'] = postingRestricted;
+        if (commentingRestricted !== undefined) updates['restrictions.commentingRestricted'] = commentingRestricted;
+        if (messagingRestricted !== undefined) updates['restrictions.messagingRestricted'] = messagingRestricted;
+        if (templatesLocked !== undefined) updates['restrictions.templatesLocked'] = templatesLocked;
+        if (adsLocked !== undefined) updates['restrictions.adsLocked'] = adsLocked;
+        if (autoGenerationLocked !== undefined) updates['restrictions.autoGenerationLocked'] = autoGenerationLocked;
+
+        const user = await User.findByIdAndUpdate(req.params.userId, { $set: updates }, { new: true });
+        if (!user) return res.status(404).json({ error: 'User not found' });
+
+        // Log the action
+        await Log.create({
+            userId: req.session.userId,
+            action: 'ADMIN_RESTRICTIONS_UPDATED',
+            message: `Updated restrictions for ${user.email}`
+        });
+
+        res.json({ success: true, user });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// PATCH /admin/users/:userId/override
+router.patch('/users/:userId/override', async (req, res) => {
+    try {
+        const { feature, value } = req.body;
+        const user = await User.findById(req.params.userId);
+        if (!user) return res.status(404).json({ error: 'User not found' });
+
+        if (!user.featureOverrides) user.featureOverrides = new Map();
+        user.featureOverrides.set(feature, value);
+        await user.save();
+
+        await Log.create({
+            userId: req.session.userId,
+            action: 'ADMIN_OVERRIDE_UPDATED',
+            message: `Override for ${user.email}: ${feature} = ${value}`
+        });
+
         res.json({ success: true });
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -441,7 +507,7 @@ router.put('/pricing', async (req, res) => {
 });
 
 /* =====================================================
-   🆕 PLAN MANAGEMENT (DYNAMIC PLANS)
+   PLAN MANAGEMENT (DYNAMIC PLANS)
 ===================================================== */
 
 // GET all plans (including inactive)
@@ -469,12 +535,12 @@ router.get('/plans/:id', async (req, res) => {
 router.post('/plans', async (req, res) => {
     try {
         const { name, label, priceUSD, priceKES, durationDays, features, isActive, isDefault, order } = req.body;
-        
+
         // Validate required fields
         if (!name || !label) {
             return res.status(400).json({ error: 'Name and label are required' });
         }
-        
+
         // Check for duplicate name
         const existing = await Plan.findOne({ name });
         if (existing) {
@@ -492,7 +558,7 @@ router.post('/plans', async (req, res) => {
             isDefault: isDefault || false,
             order: order || 0
         });
-        
+
         res.status(201).json(plan);
     } catch (err) {
         console.error(err);
@@ -504,17 +570,17 @@ router.post('/plans', async (req, res) => {
 router.put('/plans/:id', async (req, res) => {
     try {
         const { name, label, priceUSD, priceKES, durationDays, features, isActive, isDefault, order } = req.body;
-        
+
         const plan = await Plan.findById(req.params.id);
         if (!plan) {
             return res.status(404).json({ error: 'Plan not found' });
         }
-        
+
         // Prevent renaming the 'free' plan
         if (plan.name === 'free' && name && name !== 'free') {
             return res.status(400).json({ error: 'Cannot rename the "free" plan' });
         }
-        
+
         // Check for duplicate name (excluding self)
         if (name && name !== plan.name) {
             const duplicate = await Plan.findOne({ name });
@@ -538,7 +604,7 @@ router.put('/plans/:id', async (req, res) => {
             },
             { new: true }
         );
-        
+
         res.json(updated);
     } catch (err) {
         console.error(err);
@@ -553,16 +619,16 @@ router.delete('/plans/:id', async (req, res) => {
         if (!plan) {
             return res.status(404).json({ error: 'Plan not found' });
         }
-        
+
         // Prevent deleting the 'free' plan
         if (plan.name === 'free') {
             return res.status(400).json({ error: 'Cannot delete the "free" plan' });
         }
-        
+
         // Soft delete – set inactive
         plan.isActive = false;
         await plan.save();
-        
+
         res.json({ success: true, message: 'Plan deactivated' });
     } catch (err) {
         console.error(err);
@@ -571,9 +637,61 @@ router.delete('/plans/:id', async (req, res) => {
 });
 
 /* =====================================================
+   NEW: GLOBAL AUTO-GENERATION TOGGLE
+===================================================== */
+router.put('/auto-generation/global', async (req, res) => {
+    try {
+        const { enabled } = req.body;
+        const settings = await SystemSettings.findOneAndUpdate(
+            {},
+            { $set: { 'autoGeneration.globalEnabled': enabled } },
+            { new: true, upsert: true }
+        );
+        res.json({ success: true, settings });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+/* =====================================================
+   NEW: ADMIN EMAIL SEND
+===================================================== */
+router.post('/email/send', async (req, res) => {
+    try {
+        const { userIds, subject, htmlContent } = req.body;
+        let recipients = [];
+        if (userIds === 'all') {
+            const users = await User.find({}).select('email');
+            recipients = users.map(u => u.email);
+        } else if (Array.isArray(userIds)) {
+            const users = await User.find({ _id: { $in: userIds } }).select('email');
+            recipients = users.map(u => u.email);
+        } else {
+            return res.status(400).json({ error: 'Invalid recipients' });
+        }
+
+        if (!recipients.length) return res.status(400).json({ error: 'No recipients' });
+
+        const { sendEmail } = require('../services/emailService');
+        for (const email of recipients) {
+            await sendEmail(email, subject, htmlContent);
+        }
+
+        await Log.create({
+            userId: req.session.userId,
+            action: 'ADMIN_EMAIL_SENT',
+            message: `Sent email "${subject}" to ${recipients.length} users`
+        });
+
+        res.json({ success: true, sent: recipients.length });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+/* =====================================================
    SEED DEFAULT PLANS (if none exist)
 ===================================================== */
-// This function should be called on server startup (e.g., in app.js)
 const ensureDefaultPlans = async () => {
     const count = await Plan.countDocuments();
     if (count === 0) {
