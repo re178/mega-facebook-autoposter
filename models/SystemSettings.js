@@ -7,7 +7,7 @@ const SystemSettingsSchema = new mongoose.Schema({
         default: false
     },
 
-    // ✅ NEW: Pricing configuration for Pro and Enterprise plans
+    // Pricing configuration (kept as is)
     pricing: {
         pro: {
             priceUSD: { type: Number, default: 29 },
@@ -16,6 +16,14 @@ const SystemSettingsSchema = new mongoose.Schema({
         enterprise: {
             priceUSD: { type: Number, default: 99 },
             priceKES: { type: Number, default: 12000 }
+        }
+    },
+
+    // ✅ NEW: Global auto-generation toggle
+    autoGeneration: {
+        globalEnabled: {
+            type: Boolean,
+            default: true
         }
     },
 
