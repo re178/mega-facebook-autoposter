@@ -5,6 +5,8 @@ const Post = require('../models/Post');
 const Log = require('../models/Log');
 const AiScheduledPost = require('../models/AiScheduledPost');
 const AiTopic = require('../models/AiTopic');
+const User = require('../models/User');
+const requireFeature = require('../middleware/requireFeature');
 
 // -------------------- AUTH MIDDLEWARE --------------------
 function requireLogin(req, res, next) {
@@ -144,8 +146,8 @@ router.get('/page/:fbId/posts', async (req, res) => {
   }
 });
 
-// Create a post for page
-router.post('/page/:fbId/post', async (req, res) => {
+// Create a post for page (with feature enforcement and usage increment)
+router.post('/page/:fbId/post', requireLogin, requireFeature('manualPostsPerMonth', { period: 'monthly' }), async (req, res) => {
   try {
     if (!(await canAccessPage(req.params.fbId, req)))
       return res.status(403).json({ error: 'Access denied' });
@@ -163,6 +165,13 @@ router.post('/page/:fbId/post', async (req, res) => {
       scheduledTime: scheduledTime || new Date(),
       status: 'PENDING'
     });
+
+    // Increment usage counter
+    const user = await User.findById(req.session.userId);
+    if (user) {
+      user.usage.manualPostsThisMonth = (user.usage.manualPostsThisMonth || 0) + 1;
+      await user.save();
+    }
 
     await Log.create({ pageId: page._id, action: 'CREATE_POST', message: 'Post created' });
     res.status(201).json(post);
