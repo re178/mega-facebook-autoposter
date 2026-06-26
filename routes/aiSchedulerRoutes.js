@@ -1,5 +1,7 @@
 const express = require('express');
 const router = express.Router();
+const User = require('../models/User'); // ✅ Added for usage increment
+const requireFeature = require('../middleware/requireFeature'); // ✅ Added
 
 // Models
 const AiTopic = require('../models/AiTopic');
@@ -59,8 +61,8 @@ router.get('/page/:pageId/topics', async (req, res) => {
   } catch (err) { handleError(res, err); }
 });
 
-// Create topic (UPDATED to use createManualTopicWithQA)
-router.post('/page/:pageId/topic', async (req, res) => {
+// Create topic (UPDATED to use createManualTopicWithQA) – WITH FEATURE CHECK
+router.post('/page/:pageId/topic', requireLogin, requireFeature('aiTopics'), async (req, res) => {
   try {
     if (!(await canAccessPage(req.params.pageId, req)))
       return res.status(403).json({ error: 'Access denied' });
@@ -145,9 +147,9 @@ router.delete('/topic/:topicId', async (req, res) => {
 });
 
 /* =========================================================
-   POST GENERATION
+   POST GENERATION (WITH FEATURE CHECK AND USAGE INCREMENT)
 ========================================================= */
-router.post('/topic/:topicId/generate-now', async (req, res) => {
+router.post('/topic/:topicId/generate-now', requireLogin, requireFeature('aiPostsPerMonth', { period: 'monthly' }), async (req, res) => {
   console.log(`[DEBUG] Generate request for topic ${req.params.topicId}`);
   try {
     const facebookPageId = await getFacebookPageIdFromTopic(req.params.topicId);
@@ -169,10 +171,17 @@ router.post('/topic/:topicId/generate-now', async (req, res) => {
     
     const topic = await AiTopic.findById(req.params.topicId);
     await logAction({ pageId: topic.pageId, action: 'POSTS_GENERATED', message: `${posts.length} posts generated` });
+
+    // ✅ Increment AI posts usage counter
+    const user = await User.findById(req.session.userId);
+    if (user) {
+      user.usage.aiPostsThisMonth = (user.usage.aiPostsThisMonth || 0) + posts.length;
+      await user.save();
+    }
+
     res.json(posts);
   } catch (err) {
     generatingTopics.delete(req.params.topicId);
-    // FULL ERROR DETAILS
     console.error('🔥🔥🔥 GENERATION FAILED 🔥🔥🔥');
     console.error('Error message:', err.message);
     console.error('Stack trace:', err.stack);
@@ -183,6 +192,7 @@ router.post('/topic/:topicId/generate-now', async (req, res) => {
     });
   }
 });
+
 // Delete all topic posts
 router.delete('/topic/:topicId/posts', async (req, res) => {
   try {
@@ -390,5 +400,11 @@ router.delete('/page/:pageId/profile', async (req, res) => {
     res.json({ success: true });
   } catch (err) { handleError(res, err); }
 });
+
+// Helper: requireLogin (since we used it above)
+function requireLogin(req, res, next) {
+  if (req.session && req.session.userId) return next();
+  return res.status(401).json({ error: 'Not authenticated' });
+}
 
 module.exports = router;
