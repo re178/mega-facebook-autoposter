@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
-const User = require('../models/User'); // ✅ Added for usage increment
-const requireFeature = require('../middleware/requireFeature'); // ✅ Added
+const User = require('../models/User'); 
+const requireFeature = require('../middleware/requireFeature'); 
 
 // Models
 const AiTopic = require('../models/AiTopic');
