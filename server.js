@@ -49,7 +49,7 @@ app.disable('x-powered-by');
 
 const PORT = process.env.PORT || 10000;
 const isProduction = process.env.NODE_ENV === 'production';
-const serverStartTime = Date.now(); // ✅ declared once here
+const serverStartTime = Date.now();
 
 // ==================== STARTUP VALIDATION ====================
 const requiredEnvVars = [
@@ -131,9 +131,19 @@ app.use(
     })
 );
 
-// ==================== BODY PARSER ====================
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+// ==================== BODY PARSER (with raw body capture) ====================
+// ⚠️ This must come BEFORE any route that needs rawBody (like webhooks)
+app.use(express.json({
+    verify: (req, res, buf) => {
+        req.rawBody = buf.toString();
+    }
+}));
+app.use(express.urlencoded({
+    extended: true,
+    verify: (req, res, buf) => {
+        if (!req.rawBody) req.rawBody = buf.toString();
+    }
+}));
 
 // ==================== SESSION ====================
 app.use(
@@ -177,6 +187,7 @@ app.post('/api/auth/forgot-password', authLimiter);
 app.post('/api/auth/reset-password', authLimiter);
 
 // ==================== WEBHOOKS (BEFORE CSRF) ====================
+// Webhooks must be registered BEFORE CSRF protection
 app.use('/', webhookRoutes);
 app.use('/api/lipa', lipaRoutes);
 
@@ -378,7 +389,7 @@ app.get('/api/session', (req, res) => {
 app.get('/health', (req, res) => {
     res.status(200).json({
         status: 'healthy',
-        uptime: Math.floor((Date.now() - serverStartTime) / 1000), // uses the declared variable
+        uptime: Math.floor((Date.now() - serverStartTime) / 1000),
         timestamp: new Date().toISOString()
     });
 });
