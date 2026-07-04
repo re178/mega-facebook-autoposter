@@ -45,18 +45,16 @@ const { discoverAndRank } = require('./topicEngine');
 const TextProviders = [GeminiText, CloudflareText, GroqText, OpenAIText];
 const ImageProviders = [CloudflareImage, StabilityImage, LeonardoImage, DALLEImage, SmartPexelsImage];
 
-// Global settings
+// Global settings (overridden by DB)
 const TIMEZONE = 'Africa/Nairobi';
 const MAX_SCHEDULED_POSTS = 10;
 const MIN_ACTIVE_TOPICS = 3;
-const MAX_ACTIVE_TOPICS = 6;
 const TOPIC_LIFETIME_DAYS = 5;
 const POSTS_PER_DAY_AUTO = 1;
 const INCLUDE_MEDIA_AUTO = false;
 const AVOID_SIMILAR_DAYS = 7;
 const MAX_START_DATE_DAYS = 21;
 const MAX_SAME_START_DAY = 2;
-let GLOBAL_AUTO_TOPIC_CREATION_ENABLED = true;
 
 const DEFAULT_ANGLES = ['insight', 'example', 'warning', 'opinion', 'takeaway'];
 const GLOBAL_ANGLES = ['memory', 'observation', 'curiosity', 'experience', 'reflection', 'surprise', 'casual'];
@@ -69,6 +67,43 @@ function initProviderState() {
   });
 }
 initProviderState();
+
+// ================================================================
+// ========== NEW: GLOBAL SETTINGS (persistent) ===================
+// ================================================================
+const GlobalSettings = mongoose.model('GlobalSettings', new mongoose.Schema({
+  maxActiveTopics: { type: Number, default: 6 },
+  autoTopicCreationEnabled: { type: Boolean, default: true },
+  updatedAt: { type: Date, default: Date.now }
+}));
+
+let globalSettingsCache = null;
+let cacheTime = 0;
+const CACHE_TTL = 60 * 1000; // 1 minute
+
+async function getGlobalSettings() {
+  if (globalSettingsCache && (Date.now() - cacheTime < CACHE_TTL)) {
+    return globalSettingsCache;
+  }
+  let settings = await GlobalSettings.findOne();
+  if (!settings) {
+    settings = await GlobalSettings.create({});
+  }
+  globalSettingsCache = settings;
+  cacheTime = Date.now();
+  return settings;
+}
+
+async function updateGlobalSettings(updates) {
+  const settings = await GlobalSettings.findOneAndUpdate(
+    {},
+    { $set: updates, updatedAt: new Date() },
+    { new: true, upsert: true }
+  );
+  globalSettingsCache = settings;
+  cacheTime = Date.now();
+  return settings;
+}
 
 // Logger
 async function monitor(topicId, pageId, postId, action, message) {
@@ -529,14 +564,18 @@ async function expireTopicIfComplete(topic) {
 
 // ========== ENHANCED MANUAL TOPIC CREATION ==========
 async function createManualTopicWithQA(pageId, topicName, startDate, endDate, times, postsPerDay, includeMedia, includeVideo) {
+  // --- ENFORCE MAX ACTIVE TOPICS (GLOBAL SETTING) ---
+  const settings = await getGlobalSettings();
+  const maxActive = settings.maxActiveTopics;
   const activeTopicsCount = await AiTopic.countDocuments({
     pageId,
     startDate: { $lte: new Date() },
     endDate: { $gte: new Date() }
   });
-  if (activeTopicsCount >= MAX_ACTIVE_TOPICS) {
-    await monitor(null, pageId, null, 'MANUAL_TOPIC_REJECTED_MAX_ACTIVE', `Already have ${activeTopicsCount} active topics (max ${MAX_ACTIVE_TOPICS})`);
-    return { success: false, reason: `Maximum active topics (${MAX_ACTIVE_TOPICS}) reached. Please end some topics first.` };
+  if (activeTopicsCount >= maxActive) {
+    await monitor(null, pageId, null, 'MANUAL_TOPIC_REJECTED_MAX_ACTIVE', 
+      `Already have ${activeTopicsCount} active topics (max ${maxActive})`);
+    return { success: false, reason: `Maximum active topics (${maxActive}) reached. Please end some topics first.` };
   }
 
   const profile = await PageProfile.findOne({ pageId });
@@ -817,12 +856,24 @@ async function ensureActiveTopicsForPage(pageId) {
     }
   }
 
-  // --- AUTO-TOPIC CREATION (UPDATED with Engine) ---
-  if (!GLOBAL_AUTO_TOPIC_CREATION_ENABLED) return;
+  // --- AUTO-TOPIC CREATION (UPDATED with Engine + Global Settings) ---
+  const settings = await getGlobalSettings();
+  if (!settings.autoTopicCreationEnabled) {
+    await monitor(null, pageId, null, 'AUTO_SKIP_GLOBAL_DISABLED', 'Global auto‑topic creation is disabled.');
+    return;
+  }
+
   const autoTopics = activeTopics.filter(t => !t.manualTopic);
-  if (autoTopics.length >= MIN_ACTIVE_TOPICS) return;
-  if (activeTopics.length >= MAX_ACTIVE_TOPICS) {
-    await monitor(null, pageId, null, 'AUTO_SKIP_MAX_ACTIVE_TOPICS', `Already have ${activeTopics.length} active topics (max ${MAX_ACTIVE_TOPICS})`);
+  if (autoTopics.length >= MIN_ACTIVE_TOPICS) {
+    // Only create if fewer than minimum auto topics
+    await monitor(null, pageId, null, 'AUTO_SKIP_MIN_MET', `Already have ${autoTopics.length} auto topics (min ${MIN_ACTIVE_TOPICS})`);
+    return;
+  }
+
+  // Check global max limit
+  if (activeTopics.length >= settings.maxActiveTopics) {
+    await monitor(null, pageId, null, 'AUTO_SKIP_MAX_ACTIVE_TOPICS', 
+      `Already have ${activeTopics.length} active topics (max ${settings.maxActiveTopics})`);
     return;
   }
 
@@ -832,41 +883,51 @@ async function ensureActiveTopicsForPage(pageId) {
   const interests = profile.audienceInterest;
   const selectedInterest = interests[Math.floor(Math.random() * interests.length)];
 
-  // ---- NEW: Use topicEngine to discover a topic ----
   let topicName = null;
   let engineScore = null;
-  try {
-    const candidates = await discoverAndRank(selectedInterest);
-    if (candidates && candidates.length > 0) {
-      const best = candidates[0];
-      topicName = best.title;
-      engineScore = best.overallScore;
-      // Trim to a reasonable length
-      if (topicName.length > 80) topicName = topicName.slice(0, 77) + '…';
-      await monitor(null, pageId, null, 'ENGINE_FETCH_SUCCESS', 
-        `Interest: "${selectedInterest}" → Topic: "${topicName}" (Score: ${engineScore})`);
-    } else {
-      await monitor(null, pageId, null, 'ENGINE_FETCH_EMPTY', `No candidates for interest "${selectedInterest}"`);
-    }
-  } catch (err) {
-    console.warn(`Engine discovery failed for interest "${selectedInterest}":`, err.message);
-    await monitor(null, pageId, null, 'ENGINE_FETCH_ERROR', err.message);
-  }
 
-  // Fallback to old method if engine failed or returned nothing
-  if (!topicName) {
-    let trendingHeadline = null;
+  // ---- USE TRENDING ENGINE OR FALLBACK based on profile setting ----
+  if (profile.useTrendingTopics) {
     try {
-      trendingHeadline = await fetchTrendingHeadline(pageId, selectedInterest);
-    } catch (e) {
-      console.warn('Trending headline fetch failed, proceeding without news:', e.message);
+      const candidates = await discoverAndRank(selectedInterest);
+      if (candidates && candidates.length > 0) {
+        const best = candidates[0];
+        topicName = best.title;
+        engineScore = best.overallScore;
+        if (topicName.length > 80) topicName = topicName.slice(0, 77) + '…';
+        await monitor(null, pageId, null, 'ENGINE_FETCH_SUCCESS', 
+          `Interest: "${selectedInterest}" → Topic: "${topicName}" (Score: ${engineScore})`);
+      } else {
+        await monitor(null, pageId, null, 'ENGINE_FETCH_EMPTY', `No candidates for interest "${selectedInterest}"`);
+      }
+    } catch (err) {
+      console.warn(`Engine discovery failed for interest "${selectedInterest}":`, err.message);
+      await monitor(null, pageId, null, 'ENGINE_FETCH_ERROR', err.message);
     }
-    topicName = await generateShortTopicName(selectedInterest, trendingHeadline, pageId);
+
+    // Fallback to news API if engine gave nothing
     if (!topicName) {
-      topicName = `Latest update on ${selectedInterest}`; // ultimate fallback
+      let trendingHeadline = null;
+      try {
+        trendingHeadline = await fetchTrendingHeadline(pageId, selectedInterest);
+      } catch (e) {
+        console.warn('Trending headline fetch failed, proceeding without news:', e.message);
+      }
+      topicName = await generateShortTopicName(selectedInterest, trendingHeadline, pageId);
+      if (!topicName) {
+        topicName = `Latest update on ${selectedInterest}`;
+      }
+      await monitor(null, pageId, null, 'FALLBACK_TOPIC_GENERATED', 
+        `Used fallback for interest "${selectedInterest}" → Topic: "${topicName}"`);
     }
-    await monitor(null, pageId, null, 'FALLBACK_TOPIC_GENERATED', 
-      `Used fallback for interest "${selectedInterest}" → Topic: "${topicName}"`);
+  } else {
+    // ----- TRENDING MODE OFF: generate generic topic from interest only -----
+    topicName = await generateShortTopicName(selectedInterest, null, pageId);
+    if (!topicName) {
+      topicName = `Latest update on ${selectedInterest}`;
+    }
+    await monitor(null, pageId, null, 'TOPIC_GENERATED_FROM_INTEREST_ONLY', 
+      `Interest: "${selectedInterest}" → Topic: "${topicName}"`);
   }
 
   // ---- Quality checks (combine engine score with existing) ----
@@ -875,7 +936,7 @@ async function ensureActiveTopicsForPage(pageId) {
   if (engineScore !== null && engineScore !== undefined) {
     overallQuality = (overallQuality + engineScore) / 2; // average of three
   }
-  const qualityThreshold = 35; // adjust as needed
+  const qualityThreshold = 35;
   if (overallQuality < qualityThreshold) {
     await monitor(null, pageId, null, 'AUTO_TOPIC_REJECTED_QUALITY', 
       `Topic "${topicName}" overall quality ${overallQuality.toFixed(1)} (engine=${engineScore || 'N/A'}, topic=${topicScore}, fit=${pageFit})`);
@@ -884,9 +945,7 @@ async function ensureActiveTopicsForPage(pageId) {
 
   // ---- Similarity check ----
   if (await isTopicTooSimilar(topicName, pageId)) {
-    // If similar, we could modify the name slightly, or skip
     topicName = `${topicName} (fresh take)`;
-    // Optionally re-evaluate similarity after modification? But we'll proceed cautiously.
     await monitor(null, pageId, null, 'TOPIC_SIMILAR_RENAMED', `Renamed to "${topicName}"`);
   }
 
@@ -913,12 +972,12 @@ async function ensureActiveTopicsForPage(pageId) {
     customAngles,
     manualTopic: false,
     meta: {
-      sourceInterest: selectedInterest,      // TRACKING: where this topic came from
+      sourceInterest: selectedInterest,
       engineScore: engineScore,
       topicScore: topicScore,
       pageFit: pageFit,
       overallQuality: overallQuality,
-      generatedBy: 'engine_with_fallback'
+      generatedBy: profile.useTrendingTopics ? 'engine_with_fallback' : 'interest_only'
     }
   });
 
@@ -970,5 +1029,7 @@ module.exports = {
   generateNextPostForTopic,
   evaluateTopicQuality,
   getUsedAnglesCount,
-  expireTopicIfComplete
+  expireTopicIfComplete,
+  getGlobalSettings,      // <-- NEW export for admin
+  updateGlobalSettings    // <-- NEW export for admin
 };
