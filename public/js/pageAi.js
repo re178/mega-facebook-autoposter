@@ -65,6 +65,7 @@
         audienceAge: document.getElementById('profile-audience-age'),
         audienceInterest: document.getElementById('profile-audience-interest'),
         extraNotes: document.getElementById('profile-extra-notes'),
+        useTrendingTopics: document.getElementById('profile-use-trending'), // NEW
         saveBtn: document.getElementById('profile-save'),
         deleteBtn: document.getElementById('profile-delete')
     };
@@ -119,6 +120,10 @@
                 if (profileEls.audienceAge) profileEls.audienceAge.value = data.audienceAge || '';
                 if (profileEls.audienceInterest) profileEls.audienceInterest.value = (data.audienceInterest || []).join(', ');
                 if (profileEls.extraNotes) profileEls.extraNotes.value = data.extraNotes || '';
+                // NEW: load useTrendingTopics
+                if (profileEls.useTrendingTopics) {
+                    profileEls.useTrendingTopics.checked = data.useTrendingTopics === true;
+                }
                 log('📄 Page profile loaded');
             } else {
                 // Clear form
@@ -130,6 +135,8 @@
                 if (profileEls.audienceAge) profileEls.audienceAge.value = '';
                 if (profileEls.audienceInterest) profileEls.audienceInterest.value = '';
                 if (profileEls.extraNotes) profileEls.extraNotes.value = '';
+                // NEW: set default unchecked
+                if (profileEls.useTrendingTopics) profileEls.useTrendingTopics.checked = false;
                 log('No existing profile', 'warn');
             }
         } catch (err) {
@@ -149,7 +156,8 @@
                     audienceTone: profileEls.audienceTone?.value || '',
                     audienceAge: profileEls.audienceAge?.value || '',
                     audienceInterest: (profileEls.audienceInterest?.value || '').split(',').map(i => i.trim()).filter(i => i),
-                    extraNotes: profileEls.extraNotes?.value || ''
+                    extraNotes: profileEls.extraNotes?.value || '',
+                    useTrendingTopics: profileEls.useTrendingTopics ? profileEls.useTrendingTopics.checked : false // NEW
                 };
                 await apiFetch(`/api/ai/page/${pageId}/profile`, {
                     method: 'POST',
@@ -178,6 +186,7 @@
                 if (profileEls.audienceAge) profileEls.audienceAge.value = '';
                 if (profileEls.audienceInterest) profileEls.audienceInterest.value = '';
                 if (profileEls.extraNotes) profileEls.extraNotes.value = '';
+                if (profileEls.useTrendingTopics) profileEls.useTrendingTopics.checked = false;
                 showToast('Profile deleted', 'success');
             } catch (err) {
                 log('❌ Failed deleting profile', 'error');
