@@ -57,6 +57,7 @@
         await loadPages();
         await loadCharts();
         await loadPlans();
+        await loadAiSettings(); // NEW
     }
 
     async function loadDashboardStats() {
@@ -903,7 +904,7 @@
         };
     }
 
-    // ========== NEW: GLOBAL AUTO-GENERATION TOGGLE ==========
+    // ========== NEW: GLOBAL AUTO-GENERATION TOGGLE (existing) ==========
     async function toggleGlobalAutoGen() {
         try {
             const current = document.getElementById('global-auto-gen-toggle')?.checked;
@@ -981,6 +982,52 @@
         };
     }
 
+    // ========== NEW: AI SETTINGS (maxActiveTopics, autoTopicCreationEnabled) ==========
+    async function loadAiSettings() {
+        try {
+            const settings = await apiFetch('/api/admin/ai-settings');
+            const maxInput = document.getElementById('ai-max-topics');
+            const toggle = document.getElementById('ai-auto-creation-toggle');
+            if (maxInput) maxInput.value = settings.maxActiveTopics || 6;
+            if (toggle) toggle.checked = settings.autoTopicCreationEnabled !== false;
+        } catch (err) {
+            console.error('Failed to load AI settings:', err);
+        }
+    }
+
+    async function saveAiSettings() {
+        const maxInput = document.getElementById('ai-max-topics');
+        const toggle = document.getElementById('ai-auto-creation-toggle');
+        const data = {};
+        if (maxInput) {
+            const val = parseInt(maxInput.value);
+            if (isNaN(val) || val < 1) {
+                showToast('Max active topics must be a number >= 1', 'warning');
+                return;
+            }
+            data.maxActiveTopics = val;
+        }
+        if (toggle !== null) {
+            data.autoTopicCreationEnabled = toggle.checked;
+        }
+        try {
+            await apiFetch('/api/admin/ai-settings', {
+                method: 'PUT',
+                body: JSON.stringify(data)
+            });
+            showToast('AI settings saved successfully', 'success');
+            await loadAiSettings(); // reload to reflect changes
+        } catch (err) {
+            showToast('Failed to save AI settings: ' + err.message, 'error');
+        }
+    }
+
+    // Bind AI settings save button
+    function bindAiSettingsSave() {
+        const btn = document.getElementById('ai-settings-save');
+        if (btn) btn.onclick = saveAiSettings;
+    }
+
     // ========== INIT ==========
 
     async function init() {
@@ -1005,27 +1052,30 @@
             await loadPrivateMessages('');
             await loadCharts();
             await loadPlans();
+            await loadAiSettings(); // NEW
+
             bindCreateUser();
             bindBroadcastMessage();
             bindMaintenanceButtons();
+            bindAiSettingsSave(); // NEW
+
             const sendMsgBtn = document.getElementById('send-private-msg-btn');
             if (sendMsgBtn) sendMsgBtn.onclick = sendPrivateMessageFromUI;
 
             const addPlanBtn = document.getElementById('add-plan-btn');
             if (addPlanBtn) addPlanBtn.onclick = () => showPlanModal(null);
 
-            // Add global auto-gen toggle
+            // Existing global auto-gen toggle
             const toggleBtn = document.getElementById('global-auto-gen-toggle');
             if (toggleBtn) {
-                // Load current setting and set checked state (optional)
                 toggleBtn.onchange = toggleGlobalAutoGen;
             }
 
-            // Add email broadcast button
+            // Email broadcast button
             const emailBtn = document.getElementById('admin-email-btn');
             if (emailBtn) emailBtn.onclick = showEmailModal;
 
-            // Add search listener
+            // Search listener
             const searchInput = document.getElementById('user-search');
             if (searchInput) {
                 searchInput.addEventListener('input', function() {
@@ -1042,6 +1092,7 @@
                     loadUsersPaginated(currentPage, searchQuery);
                     loadPages();
                     loadPlans();
+                    loadAiSettings();
                 }
             }
             if (refreshInterval) clearInterval(refreshInterval);
