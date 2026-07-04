@@ -9,7 +9,9 @@ const PageProfileSchema = new mongoose.Schema({
   audienceTone: { type: String, default: 'casual' },
   audienceAge: { type: String, default: 'all ages' },
   audienceInterest: { type: [String], default: [] },
-  extraNotes: { type: String }
+  extraNotes: { type: String },
+  // NEW: per‑page toggle for trending topics vs interest‑only generation
+  useTrendingTopics: { type: Boolean, default: false }
 }, { timestamps: true });
 
 module.exports = mongoose.model('PageProfile', PageProfileSchema);
