@@ -1,12 +1,11 @@
 const cron = require('node-cron');
 const Page = require('../models/Page');
 const AiTopic = require('../models/AiTopic');
-const { ensureActiveTopicsForPage } = require('../services/aiSchedulerService');
+const { ensureActiveTopicsForPage, getGlobalSettings } = require('../services/aiSchedulerService');
 
 // ----- Configuration -----
 const COOLDOWN_MINUTES = 5;          // How often to actually process a page
-const MIN_ACTIVE_TOPICS = 3;         // Must match your aiSchedulerService.js
-const MAX_ACTIVE_TOPICS = 6;         // Must match your aiSchedulerService.js
+const MIN_ACTIVE_TOPICS = 3;         // Hardcoded minimum – you can keep this as a fallback
 
 // ----- Per‑page cooldown tracker -----
 const lastRun = new Map();
@@ -24,9 +23,18 @@ cron.schedule('* * * * *', async () => {
   console.log('[AUTO-GEN] Checking pages with auto-generation enabled...');
 
   try {
-    const pages = await Page.find({ autoGenerationEnabled: true });
+    // ---- Read dynamic global settings ----
+    const settings = await getGlobalSettings();
+    const maxActiveTopics = settings.maxActiveTopics;   // e.g., 6, 10, etc.
+    const autoCreationEnabled = settings.autoTopicCreationEnabled;
 
-    console.log(`[AUTO-GEN] Found ${pages.length} pages with auto-generation ON`);
+    if (!autoCreationEnabled) {
+      console.log('[AUTO-GEN] Global auto‑topic creation is disabled – skipping.');
+      return;
+    }
+
+    const pages = await Page.find({ autoGenerationEnabled: true });
+    console.log(`[AUTO-GEN] Found ${pages.length} pages with auto-generation ON (limit: ${maxActiveTopics})`);
 
     for (const page of pages) {
       const pageId = page.pageId;
@@ -46,8 +54,8 @@ cron.schedule('* * * * *', async () => {
       });
 
       // 3. If we already have enough active topics, skip
-      if (activeCount >= MAX_ACTIVE_TOPICS) {
-        console.log(`[AUTO-GEN] Page ${pageId} already has ${activeCount} active topics (max ${MAX_ACTIVE_TOPICS}) – skipping`);
+      if (activeCount >= maxActiveTopics) {
+        console.log(`[AUTO-GEN] Page ${pageId} already has ${activeCount} active topics (max ${maxActiveTopics}) – skipping`);
         lastRun.set(pageId, Date.now()); // still update cooldown to avoid repeated skips
         continue;
       }
