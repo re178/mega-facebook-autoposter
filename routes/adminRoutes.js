@@ -690,6 +690,42 @@ router.post('/email/send', async (req, res) => {
 });
 
 /* =====================================================
+   NEW: GLOBAL AI SETTINGS (maxActiveTopics & autoTopicCreationEnabled)
+===================================================== */
+const { getGlobalSettings, updateGlobalSettings } = require('../services/aiSchedulerService');
+
+// GET current global AI settings
+router.get('/ai-settings', async (req, res) => {
+    try {
+        const settings = await getGlobalSettings();
+        res.json(settings);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// UPDATE global AI settings
+router.put('/ai-settings', async (req, res) => {
+    try {
+        const { maxActiveTopics, autoTopicCreationEnabled } = req.body;
+        const updates = {};
+        if (maxActiveTopics !== undefined) {
+            if (typeof maxActiveTopics !== 'number' || maxActiveTopics < 1) {
+                return res.status(400).json({ error: 'maxActiveTopics must be a number >= 1' });
+            }
+            updates.maxActiveTopics = maxActiveTopics;
+        }
+        if (autoTopicCreationEnabled !== undefined) {
+            updates.autoTopicCreationEnabled = !!autoTopicCreationEnabled;
+        }
+        const settings = await updateGlobalSettings(updates);
+        res.json(settings);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+/* =====================================================
    SEED DEFAULT PLANS (if none exist)
 ===================================================== */
 const ensureDefaultPlans = async () => {
