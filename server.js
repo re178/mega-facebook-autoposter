@@ -507,6 +507,15 @@ mongoose
             console.error('❌ Monthly Reset service error:', err.message);
         }
 
+        // ✅ NEW: Start automatic log cleanup every 15 minutes
+        try {
+            const { cleanupLogs } = require('./services/aiSchedulerService');
+            setInterval(cleanupLogs, 15 * 60 * 1000);
+            console.log('✅ Log cleanup scheduler started (every 15 min)');
+        } catch (err) {
+            console.error('❌ Log cleanup scheduler error:', err.message);
+        }
+
         app.listen(PORT, () => {
             console.log(`🚀 Server running on port ${PORT}`);
             console.log(`📡 Environment: ${isProduction ? 'PRODUCTION' : 'DEVELOPMENT'}`);
