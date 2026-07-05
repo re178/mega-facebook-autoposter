@@ -1,12 +1,12 @@
 const mongoose = require('mongoose');
 const moment = require('moment-timezone');
 
-// ---------- Models (from ../models) ----------
-const AiTopic = require('../models/AiTopic');
-const AiScheduledPost = require('../models/AiScheduledPost');
-const AiLog = require('../models/AiLog');
-const Page = require('../models/Page');
-const PageProfile = require('../models/PageProfile');
+// ---------- Models (from project root) ----------
+const AiTopic = require('../../models/AiTopic');
+const AiScheduledPost = require('../../models/AiScheduledPost');
+const AiLog = require('../../models/AiLog');
+const Page = require('../../models/Page');
+const PageProfile = require('../../models/PageProfile');
 
 // ---------- Additional models (defined here) ----------
 const AutoTopicMeta = mongoose.model('AutoTopicMeta', new mongoose.Schema({
