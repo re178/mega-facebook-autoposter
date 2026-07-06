@@ -5,7 +5,7 @@ const { ensureActiveTopicsForPage, getGlobalSettings } = require('../services/ai
 
 // ----- Configuration -----
 const COOLDOWN_MINUTES = 5;          // How often to actually process a page
-const MIN_ACTIVE_TOPICS = 3;         // Hardcoded minimum – you can keep this as a fallback
+const MIN_ACTIVE_TOPICS = 3;         // Hardcoded minimum – fallback
 
 // ----- Per‑page cooldown tracker -----
 const lastRun = new Map();
@@ -25,7 +25,7 @@ cron.schedule('* * * * *', async () => {
   try {
     // ---- Read dynamic global settings ----
     const settings = await getGlobalSettings();
-    const maxActiveTopics = settings.maxActiveTopics;   // e.g., 6, 10, etc.
+    const maxActiveTopics = settings.maxActiveTopics;
     const autoCreationEnabled = settings.autoTopicCreationEnabled;
 
     if (!autoCreationEnabled) {
@@ -60,8 +60,7 @@ cron.schedule('* * * * *', async () => {
         continue;
       }
 
-      // 4. If we have fewer than MIN_ACTIVE_TOPICS, let the service create more
-      //    (the service will also check its own limits, but this is an extra guard)
+      // 4. Process the page
       console.log(`[AUTO-GEN] Processing page ${pageId} (active: ${activeCount})`);
       lastRun.set(pageId, Date.now());
 
